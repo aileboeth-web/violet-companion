@@ -58,14 +58,39 @@ else
 fi
 curl -fsS "http://127.0.0.1:$PORT/healthz" | grep -q violet || fail "healthz"
 
-# 4. dashboard: initial password must be changed first
+# 4. dashboard: security entrance, username + initial password, which must be changed first
+ENTRANCE="$(echo "$OUT" | json 'd["admin"]["entrance"]')"
+ADMIN_USER="$(echo "$OUT" | json 'd["admin"]["user"]')"
+[ ${#ENTRANCE} -eq 12 ] || fail "security entrance"
+echo "$OUT" | json 'd["urls"][0]' | grep -q "/$ENTRANCE\$" || fail "address without the entrance"
+code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+[ "$(code "http://127.0.0.1:$PORT/auth/login")" = "404" ] || fail "login page reachable without the entrance"
+[ "$(code "http://127.0.0.1:$PORT/control")" = "404" ] || fail "control reachable without the entrance"
 JAR="$WORK/jar"
-CODE="$(curl -s -o /dev/null -w '%{http_code}' -c "$JAR" -H "Origin: http://127.0.0.1:$PORT" \
-        --data-urlencode "password=$PASSWORD" "http://127.0.0.1:$PORT/auth/login")"
-[ "$CODE" = "302" ] || fail "login with the initial password ($CODE)"
-CODE="$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -H 'Accept: application/json' "http://127.0.0.1:$PORT/api/control/setup")"
+login() {   # $1 entrance, $2 password -> the cookie jar $JAR, logged in (prints the login status code)
+  rm -f "$JAR"
+  [ "$(code -c "$JAR" "http://127.0.0.1:$PORT/$1")" = "302" ] || fail "entrance /$1"
+  code -b "$JAR" -c "$JAR" -H "Origin: http://127.0.0.1:$PORT" --data-urlencode "username=$ADMIN_USER" \
+       --data-urlencode "password=$2" "http://127.0.0.1:$PORT/auth/login"
+}
+[ "$(login "$ENTRANCE" "$PASSWORD")" = "302" ] || fail "login with username and the initial password"
+CODE="$(code -b "$JAR" -H 'Accept: application/json' "http://127.0.0.1:$PORT/api/control/setup")"
 [ "$CODE" = "403" ] || fail "setup reachable before the password change ($CODE)"
-pass "dashboard login; everything locked until the password is changed"
+pass "security entrance (404 without it); username + password login; everything locked until the password is changed"
+
+# 4b. violet info / reset-entrance / reset-password / set-port (as root: the service must still read admin.json)
+"$ROOT/violet" info --json | json 'd["entrance"]' | grep -qx "$ENTRANCE" || fail "info"
+"$ROOT/violet" info | grep -q "$ADMIN_USER" || fail "info text"
+NEW_ENTRANCE="$("$ROOT/violet" reset-entrance --json | json 'd["entrance"]')"
+[ "$NEW_ENTRANCE" != "$ENTRANCE" ] || fail "reset-entrance"
+[ "$(code "http://127.0.0.1:$PORT/$ENTRANCE")" = "404" ] || fail "old entrance still works"
+PASSWORD="$("$ROOT/violet" reset-password --json | json 'd["password"]')"
+[ "$(login "$NEW_ENTRANCE" "$PASSWORD")" = "302" ] || fail "login after reset-entrance / reset-password"
+OLD_PORT="$PORT"; PORT=$((PORT + 37))
+"$ROOT/violet" set-port "$PORT" --json | json 'd["port"]' | grep -qx "$PORT" || fail "set-port"
+curl -fsS "http://127.0.0.1:$PORT/healthz" | grep -q violet || fail "not answering on the new port"
+! curl -fsS "http://127.0.0.1:$OLD_PORT/healthz" >/dev/null 2>&1 || fail "still answering on the old port"
+pass "info, reset-entrance, reset-password and set-port ($OLD_PORT -> $PORT)"
 
 # 5. repair keeps port and password; backup; status
 OUT2="$(curl -fsSL "http://127.0.0.1:$PORT_HTTP/install.sh" | bash -s -- --root "$ROOT" --json)" || fail "repair"

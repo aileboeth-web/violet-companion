@@ -27,6 +27,17 @@ Phase 9.0.1:
 
 Cookie-authenticated state-changing requests must also come from the same origin (Origin/Referer check, plus
 SameSite=Strict cookies) to stop CSRF.
+
+Violet stage 2 (1Panel-style access):
+  * a USERNAME (admin.json "username"; random at install). Password login needs username + password; while no
+    username is set (development, tests) any username is accepted, as before. The admin token still logs in alone;
+  * a SECURITY ENTRANCE (admin.json "entrance", a random path like ``/k3x9q2m7wz8a``): while one is set, a browser must
+    first open ``https://<host>:<port>/<entrance>`` -- that marks its session -- and every other path answers a plain
+    404 until then (the login page, the Control Center, static files, the API). Exceptions: ``/healthz`` (the
+    installer's checks; it only says that a Violet runs there), signed channel webhooks, and requests with a valid
+    Bearer token. The mark survives logout and session expiry (the login page stays reachable in that browser);
+    changing the entrance invalidates every mark. Shown by ``violet info``; changed in the Control Center or with
+    ``violet reset-entrance``.
 """
 
 from __future__ import annotations
@@ -37,6 +48,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import secrets
 import threading
 import time
@@ -61,6 +73,13 @@ PUBLIC_PREFIXES = ("/channels/hook/",)
 PASSWORD_CHANGE_PATHS = {"/control", "/auth/password", "/auth/status", "/auth/logout", "/auth/logout-all"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 _SESSION_KEY = "violet_admin"
+_ENTRANCE_KEY = "violet_entrance"          # session mark: this browser came in through the security entrance
+USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{2,31}$")
+ENTRANCE_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
+# first path segments the program itself uses: never an entrance
+RESERVED_ENTRANCES = {"auth", "static", "api", "control", "healthz", "channels", "memories", "persona", "images",
+                      "web", "reconciliation", "proactive", "dashboard", "login", "logout", "reload-env", "shutdown",
+                      "favicon.ico", "robots.txt"}
 MIN_PASSWORD_LENGTH = 12
 LOCK_AFTER_FAILURES = 5
 LOCK_WINDOW_SECONDS = 15 * 60
@@ -82,12 +101,15 @@ _LOGIN_PAGE = """<!doctype html>
 <form method="post" action="/auth/login">
   <h1>Violet Control Center</h1>
   {% if error %}<div class="err">{{ error }}</div>{% endif %}
-  <input type="password" name="password" placeholder="管理员密码（或管理令牌）" autocomplete="current-password" autofocus required>
+  <input type="text" name="username" placeholder="用户名" autocomplete="username" maxlength="32" autofocus>
+  <input type="password" name="password" placeholder="密码" autocomplete="current-password" required>
   <input type="hidden" name="next" value="{{ next_url }}">
   <button type="submit">登录</button>
-  <div class="hint">第一次登录请用安装完成时显示的初始密码，登录后需要先改成自己的密码。忘记密码：在服务器上重新运行安装并加
-  --reset-admin，或执行 python -m tools.violet_admin set-password。</div>
+  <div class="hint">第一次登录请用安装完成时显示的用户名和初始密码，登录后需要先改成自己的密码。忘记了：在服务器上执行
+  sudo /opt/violet/violet info（查看用户名和地址）或 sudo /opt/violet/violet reset-password（生成新的初始密码）。</div>
 </form></body></html>"""
+
+_NOT_FOUND = "404 Not Found\n"
 
 
 def resolve_admin_token(data_dir: str | os.PathLike[str]) -> tuple[str, str]:
@@ -228,6 +250,46 @@ class AdminStore:
     def enable_default_token(self) -> None:
         self._set_token(token_mode="default")
 
+    # -- username and security entrance (Violet stage 2)
+    def username(self) -> str:
+        """The admin's username; "" while none was set (then password login accepts any username, as before)."""
+        return str(self.load().get("username") or "")
+
+    def username_ok(self, supplied: str | None) -> bool:
+        expected = self.username()
+        if not expected:
+            return True
+        return hmac.compare_digest((supplied or "").strip().lower().encode("utf-8"), expected.lower().encode("utf-8"))
+
+    def set_username(self, name: str) -> None:
+        name = (name or "").strip()
+        if not USERNAME_RE.fullmatch(name):
+            raise ValueError("用户名要以字母开头，3–32 个字符，只能有字母、数字和 _ . -")
+        with self._lock:
+            data = self.load()
+            data.pop("unreadable", None)
+            data.update(username=name, session_version=int(data.get("session_version", 0)) + 1)
+            self._save(data)
+
+    def entrance(self) -> str:
+        """The security entrance (a path segment without "/"); "" = none (every path reachable as before)."""
+        value = str(self.load().get("entrance") or "")
+        return value if ENTRANCE_RE.fullmatch(value) and value.lower() not in RESERVED_ENTRANCES else ""
+
+    def set_entrance(self, value: str | None) -> str:
+        """A new entrance (None = a random one; "" = no entrance). Every browser must come in through it again."""
+        if value is None:
+            value = generate_entrance()
+        value = value.strip().strip("/")
+        if value and (not ENTRANCE_RE.fullmatch(value) or value.lower() in RESERVED_ENTRANCES):
+            raise ValueError("安全入口要 6–64 个字符，只能有字母、数字、_ 和 -，也不能是程序自己用的路径")
+        with self._lock:
+            data = self.load()
+            data.pop("unreadable", None)
+            data.update(entrance=value, entrance_changed_at=int(time.time()))
+            self._save(data)
+        return value
+
     def session_secret(self) -> bytes:
         path = self.dir / "session_secret"
         try:
@@ -239,6 +301,19 @@ class AdminStore:
         value = secrets.token_hex(32)
         _atomic_write(path, value + "\n")
         return bytes.fromhex(value)
+
+
+def generate_entrance(length: int = 12) -> str:
+    alphabet = "abcdefghijkmnpqrstuvwxyz23456789"           # no 0/o/1/l: read aloud or typed from a screenshot
+    while True:
+        value = "".join(secrets.choice(alphabet) for _ in range(length))
+        if value not in RESERVED_ENTRANCES:
+            return value
+
+
+def generate_username() -> str:
+    """A random username like 1Panel's: not "admin", so a password guesser also has to guess it."""
+    return "violet_" + "".join(secrets.choice("abcdefghijkmnpqrstuvwxyz23456789") for _ in range(6))
 
 
 def _token_hash(token: str) -> str:
@@ -375,22 +450,48 @@ def install_auth(app: Flask, token: str, data_dir: str | os.PathLike[str] | None
         forwarded = any(h in request.headers for h in ("X-Forwarded-For", "X-Forwarded-Proto", "Forwarded"))
         return _is_loopback(request.remote_addr) and not forwarded
 
+    def _entrance_mark(entrance: str) -> str:
+        # keyed with the session secret: the (signed, not encrypted) cookie must not reveal the entrance
+        return hmac.new(app.secret_key, ("entrance:" + entrance).encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+
+    def _clear_session() -> None:
+        """Log out, but keep "came in through the security entrance" so the login page stays reachable."""
+        mark = session.get(_ENTRANCE_KEY)
+        session.clear()
+        if mark:
+            session[_ENTRANCE_KEY] = mark
+
     def _session_ok() -> bool:
         if session.get(_SESSION_KEY) != fingerprint or session.get("v") != store.session_version():
             return False
         now = int(time.time())
         if now - int(session.get("iat", 0)) > absolute.total_seconds() or now - int(session.get("seen", 0)) > idle.total_seconds():
-            session.clear()
+            _clear_session()
             return False
         if now - int(session.get("seen", 0)) > 60:              # refresh the idle clock at most once a minute
             session["seen"] = now
         return True
 
     def _start_session() -> None:
-        session.clear()
+        _clear_session()
         now = int(time.time())
         session.update({_SESSION_KEY: fingerprint, "v": store.session_version(), "iat": now, "seen": now})
         session.permanent = True
+
+    def _mark_entrance(entrance: str) -> None:
+        session[_ENTRANCE_KEY] = _entrance_mark(entrance) if entrance else None
+
+    def _entrance_gate():
+        """None when the request may go on; a response (404, or the redirect after the entrance) otherwise."""
+        entrance = store.entrance()
+        if not entrance:
+            return None
+        if request.path.rstrip("/") == "/" + entrance:
+            _mark_entrance(entrance)
+            return redirect("/control" if _session_ok() else "/auth/login?next=/control")
+        if session.get(_ENTRANCE_KEY) == _entrance_mark(entrance):
+            return None
+        return app.response_class(_NOT_FOUND, status=404, mimetype="text/plain")
 
     def _client_key() -> str:
         return request.remote_addr or "unknown"
@@ -401,13 +502,18 @@ def install_auth(app: Flask, token: str, data_dir: str | os.PathLike[str] | None
     def _require_admin():
         if not _https_ok():
             return jsonify({"error": "HTTPS required"}), 403
-        if request.endpoint == "static" or request.path in PUBLIC_PATHS:
+        if request.path == "/healthz":
             return None
         if request.method == "POST" and request.path.startswith(PUBLIC_PREFIXES) and \
                 request.endpoint == "channel_webhook":
             return None
         if _bearer_ok():
             request.environ["violet.auth"] = "bearer"
+            return None
+        blocked = _entrance_gate()
+        if blocked is not None:
+            return blocked
+        if request.endpoint == "static" or request.path in PUBLIC_PATHS:
             return None
         if _session_ok():
             if request.method not in SAFE_METHODS and not _same_origin():
@@ -455,7 +561,9 @@ def install_auth(app: Flask, token: str, data_dir: str | os.PathLike[str] | None
             return render_template_string(_LOGIN_PAGE, error=f"尝试次数太多，请 {wait // 60 + 1} 分钟后再试",
                                           next_url=next_url), 429
         supplied = (request.form.get("password") or request.form.get("token") or "").strip()
-        ok = bool(supplied) and (_token_ok(supplied) or store.verify_password(supplied))
+        # the admin token logs in on its own; the password needs the username too (both checked, no early exit)
+        user_ok = store.username_ok(request.form.get("username"))
+        ok = bool(supplied) and (_token_ok(supplied) or (store.verify_password(supplied) and user_ok))
         if ok:
             limiter.succeeded(key)
             _start_session()
@@ -463,18 +571,49 @@ def install_auth(app: Flask, token: str, data_dir: str | os.PathLike[str] | None
         limiter.failed(key)
         time.sleep(0.3)
         logger.warning("failed dashboard login from %s", key)
-        return render_template_string(_LOGIN_PAGE, error="密码或令牌不正确", next_url=next_url), 401
+        return render_template_string(_LOGIN_PAGE, error="用户名或密码不正确", next_url=next_url), 401
 
     @app.post("/auth/logout")
     def auth_logout():
-        session.clear()
+        _clear_session()
         return redirect("/auth/login")
 
     @app.post("/auth/logout-all")
     def auth_logout_all():
         store.end_all_sessions()
-        session.clear()
+        _clear_session()
         return jsonify({"ok": True})
+
+    @app.post("/auth/account")
+    def auth_change_account():
+        """Username and / or security entrance; the current password (or token) is asked again."""
+        body = request.get_json(silent=True) or {}
+        key = _client_key()
+        if limiter.locked_for(key):
+            return jsonify({"error": "尝试次数太多，请稍后再试"}), 429
+        current = str(body.get("current") or "")
+        if not (_token_ok(current) or store.verify_password(current)):
+            limiter.failed(key)
+            return jsonify({"error": "当前密码不正确"}), 403
+        changed: dict = {}
+        try:
+            if "username" in body and str(body["username"]).strip() != store.username():
+                store.set_username(str(body["username"]))          # ends every other session
+                changed["username"] = store.username()
+            if body.get("entrance_random") or "entrance" in body:
+                new = None if body.get("entrance_random") else str(body.get("entrance") or "")
+                if new is None or new.strip().strip("/") != store.entrance():
+                    changed["entrance"] = store.set_entrance(new)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        if "entrance" in changed:
+            _mark_entrance(changed["entrance"])                      # this browser keeps its access
+        if "username" in changed and request.environ.get("violet.auth") == "session":
+            _start_session()
+        if changed:
+            logger.warning("dashboard account changed: %s", ", ".join(sorted(changed)))
+        return jsonify({"ok": True, "changed": sorted(changed), "username": store.username(),
+                        "entrance": store.entrance()})
 
     @app.post("/auth/password")
     def auth_change_password():
@@ -507,7 +646,9 @@ def install_auth(app: Flask, token: str, data_dir: str | os.PathLike[str] | None
                         "via": request.environ.get("violet.auth"), "idle_minutes": int(idle.total_seconds() // 60),
                         "session_hours": int(absolute.total_seconds() // 3600),
                         "cookie_secure": bool(app.config["SESSION_COOKIE_SECURE"]),
-                        "token_mode": store.token_mode(), "https": request.is_secure})
+                        "token_mode": store.token_mode(), "https": request.is_secure,
+                        "username": store.username(), "entrance": store.entrance(),
+                        "port": env_int("VIOLET_DASHBOARD_PORT", 0) or None})
 
     @app.get("/healthz")
     def healthz():

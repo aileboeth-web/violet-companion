@@ -273,6 +273,15 @@
       <button type="submit">修改密码</button>
     </form>
     <p class="note">修改密码会让其他所有登录失效。</p>
+    <h3>用户名和安全入口</h3>
+    <form id="acct-form" class="stack" autocomplete="off">
+      <label>用户名 <input type="text" id="acct-username" maxlength="32" autocomplete="username" pattern="[A-Za-z][A-Za-z0-9_.\-]{2,31}"></label>
+      <label>安全入口（地址里 端口/ 后面的那一段） <input type="text" id="acct-entrance" maxlength="64" pattern="[A-Za-z0-9_\-]{6,64}"></label>
+      <label class="check"><input type="checkbox" id="acct-entrance-random"> 随机生成一个新的安全入口</label>
+      <input type="password" id="acct-current" placeholder="当前密码（确认身份）" autocomplete="current-password" required>
+      <button type="submit">保存</button>
+    </form>
+    <p class="note" id="acct-entrance-note"></p>
     <div class="row"><button class="danger" id="logout-all">退出所有登录</button>
       <form method="post" action="/auth/logout"><button class="ghost" type="submit">退出</button></form></div>
   </section>

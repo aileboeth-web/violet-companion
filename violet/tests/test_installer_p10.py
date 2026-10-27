@@ -248,7 +248,9 @@ def test_real_install_status_upgrade_rollback_and_uninstall_on_this_machine(tmp_
                          "--health-timeout", "120"], root)
     try:
         assert code == 0, result
-        assert result["core_ok"] and result["port"] == port and result["urls"][0] == f"http://127.0.0.1:{port}/control"
+        entrance, user = result["admin"]["entrance"], result["admin"]["user"]
+        assert len(entrance) == 12 and user.startswith("violet_")              # Violet stage 2: 1Panel-style access
+        assert result["core_ok"] and result["port"] == port and result["urls"][0] == f"http://127.0.0.1:{port}/{entrance}"
         password = result["admin"]["password"]
         assert len(password) == 20 and result["admin"]["must_change"]
         layers = {l["layer"]: l["state"] for l in result["network"]}
@@ -258,12 +260,34 @@ def test_real_install_status_upgrade_rollback_and_uninstall_on_this_machine(tmp_
         admin_json = (root / "data" / "control" / "admin.json").read_text(encoding="utf-8")
         assert password not in admin_json and "scrypt" in admin_json
         assert password not in (root / "install.json").read_text(encoding="utf-8")
+        # without the security entrance everything is a plain 404 -- the login page too
+        login = urllib.parse.urlencode({"username": user, "password": password}).encode()
+        assert _http(port, "/auth/login")[0] == 404 and _http(port, "/control")[0] == 404
+        assert _http(port, "/auth/login", login)[0] == 404
+        status, headers, _ = _http(port, f"/{entrance}")
+        assert status == 302 and headers["Location"].endswith("/auth/login?next=/control")
+        marked = headers["Set-Cookie"].split(";")[0]
+        # the password needs the username
+        bad = urllib.parse.urlencode({"username": "admin", "password": password}).encode()
+        assert _http(port, "/auth/login", bad, cookie=marked)[0] == 401
         # the dashboard: login with the initial password, then everything but the password change is refused
-        status, headers, _ = _http(port, "/auth/login", urllib.parse.urlencode({"password": password}).encode())
+        status, headers, _ = _http(port, "/auth/login", login, cookie=marked)
         assert status in (302, 303)
         cookie = headers["Set-Cookie"].split(";")[0]
         status, _, body = _http(port, "/api/control/setup", cookie=cookie)
         assert status == 403 and "password_change_required" in body
+        # violet info / reset-entrance / reset-password / set-port
+        code_i, info = _run(["info"], root)
+        assert code_i == 0 and info["user"] == user and info["entrance"] == entrance and "password" not in info
+        code_e, moved = _run(["reset-entrance"], root)
+        assert code_e == 0 and moved["entrance"] != entrance and moved["urls"][0].endswith("/" + moved["entrance"])
+        assert _http(port, "/auth/status", cookie=cookie)[0] == 404              # the old entrance mark is gone
+        code_p, reset = _run(["reset-password"], root)
+        assert code_p == 0 and len(reset["password"]) == 20 and reset["password"] != password
+        new_port = _free_port()
+        code_s, sp = _run(["set-port", str(new_port), "--health-timeout", "120"], root)
+        assert code_s == 0 and sp["port"] == new_port and inst.probe_eve(new_port) is not None, sp
+        port = new_port
         # repair: run install again -> same port, same password, data kept
         code2, again = _run(["install", "--service", "supervisor", "--reuse-venv", str(Path(sys.prefix))], root)
         assert code2 == 0 and again["port"] == port and again["admin"]["created"] is False and not again["fresh"]

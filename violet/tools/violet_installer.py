@@ -1059,18 +1059,7 @@ def install(opts: Options) -> dict[str, Any]:
     if not healthy:
         raise InstallError("服务启动了，但 " + f"{opts.health_timeout:.0f} 秒内健康检查没有通过。查看日志："
                            + str(layout.logs / "main.log"))
-    firewall = firewall_status()
-    firewall_note = None
-    if access in ("lan", "public") and firewall.get("active"):
-        cmd = firewall_open_command(firewall.get("tool"), port)
-        if opts.open_firewall and cmd:
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            firewall_note = ("已在本机防火墙放行端口 " if result.returncode == 0 else "放行防火墙失败，请手动执行：") + \
-                            (str(port) if result.returncode == 0 else " ".join(cmd))
-            if result.returncode == 0 and firewall.get("tool") == "firewalld":
-                subprocess.run(["firewall-cmd", "--reload"], capture_output=True)
-        elif cmd:
-            firewall_note = "本机防火墙已开启，没有自动修改。需要时执行：" + " ".join(cmd) + "（或安装时加 --open-firewall）"
+    firewall_note = open_firewall_port(port, access, opts.open_firewall)
     network = network_report(port, bind_host, public_url=opts.public_url,
                              fetch=(lambda url: _fetch_ok(url)) if opts.public_url else None) \
         if service_mode != "none" else []
@@ -1079,9 +1068,7 @@ def install(opts: Options) -> dict[str, Any]:
                  updated_at=int(time.time()), python=str(venv_python(layout)))
     save_state(layout, state)
     write_cli(layout)
-    urls = [f"{scheme}://127.0.0.1:{port}/control"]
-    if bind_host == "0.0.0.0":
-        urls += [f"{scheme}://{a}:{port}/control" for a in lan_addresses()]
+    urls = panel_urls(scheme, port, bind_host, (init.get("admin") or {}).get("entrance") or "")
     return {"ok": True, "fresh": fresh, "root": str(layout.root), "version": state["version"], "port": port,
             "port_reason": port_reason, "urls": urls, "access": access, "service": service_note,
             "service_state": service.state() if service_mode != "none" else "not_registered",
@@ -1089,6 +1076,111 @@ def install(opts: Options) -> dict[str, Any]:
             "autostart_hint": supervisor_autostart_hint(layout) if service_mode == "supervisor" else None,
             "network": network, "firewall": firewall_note,
             "core_ok": healthy, "public_ready": any(n["layer"] == "public" and n["state"] == "ok" for n in network)}
+
+
+def open_firewall_port(port: int, access: str, allowed: bool,
+                       firewall: Callable[[], dict] | None = None, run: Callable[..., Any] = subprocess.run) -> str | None:
+    """A note about the local firewall for a lan / public install: the port opened (allowed = --open-firewall), or the
+    command to do it. None when nothing is in the way."""
+    state = (firewall or firewall_status)()
+    if access not in ("lan", "public") or not state.get("active"):
+        return None
+    cmd = firewall_open_command(state.get("tool"), port)
+    if not cmd:
+        return None
+    if not allowed:
+        return "本机防火墙已开启，没有自动修改。需要时执行：" + " ".join(cmd) + "（或加 --open-firewall）"
+    result = run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        return "放行防火墙失败，请手动执行：" + " ".join(cmd)
+    if state.get("tool") == "firewalld":
+        run(["firewall-cmd", "--reload"], capture_output=True)
+    return f"已在本机防火墙放行端口 {port}"
+
+
+def panel_urls(scheme: str, port: int, bind_host: str, entrance: str,
+               lan: Callable[[], list[str]] | None = None) -> list[str]:
+    """The addresses to open: with a security entrance it is part of the address (1Panel style)."""
+    path = f"/{entrance}" if entrance else "/control"
+    urls = [f"{scheme}://127.0.0.1:{port}{path}"]
+    if bind_host == "0.0.0.0":
+        urls += [f"{scheme}://{a}:{port}{path}" for a in (lan or lan_addresses)()]
+    return urls
+
+
+def _env(layout: Layout) -> dict[str, str]:
+    try:
+        return parse_env(layout.env_file.read_text(encoding="utf-8"))
+    except OSError:
+        return {}
+
+
+def account(opts: Options, action: str, entrance: str | None = None, run: Callable[..., Any] = subprocess.run
+            ) -> dict[str, Any]:
+    """`violet info | reset-password | reset-entrance` (Violet stage 2): the admin account, through the installed
+    program's own code (tools.violet_setup account). A reset password is shown once; nothing stored is read back."""
+    layout = Layout(opts.root)
+    state = load_state(layout)
+    if not state:
+        raise InstallError(f"{layout.root} 没有安装 Violet")
+    extra = ["--no-entrance"] if entrance == "" else (["--entrance", entrance] if entrance else [])
+    done = app_command(layout, "-m", "tools.violet_setup", "account", action, "--json", *extra, run=run)
+    try:
+        result = json.loads((done.stdout or "").strip().splitlines()[-1])
+    except (IndexError, ValueError):
+        result = {"ok": False, "error": (done.stderr or done.stdout or "")[-800:]}
+    if done.returncode != 0 or not result.get("ok"):
+        raise InstallError(f"{action} 失败：{result.get('error')}")
+    if state.get("service") == "systemd" and state.get("user"):
+        ensure_service_user(layout, state["user"], run=run)      # admin.json was rewritten as root
+    env = _env(layout)
+    port = int(env.get("VIOLET_DASHBOARD_PORT") or state.get("port") or 0)
+    result.update(urls=panel_urls(_scheme(layout), port, env.get("VIOLET_DASHBOARD_HOST", "127.0.0.1"),
+                                  result.get("entrance") or ""),
+                  port=port, access=state.get("access"), version=state.get("version"))
+    return result
+
+
+def set_port(opts: Options, run: Callable[..., Any] = subprocess.run) -> dict[str, Any]:
+    """`violet set-port <port>`: move the Control Center to another port -- free-checked, firewall note (or opened
+    with --open-firewall), restart, health check; on a failed check the old port is put back."""
+    layout = Layout(opts.root)
+    state = load_state(layout)
+    if not state:
+        raise InstallError(f"{layout.root} 没有安装 Violet")
+    if opts.port is None:
+        raise InstallError("要指定新端口，例如：violet set-port 8443")
+    env = _env(layout)
+    old = int(env.get("VIOLET_DASHBOARD_PORT") or state.get("port") or 0)
+    if opts.port == old:
+        return {"ok": True, "port": old, "changed": False}
+    bind_host = env.get("VIOLET_DASHBOARD_HOST", "127.0.0.1")
+    port, _ = choose_port(opts.port, old, "0.0.0.0" if bind_host == "0.0.0.0" else "127.0.0.1")
+
+    def write(value: int) -> None:
+        text = layout.env_file.read_text(encoding="utf-8")
+        lines = [f"VIOLET_DASHBOARD_PORT={value}" if line.strip().startswith("VIOLET_DASHBOARD_PORT=") else line
+                 for line in text.splitlines()]
+        if not any(line.startswith("VIOLET_DASHBOARD_PORT=") for line in lines):
+            lines.append(f"VIOLET_DASHBOARD_PORT={value}")
+        layout.env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        _restrict(layout.env_file)
+
+    firewall_note = open_firewall_port(port, state.get("access", "local"), opts.open_firewall, run=run)
+    write(port)
+    service = Service(layout, state.get("service", "supervisor"), state.get("user"))
+    if state.get("service") != "none":
+        service.stop()
+        service.start()
+        if not wait_healthy(port, "127.0.0.1", opts.health_timeout, _scheme(layout)):
+            service.stop()
+            write(old)
+            service.start()
+            raise InstallError(f"换到端口 {port} 后健康检查没有通过，已改回 {old}。查看日志：{layout.logs / 'main.log'}")
+    state.update(port=port, updated_at=int(time.time()))
+    save_state(layout, state)
+    return {"ok": True, "port": port, "previous": old, "changed": True, "firewall": firewall_note,
+            "note": "旧端口的防火墙规则没有删除，不再需要时可以手动关闭" if firewall_note else None}
 
 
 def _fetch_ok(url: str) -> bool:
@@ -1341,12 +1433,15 @@ def render_result(result: dict[str, Any]) -> str:
         lines.append("  后台只在本机监听。远程管理：ssh -L "
                      f"{result['port']}:127.0.0.1:{result['port']} 用户@服务器，然后在自己电脑打开上面的地址")
     admin = result.get("admin") or {}
+    if admin.get("entrance"):
+        lines.append(f"  安全入口：/{admin['entrance']}（地址里必须带上它，否则所有页面都显示 404）")
     lines.append("")
+    lines.append(f"用户名：{admin.get('user') or 'admin'}")
     if admin.get("password"):
-        lines += ["管理员账号：admin（单管理员，登录页只需输入密码）", f"初始密码：{admin['password']}",
-                  "  这个密码只显示这一次；第一次登录后必须修改。"]
+        lines += [f"初始密码：{admin['password']}", "  这个密码只显示这一次；第一次登录后必须修改。"]
     else:
-        lines.append("管理员密码：沿用已有的密码（忘记了可以重新运行安装并加 --reset-admin）")
+        lines.append("密码：沿用已有的密码")
+    lines.append(f"  忘记了：sudo {Path(result.get('root', '.')) / 'violet'} info（地址和用户名）| reset-password（新的初始密码）")
     lines += ["", "网络检查："]
     marks = {"ok": "通过", "fail": "失败", "not_checked": "未验证", "not_applicable": "不适用"}
     for layer in result.get("network") or []:
@@ -1357,16 +1452,39 @@ def render_result(result: dict[str, Any]) -> str:
               "公网访问：" + ("已验证可以访问" if result.get("public_ready") else "未配置或未验证（见上面的网络检查）"),
               "", "下一步：登录后台，按“开始”页填写模型服务（API 地址和 Key）、扫码登录微信或添加其他聊天渠道。",
               f"日常管理：{Path(result.get('root', '.')) / ('violet.cmd' if os.name == 'nt' else 'violet')} status | stop | "
-              "start | backup | update（升级到 GitHub 上的最新版本）| uninstall", ""]
+              "start | backup | update（升级到 GitHub 上的最新版本）| info | reset-password | reset-entrance | "
+              "set-port <端口> | uninstall", ""]
+    return "\n".join(lines)
+
+
+def render_account(result: dict[str, Any], command: str) -> str:
+    lines = ["", "Violet 管理后台", "-" * 40]
+    lines += [f"  {u}" for u in result.get("urls") or []]
+    lines.append(f"安全入口：/{result['entrance']}" if result.get("entrance")
+                 else "安全入口：未设置（任何人都能打开登录页；建议执行 reset-entrance 设置一个）")
+    lines.append(f"用户名：{result.get('user')}" + ("" if result.get("username_set") else "（未设置：登录时用户名可以随便填）"))
+    if result.get("password"):
+        lines += [f"新的初始密码：{result['password']}", "  只显示这一次；所有登录已失效，登录后必须先修改。"]
+    elif command == "info":
+        lines.append("密码：" + ("安装时的初始密码，还没有修改" if result.get("must_change") else "已设置（不能查看；"
+                                                                               "忘记了用 reset-password）"))
+    if command == "reset-entrance":
+        lines.append("安全入口已更换：其他浏览器要用上面的新地址重新进入。")
+    if result.get("access") == "local":
+        lines.append(f"后台只在本机监听：远程管理用 ssh -L {result.get('port')}:127.0.0.1:{result.get('port')} 用户@服务器")
+    lines.append("")
     return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="violet-installer", description="Violet installer")
     parser.add_argument("command", choices=["install", "upgrade", "update", "rollback", "status", "backup", "restore",
-                                            "uninstall", "doctor", "start", "stop", "restart"])
+                                            "uninstall", "doctor", "start", "stop", "restart", "info",
+                                            "reset-password", "reset-entrance", "set-port"])
     parser.add_argument("--check", action="store_true", help="update: only report whether a newer release exists")
-    parser.add_argument("archive", nargs="?", help="restore: the backup file")
+    parser.add_argument("archive", nargs="?", help="restore: the backup file; set-port: the new port")
+    parser.add_argument("--entrance", help="reset-entrance: this value instead of a random one")
+    parser.add_argument("--no-entrance", action="store_true", help="reset-entrance: remove the security entrance")
     parser.add_argument("--root", type=Path, default=None)
     parser.add_argument("--port", type=int)
     parser.add_argument("--access", choices=["local", "lan", "public", "proxy"])
@@ -1411,6 +1529,25 @@ def main(argv: list[str] | None = None) -> int:
                     out(f"有新版本：{result['latest']}（当前 {result['current']}）。升级：{root / 'violet'} update")
                 else:
                     out(f"已升级到 {result['to']}；升级前的备份：{result['backup']}")
+        elif args.command in ("info", "reset-password", "reset-entrance"):
+            result = account(opts, args.command, "" if args.no_entrance else args.entrance)
+            if not args.json:
+                print(render_account(result, args.command))
+                return 0
+        elif args.command == "set-port":
+            if opts.port is None and args.archive:
+                try:
+                    opts.port = int(args.archive)
+                except ValueError:
+                    raise InstallError(f"端口要是数字：{args.archive}") from None
+            result = set_port(opts)
+            if not args.json:
+                out(f"后台端口已改为 {result['port']}" if result["changed"] else f"端口没有变化：{result['port']}")
+                for note in (result.get("firewall"), result.get("note")):
+                    if note:
+                        out("  " + note)
+                out(f"  新地址：sudo {root / 'violet'} info 查看")
+                return 0
         elif args.command == "rollback":
             result = rollback(opts)
         elif args.command == "status":

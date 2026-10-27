@@ -22,7 +22,7 @@ Violet 是一个自己部署的 AI 陪伴：一个有稳定性格、会慢慢熟
 curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | sudo bash
 ```
 
-安装程序会自动装好 Python 和依赖、注册 systemd 服务、选端口、生成管理员初始密码，最后显示后台地址。之后打开后台，按"开始"页填写模型服务的地址和 Key、在"渠道"页登录微信或添加机器人就可以聊天了。详细说明见 [violet/INSTALL.md](violet/INSTALL.md)。
+安装程序会自动装好 Python 和依赖、注册 systemd 服务、选端口，并像 1Panel 一样生成随机的安全入口、用户名和初始密码，最后显示后台地址（`https://服务器IP:端口/安全入口`）。忘记了用 `sudo /opt/violet/violet info` 查看地址和用户名，`sudo /opt/violet/violet reset-password` 重置密码。之后打开后台，按"开始"页填写模型服务的地址和 Key、在"渠道"页登录微信或添加机器人就可以聊天了。详细说明见 [violet/INSTALL.md](violet/INSTALL.md)。
 
 升级到最新版本：`sudo /opt/violet/violet update`（后台"开始"页也会提示有没有新版本）。
 

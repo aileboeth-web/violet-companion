@@ -383,8 +383,35 @@ loaders.account = async () => {
       h("div", { class: "note", text: `登录方式：${s.via}；无操作 ${s.idle_minutes} 分钟后需要重新登录，最长 ${s.session_hours} 小时；Cookie 仅限 HTTPS：${s.cookie_secure ? "是" : "否"}；这次连接是 HTTPS：${s.https ? "是" : "否"}` }),
       h("div", { class: "note", text: "管理令牌：" + ({ default: "使用 VIOLET_ADMIN_TOKEN / admin_token 文件", rotated: "已更换（只保存哈希）", disabled: "已禁用" }[s.token_mode] || s.token_mode) +
         "。禁用或更换令牌请在本机运行 python -m tools.violet_admin token-disable / token-rotate" }));
+    $("#acct-username").value = s.username || "";
+    $("#acct-entrance").value = s.entrance || "";
+    $("#acct-entrance-random").checked = false;
+    $("#acct-entrance").disabled = false;
+    renderEntranceNote(s.entrance, s.port);
   } catch (e) { toast("读取失败：" + e.message, false); }
 };
+function renderEntranceNote(entrance, port) {
+  const base = `${location.protocol}//${location.hostname}${port ? ":" + port : (location.port ? ":" + location.port : "")}`;
+  $("#acct-entrance-note").textContent = (entrance
+    ? `后台地址：${base}/${entrance}（没有带安全入口的访问一律显示 404）。`
+    : "没有设置安全入口：任何人都能打开登录页，建议设置一个。") +
+    " 修改端口需要重启服务，请在服务器上执行 sudo /opt/violet/violet set-port 新端口；忘记地址或密码时执行 sudo /opt/violet/violet info / reset-password。";
+}
+$("#acct-entrance-random").addEventListener("change", (ev) => { $("#acct-entrance").disabled = ev.target.checked; });
+$("#acct-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const body = { current: $("#acct-current").value, username: $("#acct-username").value.trim() };
+  if ($("#acct-entrance-random").checked) body.entrance_random = true;
+  else body.entrance = $("#acct-entrance").value.trim();
+  if (!body.entrance_random && !body.entrance && !(await confirmBox("清空安全入口后，任何人都能打开登录页。确定？"))) return;
+  try {
+    const r = await api("POST", "/auth/account", body);
+    $("#acct-current").value = "";
+    if (!r.changed.length) { toast("没有变化"); return; }
+    toast(r.changed.includes("entrance") ? `已保存。新的后台地址：…/${r.entrance}，请记下来` : "已保存，其他登录已失效");
+    loaders.account();
+  } catch (e) { toast(e.message, false); }
+});
 $("#pw-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   try {

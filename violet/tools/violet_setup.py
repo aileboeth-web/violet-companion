@@ -2,10 +2,12 @@
 again (it only creates what is missing):
 
     python -m tools.violet_setup init [--json] [--reset-admin]
+    python -m tools.violet_setup account info|reset-password|reset-entrance [--entrance X | --no-entrance] [--json]
 
   * the database: created with every table and migration (VioletDatabase does that on open);
   * the admin password: generated once (20 random characters), stored only as a scrypt hash with "must change at
     first login"; printed ONCE in the JSON result. An existing password is kept (unless --reset-admin);
+  * a new install also gets a random username and security entrance (wx_ilink_py.auth, Violet stage 2);
   * the tuned Chat / Proactive prompt versions are selected in the Control Center settings when nothing chose a
     prompt yet (a fresh install has no .env with the prompt texts -- without this it would run the short code
     defaults);
@@ -48,14 +50,24 @@ def init(reset_admin: bool = False) -> dict:
     finally:
         db.close()
 
-    from wx_ilink_py.auth import AdminStore
+    from wx_ilink_py.auth import AdminStore, generate_username
     store = AdminStore(data_dir)
-    if reset_admin or not store.has_password():
+    fresh = not store.has_password()
+    if fresh and not store.username():
+        # Violet stage 2: a new install gets a random username and security entrance (1Panel style). An existing
+        # install keeps what it has -- adding them on upgrade would lock out an admin who does not know them yet
+        store.set_username(generate_username())
+    if fresh and not store.entrance():
+        store.set_entrance(None)
+    if reset_admin or fresh:
         password = generate_password()
         store.set_password(password, must_change=True)
-        result["admin"] = {"user": "admin", "password": password, "must_change": True, "created": True}
+        result["admin"] = {"user": store.username() or "admin", "password": password, "must_change": True,
+                           "created": True}
     else:
-        result["admin"] = {"user": "admin", "created": False, "must_change": bool(store.load().get("must_change"))}
+        result["admin"] = {"user": store.username() or "admin", "created": False,
+                           "must_change": bool(store.load().get("must_change"))}
+    result["admin"]["entrance"] = store.entrance()
 
     from ai.control_config import ControlStore, prompt_versions
     control = ControlStore(data_dir)
@@ -72,14 +84,46 @@ def init(reset_admin: bool = False) -> dict:
     return result
 
 
+def account(action: str, entrance: str | None = None) -> dict:
+    """The admin account for `violet info | reset-password | reset-entrance` (Violet stage 2). Never prints a stored
+    secret: a password appears only when reset-password has just made it.
+
+      info            username, security entrance, password state
+      reset-password  a new random initial password (must be changed at the next login); ends every session
+      reset-entrance  a new random entrance, or ``entrance`` ("" removes it -- every path reachable again)
+    """
+    from ai.settings import ENV_PATH
+    from dotenv import load_dotenv
+    load_dotenv(ENV_PATH, override=True)
+    from wx_ilink_py.auth import AdminStore
+    store = AdminStore(os.environ.get("VIOLET_DATA_DIR") or "./data")
+    result: dict = {"ok": True}
+    if action == "reset-password":
+        password = generate_password()
+        store.set_password(password, must_change=True)
+        result["password"] = password
+    elif action == "reset-entrance":
+        store.set_entrance(entrance)
+    data = store.load()
+    result.update(user=store.username() or "admin", username_set=bool(store.username()), entrance=store.entrance(),
+                  password_set=bool(data.get("password_hash")), must_change=bool(data.get("must_change")))
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m tools.violet_setup")
-    parser.add_argument("command", choices=["init"])
+    parser.add_argument("command", choices=["init", "account"])
+    parser.add_argument("action", nargs="?", choices=["info", "reset-password", "reset-entrance"], default="info")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--reset-admin", action="store_true")
+    parser.add_argument("--entrance", help="reset-entrance: this value instead of a random one")
+    parser.add_argument("--no-entrance", action="store_true", help="reset-entrance: remove the security entrance")
     args = parser.parse_args(argv)
     try:
-        result = init(reset_admin=args.reset_admin)
+        if args.command == "account":
+            result = account(args.action, "" if args.no_entrance else args.entrance)
+        else:
+            result = init(reset_admin=args.reset_admin)
     except Exception as exc:  # noqa: BLE001
         print(json.dumps({"ok": False, "error": f"{exc.__class__.__name__}: {exc}"}, ensure_ascii=False))
         return 1
