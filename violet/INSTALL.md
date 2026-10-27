@@ -42,13 +42,16 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 
 | 安装参数 | 后台在哪里能打开 |
 |---|---|
-| 默认 `--access local` | 只有服务器本机。远程管理：`ssh -L 7100:127.0.0.1:7100 用户@服务器`，再在自己电脑打开 `http://127.0.0.1:7100/安全入口` |
-| `--access lan` / `--access public` | 其他机器也能打开，强制 HTTPS（自签名证书，浏览器会提示，核对安装输出里的证书指纹）。需要 openssl |
+| `--access public`（root 安装的默认） | 公网和局域网都能打开：`https://服务器公网IP:端口/安全入口`，强制 HTTPS（自签名证书，浏览器会提示“不安全”，核对安装输出里的证书指纹后继续访问）。安装时自动装 openssl、查询公网 IP（和 1Panel 一样问外部服务）、在本机防火墙（ufw / firewalld）放行端口（加 `--keep-firewall` 不动防火墙）。云服务器还要在控制台安全组里放行这个端口 |
+| `--access lan` | 只给局域网用，同样是 HTTPS；本机防火墙只给出放行命令 |
+| `--access local`（普通用户 `--user-install` 的默认） | 只有服务器本机。远程管理：`ssh -L 7100:127.0.0.1:7100 用户@服务器`，再在自己电脑打开 `http://127.0.0.1:7100/安全入口` |
 | `--access proxy` | 你自己的 HTTPS 反向代理（Caddy / Nginx，同一台机器）转发到 127.0.0.1 |
+
+已经装好的随时可以切换：重新运行安装命令并加上 `-s -- --access public`（或 local / lan / proxy），数据、账号、端口都保留，只改监听地址和证书。
 
 **安全入口**：没有从安全入口进来的浏览器，访问任何页面（包括登录页）都只得到 404，扫描器看不出这里是 Violet。从入口进来一次后，这个浏览器就可以打开登录页（退出登录后也一样）。例外只有：`/healthz`（只回答“这里运行着 Violet”，安装和升级的健康检查要用）、聊天平台的签名回调地址，以及带正确管理令牌的脚本请求。
 
-安装程序分别检查：端口在监听、本机能访问、局域网能访问、公网能访问。**公网是否可达从服务器内部无法确认**（云厂商安全组、NAT、运营商封端口都要从外面测），所以默认显示“未验证”；用手机流量打开地址确认，或者安装时加 `--public-url https://你的域名` 让安装程序试一次。本机防火墙开着时只给出放行命令，加 `--open-firewall` 才会自动放行。
+安装程序分别检查：端口在监听、本机能访问、局域网能访问、公网能访问。**公网是否可达从服务器内部无法确认**（云厂商安全组、NAT、运营商封端口都要从外面测），所以默认显示“未验证”；用手机流量打开地址确认，或者安装时加 `--public-url https://你的域名` 让安装程序试一次。
 
 ## 更新
 
@@ -81,7 +84,9 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 bash install.sh upgrade       # 或者：在新版本的程序目录里执行
 /opt/violet/violet rollback      # 退回上一个版本的程序（数据不动）
 /opt/violet/violet uninstall     # 删除服务和程序，保留配置、数据和备份
-/opt/violet/violet uninstall --purge --yes   # 连数据一起删除（不可恢复）
+/opt/violet/violet uninstall --purge --yes   # 全部删除（不可恢复）：数据、备份、/opt/violet、violet 系统账号、放行的防火墙规则
+# 或者不依赖已安装的文件（例如装坏了）：
+# curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
 /opt/violet/violet info             # 后台地址（带安全入口）和用户名；密码不能查看
 /opt/violet/violet reset-password   # 生成新的初始密码（只显示一次），所有登录失效
 /opt/violet/violet reset-entrance   # 换一个随机的安全入口（--entrance 自己指定；--no-entrance 取消）

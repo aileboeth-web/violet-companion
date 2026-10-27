@@ -39,10 +39,15 @@ OUT="$(curl -fsSL "http://127.0.0.1:$PORT_HTTP/install.sh" | bash -s -- --root "
   printf '%s\n' "$OUT"; tail -n 40 "$ROOT/logs/main.log" 2>/dev/null || true; fail "install command"; }
 echo "$OUT" | json 'd["core_ok"]' | grep -q True || fail "core service not healthy"
 PORT="$(echo "$OUT" | json 'd["port"]')"
+SCHEME="$(echo "$OUT" | json 'd["urls"][0].split(":")[0]')"
 PASSWORD="$(echo "$OUT" | json 'd["admin"]["password"]')"
 [ ${#PASSWORD} -eq 20 ] || fail "initial password"
 echo "$OUT" | json '[l["state"] for l in d["network"] if l["layer"]=="public"][0]' | grep -qv '^ok$' || fail "public must not be claimed"
-pass "installed on port $PORT, initial password shown once, public access not claimed"
+# as root the default is public access over HTTPS (https://IP:port/entrance, 1Panel style)
+echo "$OUT" | json 'd["access"]' | grep -qx public || fail "a root install is not public by default"
+[ "$SCHEME" = "https" ] || fail "public access without HTTPS"
+grep -q '^VIOLET_DASHBOARD_HOST=0.0.0.0' "$ROOT/config/violet.env" || fail "not listening on every interface"
+pass "installed on port $PORT, public over HTTPS by default ($(echo "$OUT" | json 'd["urls"][0]')), initial password shown once"
 
 # 3. service manager
 MODE="$(python3 -c "import json;print(json.load(open('$ROOT/install.json'))['service'])")"
@@ -51,31 +56,31 @@ if [ "$MODE" = "systemd" ]; then
   systemctl is-enabled --quiet violet || fail "systemd unit not enabled at boot"
   MAINPID="$(systemctl show -p MainPID --value violet)"
   kill -9 "$MAINPID"
-  for _ in $(seq 1 30); do curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1 && break; sleep 1; done
+  for _ in $(seq 1 30); do curl -fsSk "$SCHEME://127.0.0.1:$PORT/healthz" >/dev/null 2>&1 && break; sleep 1; done
   [ "$(systemctl show -p MainPID --value violet)" != "$MAINPID" ] || fail "not restarted after a crash"
   pass "systemd: active, enabled, restarted after kill -9"
 else
   pass "service mode: $MODE"
 fi
-curl -fsS "http://127.0.0.1:$PORT/healthz" | grep -q violet || fail "healthz"
+curl -fsSk "$SCHEME://127.0.0.1:$PORT/healthz" | grep -q violet || fail "healthz"
 
 # 4. dashboard: security entrance, username + initial password, which must be changed first
 ENTRANCE="$(echo "$OUT" | json 'd["admin"]["entrance"]')"
 ADMIN_USER="$(echo "$OUT" | json 'd["admin"]["user"]')"
 [ ${#ENTRANCE} -eq 12 ] || fail "security entrance"
 echo "$OUT" | json 'd["urls"][0]' | grep -q "/$ENTRANCE\$" || fail "address without the entrance"
-code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
-[ "$(code "http://127.0.0.1:$PORT/auth/login")" = "404" ] || fail "login page reachable without the entrance"
-[ "$(code "http://127.0.0.1:$PORT/control")" = "404" ] || fail "control reachable without the entrance"
+code() { curl -sk -o /dev/null -w '%{http_code}' "$@"; }
+[ "$(code "$SCHEME://127.0.0.1:$PORT/auth/login")" = "404" ] || fail "login page reachable without the entrance"
+[ "$(code "$SCHEME://127.0.0.1:$PORT/control")" = "404" ] || fail "control reachable without the entrance"
 JAR="$WORK/jar"
 login() {   # $1 entrance, $2 password -> the cookie jar $JAR, logged in (prints the login status code)
   rm -f "$JAR"
-  [ "$(code -c "$JAR" "http://127.0.0.1:$PORT/$1")" = "302" ] || fail "entrance /$1"
-  code -b "$JAR" -c "$JAR" -H "Origin: http://127.0.0.1:$PORT" --data-urlencode "username=$ADMIN_USER" \
-       --data-urlencode "password=$2" "http://127.0.0.1:$PORT/auth/login"
+  [ "$(code -c "$JAR" "$SCHEME://127.0.0.1:$PORT/$1")" = "302" ] || fail "entrance /$1"
+  code -b "$JAR" -c "$JAR" -H "Origin: $SCHEME://127.0.0.1:$PORT" --data-urlencode "username=$ADMIN_USER" \
+       --data-urlencode "password=$2" "$SCHEME://127.0.0.1:$PORT/auth/login"
 }
 [ "$(login "$ENTRANCE" "$PASSWORD")" = "302" ] || fail "login with username and the initial password"
-CODE="$(code -b "$JAR" -H 'Accept: application/json' "http://127.0.0.1:$PORT/api/control/setup")"
+CODE="$(code -b "$JAR" -H 'Accept: application/json' "$SCHEME://127.0.0.1:$PORT/api/control/setup")"
 [ "$CODE" = "403" ] || fail "setup reachable before the password change ($CODE)"
 pass "security entrance (404 without it); username + password login; everything locked until the password is changed"
 
@@ -84,13 +89,13 @@ pass "security entrance (404 without it); username + password login; everything 
 "$ROOT/violet" info | grep -q "$ADMIN_USER" || fail "info text"
 NEW_ENTRANCE="$("$ROOT/violet" reset-entrance --json | json 'd["entrance"]')"
 [ "$NEW_ENTRANCE" != "$ENTRANCE" ] || fail "reset-entrance"
-[ "$(code "http://127.0.0.1:$PORT/$ENTRANCE")" = "404" ] || fail "old entrance still works"
+[ "$(code "$SCHEME://127.0.0.1:$PORT/$ENTRANCE")" = "404" ] || fail "old entrance still works"
 PASSWORD="$("$ROOT/violet" reset-password --json | json 'd["password"]')"
 [ "$(login "$NEW_ENTRANCE" "$PASSWORD")" = "302" ] || fail "login after reset-entrance / reset-password"
 OLD_PORT="$PORT"; PORT=$((PORT + 37))
 "$ROOT/violet" set-port "$PORT" --json | json 'd["port"]' | grep -qx "$PORT" || fail "set-port"
-curl -fsS "http://127.0.0.1:$PORT/healthz" | grep -q violet || fail "not answering on the new port"
-! curl -fsS "http://127.0.0.1:$OLD_PORT/healthz" >/dev/null 2>&1 || fail "still answering on the old port"
+curl -fsSk "$SCHEME://127.0.0.1:$PORT/healthz" | grep -q violet || fail "not answering on the new port"
+! curl -fsSk "$SCHEME://127.0.0.1:$OLD_PORT/healthz" >/dev/null 2>&1 || fail "still answering on the old port"
 pass "info, reset-entrance, reset-password and set-port ($OLD_PORT -> $PORT)"
 
 # 4c. automatic updates (root + systemd): "update now" in the Control Center -> the root update service installs a
@@ -104,21 +109,21 @@ if [ "$MODE" = "systemd" ]; then
   echo "$NEXT" > "$WORK/next/VERSION"
   python3 "$WORK/next/tools/make_release.py" --base "http://127.0.0.1:$PORT_HTTP" --out "$WORK/dist" --worktree >/dev/null
   NEWPW="e2e-Password-$(date +%s)"
-  CODE="$(code -b "$JAR" -c "$JAR" -H "Origin: http://127.0.0.1:$PORT" -H 'Content-Type: application/json' \
-          --data "{\"current\":\"$PASSWORD\",\"new\":\"$NEWPW\",\"confirm\":\"$NEWPW\"}" "http://127.0.0.1:$PORT/auth/password")"
+  CODE="$(code -b "$JAR" -c "$JAR" -H "Origin: $SCHEME://127.0.0.1:$PORT" -H 'Content-Type: application/json' \
+          --data "{\"current\":\"$PASSWORD\",\"new\":\"$NEWPW\",\"confirm\":\"$NEWPW\"}" "$SCHEME://127.0.0.1:$PORT/auth/password")"
   [ "$CODE" = "200" ] || fail "password change ($CODE)"
   # "notify": the check below must not start the update by itself; "update now" does
-  CODE="$(code -X PUT -b "$JAR" -H "Origin: http://127.0.0.1:$PORT" -H 'Content-Type: application/json' \
-          --data '{"changes":{"VIOLET_UPDATE_MODE":"notify"}}' "http://127.0.0.1:$PORT/api/control/settings")"
+  CODE="$(code -X PUT -b "$JAR" -H "Origin: $SCHEME://127.0.0.1:$PORT" -H 'Content-Type: application/json' \
+          --data '{"changes":{"VIOLET_UPDATE_MODE":"notify"}}' "$SCHEME://127.0.0.1:$PORT/api/control/settings")"
   [ "$CODE" = "200" ] || fail "update mode setting ($CODE)"
-  UPD="$(curl -s -b "$JAR" -H 'Accept: application/json' "http://127.0.0.1:$PORT/api/control/update?refresh=1")"
+  UPD="$(curl -sk -b "$JAR" -H 'Accept: application/json' "$SCHEME://127.0.0.1:$PORT/api/control/update?refresh=1")"
   echo "$UPD" | json 'd["data"]["latest"]' | grep -qx "$NEXT" || { echo "$UPD"; fail "the page does not see $NEXT"; }
   echo "$UPD" | json 'd["data"]["auto"]["available"]' | grep -q True || fail "automatic updates not available"
   sleep 5
   [ "$(python3 -c "import json;print(json.load(open('$ROOT/install.json'))['version'])")" = "$OLD_VERSION" ] ||
     fail "notify mode updated by itself"
-  CODE="$(code -b "$JAR" -H "Origin: http://127.0.0.1:$PORT" -H 'Content-Type: application/json' \
-          --data '{"confirm":true}' "http://127.0.0.1:$PORT/api/control/update/apply")"
+  CODE="$(code -b "$JAR" -H "Origin: $SCHEME://127.0.0.1:$PORT" -H 'Content-Type: application/json' \
+          --data '{"confirm":true}' "$SCHEME://127.0.0.1:$PORT/api/control/update/apply")"
   [ "$CODE" = "200" ] || fail "update now ($CODE)"
   for _ in $(seq 1 120); do
     python3 -c "import json,sys;d=json.load(open('$ROOT/install.json'));sys.exit(0 if d.get('version')=='$NEXT' and (d.get('auto_update') or {}).get('last_result')=='updated' else 1)" 2>/dev/null && break
@@ -127,8 +132,8 @@ if [ "$MODE" = "systemd" ]; then
   python3 -c "import json,sys;d=json.load(open('$ROOT/install.json'));print(d.get('version'), d.get('auto_update'))"
   [ "$(python3 -c "import json;print(json.load(open('$ROOT/install.json'))['version'])")" = "$NEXT" ] || {
     journalctl -u violet-update -n 60 --no-pager || true; fail "automatic update to $NEXT"; }
-  for _ in $(seq 1 30); do curl -fsS "http://127.0.0.1:$PORT/healthz" 2>/dev/null | grep -q violet && break; sleep 1; done
-  curl -fsS "http://127.0.0.1:$PORT/healthz" | grep -q violet || fail "not answering after the automatic update"
+  for _ in $(seq 1 30); do curl -fsSk "$SCHEME://127.0.0.1:$PORT/healthz" 2>/dev/null | grep -q violet && break; sleep 1; done
+  curl -fsSk "$SCHEME://127.0.0.1:$PORT/healthz" | grep -q violet || fail "not answering after the automatic update"
   [ ! -e "$ROOT/data/control/update-request" ] || fail "update request left behind"
   ! ls "$ROOT"/backups/*before-upgrade* >/dev/null 2>&1 || fail "backup of a successful update not deleted"
   pass "automatic update from the Control Center: $OLD_VERSION -> $NEXT (root update service, healthy)"
@@ -148,16 +153,26 @@ cp -r "$PROJECT" "$BROKEN"
 echo 'raise SystemExit("broken build")' > "$BROKEN/main.py"
 echo "9.9.9-broken" > "$BROKEN/VERSION"
 if bash "$BROKEN/install.sh" upgrade --root "$ROOT" --health-timeout 20 --json >/dev/null; then fail "broken upgrade reported success"; fi
-for _ in $(seq 1 30); do curl -fsS "http://127.0.0.1:$PORT/healthz" 2>/dev/null | grep -q violet && break; sleep 1; done
-curl -fsS "http://127.0.0.1:$PORT/healthz" | grep -q violet || fail "old version not back after the failed upgrade"
+for _ in $(seq 1 30); do curl -fsSk "$SCHEME://127.0.0.1:$PORT/healthz" 2>/dev/null | grep -q violet && break; sleep 1; done
+curl -fsSk "$SCHEME://127.0.0.1:$PORT/healthz" | grep -q violet || fail "old version not back after the failed upgrade"
 ls "$ROOT"/backups/*before-upgrade* >/dev/null 2>&1 || fail "a failed upgrade must keep its backup"
 pass "broken upgrade rolled back automatically (its backup kept)"
 
 # 7. uninstall keeps data, purge removes everything
 "$ROOT/violet" uninstall --json >/dev/null || fail "uninstall"
 [ -f "$ROOT/data/violet.db" ] || fail "uninstall removed the data"
-! curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1 || fail "still running after uninstall"
+! curl -fsSk "$SCHEME://127.0.0.1:$PORT/healthz" >/dev/null 2>&1 || fail "still running after uninstall"
 [ "$MODE" != "systemd" ] || [ ! -e /etc/systemd/system/violet.service ] || fail "unit file left behind"
-python3 "$PROJECT/tools/violet_installer.py" uninstall --root "$ROOT" --purge --yes --json >/dev/null 2>&1 || true
-pass "uninstall kept data; purge cleaned up"
+pass "uninstall kept data"
+# the one-line complete removal from the README
+curl -fsSL "http://127.0.0.1:$PORT_HTTP/install.sh" | bash -s -- uninstall --root "$ROOT" --purge --yes --json \
+  || fail "uninstall --purge"
+[ ! -e "$ROOT" ] || { ls -la "$ROOT"; fail "$ROOT left behind"; }
+if [ "$MODE" = "systemd" ]; then
+  ! id violet >/dev/null 2>&1 || fail "system account violet left behind"
+  for unit in violet.service violet-update.service violet-update.timer violet-update.path; do
+    [ ! -e "/etc/systemd/system/$unit" ] || fail "$unit left behind"
+  done
+fi
+pass "uninstall --purge removed everything (folder, services, update timer, system account)"
 echo "ALL PASSED"

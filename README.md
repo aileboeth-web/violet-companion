@@ -26,9 +26,23 @@ Debian、Ubuntu、Rocky 等都用这一条：root 直接装（Debian 最小安�
 
 安装程序会自动装好 Python 和依赖、注册 systemd 服务、选端口，并像 1Panel 一样生成随机的安全入口、用户名和初始密码，最后显示后台地址（`https://服务器IP:端口/安全入口`）。忘记了用 `/opt/violet/violet info` 查看地址和用户名，`/opt/violet/violet reset-password` 重置密码。之后打开后台，按"开始"页填写模型服务的地址和 Key、在"渠道"页登录微信或添加机器人就可以聊天了。详细说明见 [violet/INSTALL.md](violet/INSTALL.md)。
 
+访问方式：以 root 安装时默认开放公网访问，后台地址是 `https://服务器公网IP:端口/安全入口`（自签名证书，浏览器提示“不安全”时选择继续访问）。云服务器还要在控制台的“安全组 / 防火墙”里放行这个端口。只想在服务器本机访问（用 SSH 隧道管理）：安装命令后面加 `-s -- --access local`。已经装好的也可以随时切换，重新运行一次（数据、账号和端口都保留）：
+
+```bash
+curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- --access public
+```
+
 更新：默认自动更新（有新版本就在服务器上自动升级，先备份、失败自动退回），也可以在后台“设置 → 版本更新”改成只提醒或手动检查；手动升级用 `/opt/violet/violet update`。所有日常设置都在网页后台完成，不需要编辑配置文件。
 
-> 1Panel 式的"地址 + 安全入口 + 账号密码"登录正在开发中。
+## 卸载
+
+一行命令彻底卸载：删除程序、服务、自动更新任务、配置、数据（聊天记录和记忆）、备份、`violet` 系统账号，以及安装时放行的防火墙规则，**不可恢复**：
+
+```bash
+curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
+```
+
+只删程序、保留配置和数据（以后重新安装还能接着用）：`/opt/violet/violet uninstall`。
 
 需要：一个 OpenAI 兼容的模型接口。已在 Ubuntu 22.04 / 24.04、Debian 12、Rocky Linux 9 上自动测试过安装（GitHub Actions）。
 

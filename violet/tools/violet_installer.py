@@ -342,14 +342,25 @@ def port_free(port: int, host: str = "127.0.0.1") -> bool:
 
 
 def probe_eve(port: int, host: str = "127.0.0.1", timeout: float = 2.0) -> dict[str, Any] | None:
-    """The /healthz answer when an Violet listens there, else None."""
-    try:
-        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
-                f"http://{_host_for_url(host)}:{port}/healthz", timeout=timeout) as response:
-            data = json.loads(response.read(4096).decode("utf-8"))
-            return data if isinstance(data, dict) and data.get("ok") and data.get("service") == "violet" else None
-    except (OSError, ValueError, urllib.error.URLError):
-        return None
+    """The /healthz answer when a Violet listens there (plain HTTP, or HTTPS with its own self-signed certificate),
+    else None."""
+    import ssl
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE                     # only asks "is this Violet?" on this machine
+    for scheme in ("http", "https"):
+        handlers: list[Any] = [urllib.request.ProxyHandler({})]
+        if scheme == "https":
+            handlers.append(urllib.request.HTTPSHandler(context=context))
+        try:
+            with urllib.request.build_opener(*handlers).open(
+                    f"{scheme}://{_host_for_url(host)}:{port}/healthz", timeout=timeout) as response:
+                data = json.loads(response.read(4096).decode("utf-8"))
+                if isinstance(data, dict) and data.get("ok") and data.get("service") == "violet":
+                    return data
+        except (OSError, ValueError, urllib.error.URLError):
+            continue
+    return None
 
 
 def _host_for_url(host: str) -> str:
@@ -396,6 +407,30 @@ def lan_addresses() -> list[str]:
     except OSError:
         pass
     return sorted(a for a in found if _is_private(a))
+
+
+PUBLIC_IP_SERVICES = ("https://api.ipify.org", "https://ifconfig.me/ip", "https://ipv4.icanhazip.com")
+
+
+def public_ip(opener: Callable[..., Any] | None = None, timeout: float = 4.0) -> str | None:
+    """This server's public IPv4 address, asked from a "what is my IP" service (as 1Panel does) -- only for the address
+    shown after a public install. None when offline or every answer is not a public IPv4 address."""
+    for url in PUBLIC_IP_SERVICES:
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "violet-installer"})
+            with (opener or urllib.request.urlopen)(request, timeout=timeout) as response:
+                text = response.read(64).decode("ascii", "replace").strip()
+            ip = ipaddress.ip_address(text)
+            if ip.version == 4 and ip.is_global:
+                return text
+        except (OSError, ValueError, urllib.error.URLError):
+            continue
+    return None
+
+
+def default_access() -> str:
+    """public for a server install as root (1Panel style: https://IP:port/entrance), local otherwise."""
+    return "public" if os.name != "nt" and _is_root() else "local"
 
 
 def _is_private(address: str) -> bool:
@@ -463,7 +498,7 @@ def network_report(port: int, bind_host: str, *, public_url: str | None = None,
                    "detail": f"端口 {port}" + ("" if listening else " 上没有程序在监听：服务没有启动或启动失败")})
     local = health("127.0.0.1", port) if listening else False
     layers.append({"layer": "local", "title": "本机可以访问", "state": "ok" if local else "fail",
-                   "detail": f"http://127.0.0.1:{port}/healthz " + ("返回正常" if local else "没有正常返回")})
+                   "detail": f"127.0.0.1:{port}/healthz " + ("返回正常" if local else "没有正常返回")})
     loopback_only = bind_host in ("127.0.0.1", "localhost", "::1")
     addresses = lan()
     if loopback_only:
@@ -521,6 +556,26 @@ def merge_env(existing: str, wanted: dict[str, str], header: str = "") -> tuple[
         lines.append(f"# added by the installer {_dt.date.today().isoformat()}")
     lines += [f"{k}={_quote(wanted[k])}" for k in added]
     return "\n".join(lines) + "\n", added
+
+
+ACCESS_KEYS = ("VIOLET_DASHBOARD_HOST", "VIOLET_DASHBOARD_PORT", "VIOLET_DASHBOARD_TLS_CERT", "VIOLET_DASHBOARD_TLS_KEY",
+               "VIOLET_DASHBOARD_COOKIE_SECURE", "VIOLET_DASHBOARD_TRUST_PROXY")
+
+
+def set_env_keys(existing: str, values: dict[str, str | None]) -> str:
+    """Set (or, with None, remove) these keys in place; every other line stays as it is. For the keys the installer
+    owns -- how the dashboard is reached -- so that "install --access public" on an existing install takes effect."""
+    lines, done = [], set()
+    for line in existing.splitlines():
+        key = line.split("=", 1)[0].strip() if "=" in line and not line.strip().startswith("#") else None
+        if key in values:
+            done.add(key)
+            if values[key] is not None:
+                lines.append(f"{key}={_quote(values[key])}")
+            continue
+        lines.append(line)
+    lines += [f"{k}={_quote(v)}" for k, v in values.items() if k not in done and v is not None]
+    return "\n".join(lines) + "\n"
 
 
 def _quote(value: str) -> str:
@@ -1080,6 +1135,7 @@ class Options:
     log: Callable[[str], None] = field(default=print)
     update_feed: str | None = None       # a release.json URL instead of GitHub (own mirror; Linux acceptance test)
     update_repo: str | None = None       # a fork's GitHub owner/repo instead of the official releases
+    keep_firewall: bool = False          # public access: do not open the port in ufw / firewalld
 
 
 def bind_host_for(access: str) -> str:
@@ -1112,23 +1168,27 @@ def install(opts: Options) -> dict[str, Any]:
     log("  复制程序文件…")
     install_program(layout, opts.source)
     ensure_venv(layout, opts.python, offline_wheels=opts.wheels, reuse_venv=opts.reuse_venv, log=log)
-    access = opts.access or state.get("access", "local")
+    # a server install as root is reachable at https://IP:port/entrance (1Panel style; user decision 2026-10-27);
+    # a repair keeps what was chosen before unless --access says otherwise
+    access = opts.access or state.get("access") or default_access()
     bind_host = bind_host_for(access)
     port, port_reason = choose_port(opts.port, state.get("port"), "0.0.0.0" if bind_host == "0.0.0.0" else "127.0.0.1")
     log(f"  端口 {port}（{port_reason}）")
-    tls = None
+    tls, server_ip = None, None
+    if access == "public":
+        server_ip = public_ip()
+        log(f"  公网 IP：{server_ip}" if server_ip else "  没有查到公网 IP（离线，或服务器在 NAT 后面）")
     if access in ("lan", "public"):
-        tls = ensure_self_signed(layout, lan_addresses())
+        tls = ensure_self_signed(layout, lan_addresses() + ([server_ip] if server_ip else []))
         if tls is None:
             raise InstallError("局域网 / 公网访问必须用 HTTPS，但这台机器没有 openssl，无法生成证书。"
                                "安装 openssl 后重试，或用 --access local（SSH 隧道）/ --access proxy（自己的 HTTPS 反向代理）")
     existing = layout.env_file.read_text(encoding="utf-8") if layout.env_file.exists() else ""
     wanted = wanted_env(layout, port, bind_host, access, tls)
-    have = parse_env(existing)
-    if have.get("VIOLET_DASHBOARD_PORT") and have["VIOLET_DASHBOARD_PORT"] != str(port):
-        # the port is the one thing an install decides again (it was free-checked just now)
-        existing = "\n".join(f"VIOLET_DASHBOARD_PORT={port}" if line.strip().startswith("VIOLET_DASHBOARD_PORT=") else line
-                             for line in existing.splitlines()) + "\n"
+    if existing.strip():
+        # how the dashboard is reached belongs to the installer: decided again on every install (port free-checked
+        # just now, access possibly changed with --access); everything else the user may have edited stays
+        existing = set_env_keys(existing, {k: wanted.get(k) for k in ACCESS_KEYS})
     text, added = merge_env(existing, wanted, header="# Violet -- written by the installer. Model keys, channels "
                                                      "and everything else are set in the Control Center.")
     layout.env_file.write_text(text, encoding="utf-8")
@@ -1162,18 +1222,24 @@ def install(opts: Options) -> dict[str, Any]:
                            + str(layout.logs / "main.log"))
     if repair_backup is not None and service_mode != "none" and _remove_backup(repair_backup):
         state["last_backup"] = None                 # a repair that came up healthy: its own safety backup is not needed
-    firewall_note = open_firewall_port(port, access, opts.open_firewall)
+    # public: open the port in the local firewall like 1Panel does (--keep-firewall leaves it alone); lan: suggest
+    fw = firewall_status()
+    firewall_note = open_firewall_port(port, access, opts.open_firewall or (access == "public" and not opts.keep_firewall),
+                                       firewall=lambda: fw)
+    if firewall_note and firewall_note.startswith("已在本机防火墙放行") and fw.get("tool"):
+        rules = [r for r in state.get("firewall_rules") or [] if r != {"tool": fw["tool"], "port": port}]
+        state["firewall_rules"] = rules + [{"tool": fw["tool"], "port": port}]     # removed again by uninstall --purge
     network = network_report(port, bind_host, public_url=opts.public_url,
                              fetch=(lambda url: _fetch_ok(url)) if opts.public_url else None) \
         if service_mode != "none" else []
     state.update(version=source_version(opts.source), port=port, access=access, service=service_mode,
                  user=service.user or opts.user or state.get("user"), installed_at=state.get("installed_at") or int(time.time()),
-                 updated_at=int(time.time()), python=str(venv_python(layout)))
+                 updated_at=int(time.time()), python=str(venv_python(layout)), public_ip=server_ip)
     save_state(layout, state)
     write_cli(layout)
-    urls = panel_urls(scheme, port, bind_host, (init.get("admin") or {}).get("entrance") or "")
+    urls = panel_urls(scheme, port, bind_host, (init.get("admin") or {}).get("entrance") or "", public=server_ip)
     return {"ok": True, "fresh": fresh, "root": str(layout.root), "version": state["version"], "port": port,
-            "port_reason": port_reason, "urls": urls, "access": access, "service": service_note,
+            "port_reason": port_reason, "urls": urls, "access": access, "service": service_note, "public_ip": server_ip,
             "service_state": service.state() if service_mode != "none" else "not_registered",
             "admin": init.get("admin"), "tls_fingerprint": (tls or {}).get("fingerprint"),
             "autostart_hint": supervisor_autostart_hint(layout) if service_mode == "supervisor" else None,
@@ -1202,12 +1268,15 @@ def open_firewall_port(port: int, access: str, allowed: bool,
 
 
 def panel_urls(scheme: str, port: int, bind_host: str, entrance: str,
-               lan: Callable[[], list[str]] | None = None) -> list[str]:
-    """The addresses to open: with a security entrance it is part of the address (1Panel style)."""
+               lan: Callable[[], list[str]] | None = None, public: str | None = None) -> list[str]:
+    """The addresses to open: with a security entrance it is part of the address (1Panel style). The public one
+    first when the server listens on every interface."""
     path = f"/{entrance}" if entrance else "/control"
     urls = [f"{scheme}://127.0.0.1:{port}{path}"]
     if bind_host == "0.0.0.0":
-        urls += [f"{scheme}://{a}:{port}{path}" for a in (lan or lan_addresses)()]
+        urls += [f"{scheme}://{a}:{port}{path}" for a in (lan or lan_addresses)() if a != public]
+        if public:
+            urls.insert(0, f"{scheme}://{public}:{port}{path}")
     return urls
 
 
@@ -1239,7 +1308,7 @@ def account(opts: Options, action: str, entrance: str | None = None, run: Callab
     env = _env(layout)
     port = int(env.get("VIOLET_DASHBOARD_PORT") or state.get("port") or 0)
     result.update(urls=panel_urls(_scheme(layout), port, env.get("VIOLET_DASHBOARD_HOST", "127.0.0.1"),
-                                  result.get("entrance") or ""),
+                                  result.get("entrance") or "", public=state.get("public_ip")),
                   port=port, access=state.get("access"), version=state.get("version"))
     return result
 
@@ -1597,17 +1666,59 @@ def uninstall(opts: Options, purge: bool = False) -> dict[str, Any]:
     (layout.root / "violet").unlink(missing_ok=True)
     _remove_cmd_later(layout.root / "violet.cmd")
     kept = [p.name for p in (layout.config, layout.data, layout.backups) if p.exists()]
+    leftovers: list[str] = []
     if purge:
         for p in (layout.config, layout.data, layout.backups, layout.logs):
             if p.exists():
                 shutil.rmtree(p)
         layout.state_file.unlink(missing_ok=True)
         kept = []
+        removed += purge_system(layout, state)
+        # the install folder itself, when nothing but Violet's own files is left in it
+        if layout.root.exists():
+            leftovers = sorted(p.name for p in layout.root.iterdir() if p.name not in OWN_ROOT_FILES)
+            if not leftovers:
+                shutil.rmtree(layout.root, ignore_errors=True)
+                removed.append(str(layout.root))
     else:
         state.update(service="none", uninstalled_at=int(time.time()))
         save_state(layout, state)
-    return {"ok": True, "removed": removed, "kept": kept,
-            "note": "配置、数据和备份都保留了；彻底删除用 uninstall --purge --yes" if kept else "已全部删除"}
+    note = ("配置、数据和备份都保留了；彻底删除用 uninstall --purge --yes" if kept else
+            "已全部删除" if not leftovers else f"已删除 Violet 的文件；{layout.root} 里还有不是 Violet 的文件，没有动："
+            + "、".join(leftovers))
+    return {"ok": True, "removed": removed, "kept": kept, "leftovers": leftovers, "note": note}
+
+
+# what may be left in <root> after a purge and is Violet's own (pid / stop flags of the supervisor, startup logs)
+OWN_ROOT_FILES = {"violet.pid", "violet.stop", "violet", "violet.cmd", "venv.path", "install.json", "install.json.tmp",
+                  "app.failed", "app.new", "logs"}
+
+
+def purge_system(layout: Layout, state: dict, run: Callable[..., Any] = subprocess.run,
+                 linux_root: bool | None = None) -> list[str]:
+    """`uninstall --purge`: what the installer set up outside <root> -- the firewall rules it opened and the system
+    account it created (only if that account's home is this installation's data folder, i.e. made by us)."""
+    removed: list[str] = []
+    if not (linux_root if linux_root is not None else (os.name != "nt" and _is_root())):
+        return removed
+    for rule in state.get("firewall_rules") or []:
+        port, tool = int(rule.get("port") or 0), rule.get("tool")
+        if tool == "ufw" and shutil.which("ufw"):
+            run(["ufw", "delete", "allow", f"{port}/tcp"], capture_output=True)
+        elif tool == "firewalld" and shutil.which("firewall-cmd"):
+            run(["firewall-cmd", "--permanent", "--remove-port", f"{port}/tcp"], capture_output=True)
+            run(["firewall-cmd", "--reload"], capture_output=True)
+        else:
+            continue
+        removed.append(f"防火墙规则 {port}/tcp")
+    user = state.get("user")
+    if user:
+        done = run(["getent", "passwd", user], capture_output=True, text=True)
+        fields = (done.stdout or "").strip().split(":")
+        if done.returncode == 0 and len(fields) >= 6 and fields[5] and Path(fields[5]) == layout.data:
+            if run(["userdel", user], capture_output=True).returncode == 0:
+                removed.append(f"系统账号 {user}")
+    return removed
 
 
 def _remove_cmd_later(path: Path) -> None:
@@ -1664,7 +1775,13 @@ def render_result(result: dict[str, Any]) -> str:
     lines.append("管理后台地址：")
     lines += [f"  {u}" for u in result.get("urls") or []]
     if result.get("tls_fingerprint"):
-        lines.append(f"  （自签名证书，浏览器会提示不安全；核对证书指纹 SHA-256 {result['tls_fingerprint'][:47]}…）")
+        lines.append(f"  （自签名证书，浏览器会提示“不安全”，选择“继续访问”即可；核对证书指纹 SHA-256 "
+                     f"{result['tls_fingerprint'][:47]}…）")
+    if result.get("access") == "public":
+        lines.append(f"  打不开时：在云服务器控制台的“安全组 / 防火墙”里放行 TCP 端口 {result['port']}"
+                     "（服务器自己无法检查这一层）")
+        if not result.get("public_ip"):
+            lines.append("  没有查到公网 IP：用“https://你的服务器公网 IP:端口/安全入口”打开")
     if result.get("access") == "local":
         lines.append("  后台只在本机监听。远程管理：ssh -L "
                      f"{result['port']}:127.0.0.1:{result['port']} 用户@服务器，然后在自己电脑打开上面的地址")
@@ -1732,6 +1849,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reuse-venv", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--public-url", help="the address to try for the public-access check")
     parser.add_argument("--open-firewall", action="store_true")
+    parser.add_argument("--keep-firewall", action="store_true", help="public access: do not open the port in ufw/firewalld")
     parser.add_argument("--no-autostart", action="store_true")
     parser.add_argument("--reset-admin", action="store_true", help="make a new initial admin password")
     parser.add_argument("--health-timeout", type=float, default=HEALTH_TIMEOUT)
@@ -1745,11 +1863,11 @@ def main(argv: list[str] | None = None) -> int:
                    wheels=args.wheels, reuse_venv=args.reuse_venv, public_url=args.public_url,
                    open_firewall=args.open_firewall, autostart=not args.no_autostart, reset_admin=args.reset_admin,
                    health_timeout=args.health_timeout, json_output=args.json, log=out, update_feed=args.update_feed,
-                   update_repo=args.update_repo)
+                   update_repo=args.update_repo, keep_firewall=args.keep_firewall)
     try:
         if args.command == "install":
             if not opts.access:
-                opts.access = load_state(Layout(root)).get("access") or "local"
+                opts.access = load_state(Layout(root)).get("access") or default_access()
             result = install(opts)
             print(json.dumps(result, ensure_ascii=False) if args.json else render_result(result))
             return 0

@@ -470,3 +470,95 @@ def test_one_command_for_root_without_sudo_and_for_sudo_users():
     for doc in (PROJECT / "INSTALL.md", PROJECT.parent / "README.md"):
         text = doc.read_text(encoding="utf-8")
         assert "| sudo bash" not in text and "sudo /opt/violet" not in text, doc
+
+
+# ------------------------------------------------------------------------------------------------ public by default
+
+def test_switching_access_rewrites_only_the_installer_keys():
+    before = "# my notes\nLLM_API_KEY=keep\nVIOLET_DASHBOARD_HOST=127.0.0.1\nVIOLET_DASHBOARD_PORT=7101\n"
+    after = inst.set_env_keys(before, {"VIOLET_DASHBOARD_HOST": "0.0.0.0", "VIOLET_DASHBOARD_PORT": "7101",
+                                       "VIOLET_DASHBOARD_TLS_CERT": "/opt/violet/config/tls/violet.crt",
+                                       "VIOLET_DASHBOARD_TRUST_PROXY": None})
+    assert "# my notes\nLLM_API_KEY=keep\nVIOLET_DASHBOARD_HOST=0.0.0.0\n" in after
+    assert "VIOLET_DASHBOARD_TLS_CERT=/opt/violet/config/tls/violet.crt" in after and "TRUST_PROXY" not in after
+    back = inst.set_env_keys(after, {"VIOLET_DASHBOARD_HOST": "127.0.0.1", "VIOLET_DASHBOARD_TLS_CERT": None})
+    assert "TLS_CERT" not in back and "VIOLET_DASHBOARD_HOST=127.0.0.1" in back and "LLM_API_KEY=keep" in back
+
+
+def test_public_ip_takes_the_first_public_ipv4_answer():
+    import io
+
+    class Answer(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    answers = iter([OSError("offline"), b"10.0.0.5\n", b"203.0.113.9\n"])
+
+    def opener(request, timeout):
+        a = next(answers)
+        if isinstance(a, Exception):
+            raise a
+        return Answer(a)
+    # 203.0.113.0/24 is a documentation range (not global) -> rejected too; a real public address is accepted
+    assert inst.public_ip(opener=opener) is None
+    assert inst.public_ip(opener=lambda r, timeout: Answer(b"8.8.8.8")) == "8.8.8.8"
+
+
+def test_the_public_address_comes_first():
+    urls = inst.panel_urls("https", 7101, "0.0.0.0", "kg9icfqhxzji", lan=lambda: ["10.0.0.5"], public="8.8.8.8")
+    assert urls == ["https://8.8.8.8:7101/kg9icfqhxzji", "https://127.0.0.1:7101/kg9icfqhxzji",
+                    "https://10.0.0.5:7101/kg9icfqhxzji"]
+
+
+def test_default_access(monkeypatch):
+    monkeypatch.setattr(inst, "_is_root", lambda: True)
+    monkeypatch.setattr(inst.os, "name", "posix")
+    assert inst.default_access() == "public"
+    monkeypatch.setattr(inst, "_is_root", lambda: False)
+    assert inst.default_access() == "local"
+
+
+def test_purge_removes_firewall_rules_and_only_our_own_account(tmp_path):
+    layout = inst.Layout(Path("/opt/violet"))
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(cmd)
+        if cmd[:2] == ["getent", "passwd"]:
+            home = "/opt/violet/data" if cmd[2] == "violet" else "/home/alice"
+            return subprocess.CompletedProcess(cmd, 0, f"{cmd[2]}:x:999:999::{home}:/usr/sbin/nologin\n", "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+    state = {"user": "violet", "firewall_rules": [{"tool": "ufw", "port": 7101}]}
+    import shutil as _sh
+    real_which = _sh.which
+    try:
+        inst.shutil.which = lambda name: "/usr/sbin/" + name
+        removed = inst.purge_system(layout, state, run=run, linux_root=True)
+        assert ["ufw", "delete", "allow", "7101/tcp"] in calls and ["userdel", "violet"] in calls
+        assert removed == ["防火墙规则 7101/tcp", "系统账号 violet"]
+        calls.clear()
+        inst.purge_system(layout, {"user": "alice"}, run=run, linux_root=True)    # someone else's account
+        assert not any(c[0] == "userdel" for c in calls)
+    finally:
+        inst.shutil.which = real_which
+    assert inst.purge_system(layout, state, run=run, linux_root=False) == []
+
+
+def test_purge_removes_the_folder_but_not_foreign_files(tmp_path):
+    for foreign in (False, True):
+        root = tmp_path / ("with-foreign" if foreign else "clean")
+        layout = inst.Layout(root)
+        for folder in (layout.config, layout.data, layout.backups, layout.logs, layout.app):
+            folder.mkdir(parents=True)
+        (layout.data / "violet.db").write_text("x", encoding="utf-8")
+        if foreign:
+            (root / "my-notes.txt").write_text("mine", encoding="utf-8")
+        inst.save_state(layout, {"version": "0.3.3", "service": "none"})
+        result = inst.uninstall(inst.Options(root=root, log=lambda s: None), purge=True)
+        if foreign:
+            assert root.exists() and (root / "my-notes.txt").exists() and result["leftovers"] == ["my-notes.txt"]
+            assert not layout.data.exists()
+        else:
+            assert not root.exists() and result["note"] == "已全部删除"

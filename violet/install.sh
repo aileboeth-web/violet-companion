@@ -133,6 +133,20 @@ PY
   fi
   [ -n "$PY" ] || die "没有找到 Python 3.11 或更新版本（带 venv）。请用 root 运行（会自动安装），或先安装：apt install python3.11 python3.11-venv"
 
+  # openssl: the self-signed HTTPS certificate of a public install (Debian minimal may not have it)
+  if is_root && ! command -v openssl >/dev/null 2>&1 && [ "${VIOLET_NO_SYSTEM_PACKAGES:-0}" != "1" ]; then
+    say "== 安装 openssl（生成 HTTPS 证书用）"
+    if command -v apt-get >/dev/null 2>&1; then
+      DEBIAN_FRONTEND=noninteractive apt-get install -y openssl </dev/null >&2 || \
+        { DEBIAN_FRONTEND=noninteractive apt-get update -y </dev/null >&2 && \
+          DEBIAN_FRONTEND=noninteractive apt-get install -y openssl </dev/null >&2; } || true
+    elif command -v dnf >/dev/null 2>&1; then dnf install -y openssl </dev/null >&2 || true
+    elif command -v yum >/dev/null 2>&1; then yum install -y openssl </dev/null >&2 || true
+    elif command -v apk >/dev/null 2>&1; then apk add --no-cache openssl </dev/null >&2 || true
+    elif command -v zypper >/dev/null 2>&1; then zypper --non-interactive install openssl </dev/null >&2 || true
+    fi
+  fi
+
   # the program: next to this script, else the release archive from the same address
   local here=""
   if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
