@@ -2,7 +2,7 @@
 
 Violet 是一个自己部署的 AI 陪伴：一个有稳定性格、会慢慢熟起来的虚构女孩。你可以在微信（ClawBot）、QQ 或 Telegram 上和她聊天，她会记住你说过的事，有自己平淡的日常，也会在合适的时候主动找你。所有设置都在网页后台里完成。
 
-> 灵感来源：[Lynnette177/Project-Eve](https://github.com/Lynnette177/Project-Eve)（作者 [@Lynnette177](https://github.com/Lynnette177)）。Violet 在它的基础上重写和扩展了大部分功能，已经是一个独立的项目。感谢原作者的创意和同意。
+> 灵感来源：[Lynnette177/Project-Eve](https://github.com/Lynnette177/Project-Eve)（作者 [Lynnette177](https://github.com/Lynnette177)）。Violet 在它的基础上重写和扩展了大部分功能，已经是一个独立的项目。感谢原作者的创意。
 
 ## 她能做什么
 
