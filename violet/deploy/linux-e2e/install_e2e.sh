@@ -81,6 +81,7 @@ cp -r "$PROJECT" "$BROKEN"
 echo 'raise SystemExit("broken build")' > "$BROKEN/main.py"
 echo "9.9.9-broken" > "$BROKEN/VERSION"
 if bash "$BROKEN/install.sh" upgrade --root "$ROOT" --health-timeout 20 --json >/dev/null; then fail "broken upgrade reported success"; fi
+for _ in $(seq 1 30); do curl -fsS "http://127.0.0.1:$PORT/healthz" 2>/dev/null | grep -q violet && break; sleep 1; done
 curl -fsS "http://127.0.0.1:$PORT/healthz" | grep -q violet || fail "old version not back after the failed upgrade"
 pass "broken upgrade rolled back automatically"
 

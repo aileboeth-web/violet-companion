@@ -1075,22 +1075,34 @@ def upgrade(opts: Options) -> dict[str, Any]:
             Service(layout, "systemd", state["user"]).register()  # the unit of the new version
         if state.get("service") != "none":
             service.start()
-            scheme = "https" if parse_env(layout.env_file.read_text(encoding="utf-8")).get("VIOLET_DASHBOARD_TLS_CERT") else "http"
-            if not wait_healthy(state["port"], "127.0.0.1", opts.health_timeout, scheme):
+            if not wait_healthy(state["port"], "127.0.0.1", opts.health_timeout, _scheme(layout)):
                 raise InstallError("新版本启动后健康检查没有通过")
     except Exception as exc:
         opts.log(f"  升级失败（{exc}），恢复旧版本…")
         if state.get("service") != "none":
             service.stop()
         _rollback_program(layout)
+        running = ""
         if state.get("service") != "none":
             service.start()
-        raise InstallError(f"升级失败，已恢复到 {old_version}。数据备份：{archive}。原因：{exc}") from None
+            # say whether the old version is really answering again, not only that its files are back
+            running = ("，旧版本已重新运行" if wait_healthy(state["port"], "127.0.0.1", opts.health_timeout, _scheme(layout))
+                       else "，但旧版本启动后健康检查没有通过，请运行 status 查看")
+        raise InstallError(f"升级失败，已恢复到 {old_version}{running}。数据备份：{archive}。原因：{exc}") from None
     state.update(version=source_version(opts.source), previous_version=old_version, updated_at=int(time.time()),
                  last_backup=str(archive))
     save_state(layout, state)
     write_cli(layout)
     return {"ok": True, "from": old_version, "to": state["version"], "backup": str(archive)}
+
+
+def _scheme(layout: Layout) -> str:
+    """https when the installed configuration serves the dashboard with its own certificate."""
+    try:
+        env = parse_env(layout.env_file.read_text(encoding="utf-8"))
+    except OSError:
+        return "http"
+    return "https" if env.get("VIOLET_DASHBOARD_TLS_CERT") else "http"
 
 
 def _rollback_program(layout: Layout) -> None:
@@ -1125,12 +1137,15 @@ def rollback(opts: Options) -> dict[str, Any]:
     if state.get("service") != "none":
         service.stop()
     _rollback_program(layout)
+    healthy = None
     if state.get("service") != "none":
         service.start()
+        healthy = wait_healthy(state["port"], "127.0.0.1", opts.health_timeout, _scheme(layout)) if state.get("port") \
+            else None
     state.update(version=source_version(layout.app), previous_version=None, updated_at=int(time.time()))
     save_state(layout, state)
-    return {"ok": True, "version": state["version"], "note": "数据没有回滚；需要时用 restore 恢复升级前的备份",
-            "backup": state.get("last_backup")}
+    return {"ok": healthy is not False, "version": state["version"], "healthy": healthy,
+            "note": "数据没有回滚；需要时用 restore 恢复升级前的备份", "backup": state.get("last_backup")}
 
 
 def status(opts: Options) -> dict[str, Any]:
