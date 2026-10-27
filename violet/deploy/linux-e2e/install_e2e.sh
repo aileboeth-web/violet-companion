@@ -34,7 +34,8 @@ sleep 1
 pass "release built and served"
 
 # 2. the one command
-OUT="$(curl -fsSL "http://127.0.0.1:$PORT_HTTP/install.sh" | bash -s -- --root "$ROOT" --service "$SERVICE" --json)" || fail "install command"
+OUT="$(curl -fsSL "http://127.0.0.1:$PORT_HTTP/install.sh" | bash -s -- --root "$ROOT" --service "$SERVICE" --json)" || {
+  printf '%s\n' "$OUT"; tail -n 40 "$ROOT/logs/main.log" 2>/dev/null || true; fail "install command"; }
 echo "$OUT" | json 'd["core_ok"]' | grep -q True || fail "core service not healthy"
 PORT="$(echo "$OUT" | json 'd["port"]')"
 PASSWORD="$(echo "$OUT" | json 'd["admin"]["password"]')"
