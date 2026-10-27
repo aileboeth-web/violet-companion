@@ -1,0 +1,35 @@
+{
+  "_comment": "WebExplorer（第五阶段 B）：Violet 按自己已确认的长期兴趣低频联网看看。默认关闭：需要 VIOLET_WEB_EXPLORER=1（部署授权）并在 Dashboard 打开开关。查询词只来自这里，绝不使用用户聊天、住址、设备等信息。",
+  "run_after_hour": 20,
+  "max_runs_per_day": 1,
+  "max_searches_per_run": 1,
+  "max_fetches_per_run": 1,
+  "max_new_findings_per_run": 1,
+  "max_searches_per_day": 2,
+  "max_fetches_per_day": 2,
+  "freshness_days": 30,
+  "query_cooldown_days": 7,
+  "reading_record": {"enabled": true, "probability": 0.5, "max_per_week": 1},
+  "cost": {"search_cost_per_request": 0.0, "llm_cost_per_1k_tokens": 0.0, "max_cost_per_day": 0.2},
+  "llm_select": {
+    "_comment": "可选：让模型从候选里挑一条或都不挑。默认关闭（直接取第一条合格结果）。模型名 VIOLET_WEB_EXPLORER_LLM_MODEL。",
+    "enabled": false,
+    "max_calls_per_day": 1,
+    "max_tokens_per_day": 2000,
+    "max_output_tokens": 150,
+    "timeout_seconds": 20
+  },
+  "sharing": {
+    "_comment": "探索结果只作为主动候选：必须新鲜、与用户已知兴趣相关、没分享过、没被冷落；大多数时候不发是正常的。",
+    "enabled": true,
+    "max_candidates": 1,
+    "freshness_days": 14,
+    "min_days_between_shares": 3,
+    "cooling_after_disengaged_shares": 2
+  },
+  "topics": {
+    "reading": {"label": "新书和书评", "queries": ["小说 新书 书评", "文学 书评 推荐", "短篇小说集 评论"]},
+    "music": {"label": "新专辑和乐评", "queries": ["独立音乐 新专辑 乐评", "钢琴 专辑 推荐", "爵士 专辑 乐评"]},
+    "culture": {"label": "公开文化资讯", "queries": ["图书馆 读书 活动", "书店 文化 活动"], "explicitly_allowed": true}
+  }
+}

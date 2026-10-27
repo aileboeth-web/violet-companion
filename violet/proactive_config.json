@@ -1,0 +1,48 @@
+{
+  "enabled": true,
+  "check_interval_seconds": 60,
+  "quiet_hours": {
+    "start": "01:00",
+    "end": "08:00"
+  },
+  "daily_message_limit": 3,
+  "min_minutes_after_user_message": 90,
+  "min_minutes_between_proactive_messages": 180,
+  "random_delay_minutes": {
+    "morning": [
+      45,
+      120
+    ],
+    "noon": [
+      45,
+      120
+    ],
+    "afternoon": [
+      60,
+      150
+    ],
+    "evening": [
+      30,
+      90
+    ],
+    "night": [
+      90,
+      180
+    ],
+    "other": [
+      60,
+      150
+    ]
+  },
+  "unanswered_backoff_factor": 2.0,
+  "max_backoff_multiplier": 8,
+  "max_cold_streak": 2,
+  "fixed_task_min_gap_minutes": 30,
+  "commitments": {
+    "enabled": true,
+    "respect_quiet_hours": true,
+    "max_attempts": 3,
+    "retry_minutes": 5
+  },
+  "allowed_tasks": {}
+}

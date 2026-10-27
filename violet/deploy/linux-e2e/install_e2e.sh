@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Linux acceptance of the one-command install (phase 10.7). Run as root on a FRESH, disposable Linux machine / VM /
+# CI runner -- never on a server with a real Violet. It serves a release built from this checkout on 127.0.0.1, runs the
+# exact user command (curl ... | sudo bash) and checks every promise of INSTALL.md:
+#
+#   bash "violet/deploy/linux-e2e/install_e2e.sh"                   # systemd if present, else the supervisor
+#   VIOLET_E2E_SERVICE=supervisor bash .../install_e2e.sh                   # containers without systemd
+#
+# Prints PASS / FAIL per check and exits non-zero on the first failure. Needs: bash, curl, internet access to PyPI
+# (the installer installs the requirements), python3 only for building the release (the install itself must find or
+# install Python on its own: the build uses a separate interpreter path, the install starts from a clean PATH lookup).
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT="$(cd "$HERE/../.." && pwd)"
+ROOT="${VIOLET_E2E_ROOT:-/opt/violet}"
+SERVICE="${VIOLET_E2E_SERVICE:-auto}"
+WORK="$(mktemp -d)"
+PORT_HTTP=18765
+trap 'kill "${HTTP_PID:-0}" 2>/dev/null || true; rm -rf "$WORK"' EXIT
+
+pass() { printf 'PASS %s\n' "$*"; }
+fail() { printf 'FAIL %s\n' "$*"; exit 1; }
+json() { python3 -c "import json,sys; d=json.loads(sys.stdin.read().strip().splitlines()[-1]); print($1)"; }
+
+[ "$(id -u)" = "0" ] || fail "run as root (on a disposable machine)"
+[ ! -e "$ROOT/install.json" ] || fail "$ROOT already has an Violet installation -- use a fresh machine"
+
+# 1. release served locally (exactly what would be uploaded)
+python3 "$PROJECT/tools/make_release.py" --base "http://127.0.0.1:$PORT_HTTP" --out "$WORK/dist" --worktree >/dev/null
+( cd "$WORK/dist" && exec python3 -m http.server "$PORT_HTTP" --bind 127.0.0.1 >/dev/null 2>&1 ) &
+HTTP_PID=$!
+sleep 1
+pass "release built and served"
+
+# 2. the one command
+OUT="$(curl -fsSL "http://127.0.0.1:$PORT_HTTP/install.sh" | bash -s -- --root "$ROOT" --service "$SERVICE" --json)" || fail "install command"
+echo "$OUT" | json 'd["core_ok"]' | grep -q True || fail "core service not healthy"
+PORT="$(echo "$OUT" | json 'd["port"]')"
+PASSWORD="$(echo "$OUT" | json 'd["admin"]["password"]')"
+[ ${#PASSWORD} -eq 20 ] || fail "initial password"
+echo "$OUT" | json '[l["state"] for l in d["network"] if l["layer"]=="public"][0]' | grep -qv '^ok$' || fail "public must not be claimed"
+pass "installed on port $PORT, initial password shown once, public access not claimed"
+
+# 3. service manager
+MODE="$(python3 -c "import json;print(json.load(open('$ROOT/install.json'))['service'])")"
+if [ "$MODE" = "systemd" ]; then
+  systemctl is-active --quiet violet || fail "systemd unit not active"
+  systemctl is-enabled --quiet violet || fail "systemd unit not enabled at boot"
+  MAINPID="$(systemctl show -p MainPID --value violet)"
+  kill -9 "$MAINPID"
+  for _ in $(seq 1 30); do curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1 && break; sleep 1; done
+  [ "$(systemctl show -p MainPID --value violet)" != "$MAINPID" ] || fail "not restarted after a crash"
+  pass "systemd: active, enabled, restarted after kill -9"
+else
+  pass "service mode: $MODE"
+fi
+curl -fsS "http://127.0.0.1:$PORT/healthz" | grep -q violet || fail "healthz"
+
+# 4. dashboard: initial password must be changed first
+JAR="$WORK/jar"
+CODE="$(curl -s -o /dev/null -w '%{http_code}' -c "$JAR" -H "Origin: http://127.0.0.1:$PORT" \
+        --data-urlencode "password=$PASSWORD" "http://127.0.0.1:$PORT/auth/login")"
+[ "$CODE" = "302" ] || fail "login with the initial password ($CODE)"
+CODE="$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -H 'Accept: application/json' "http://127.0.0.1:$PORT/api/control/setup")"
+[ "$CODE" = "403" ] || fail "setup reachable before the password change ($CODE)"
+pass "dashboard login; everything locked until the password is changed"
+
+# 5. repair keeps port and password; backup; status
+OUT2="$(curl -fsSL "http://127.0.0.1:$PORT_HTTP/install.sh" | bash -s -- --root "$ROOT" --json)" || fail "repair"
+[ "$(echo "$OUT2" | json 'd["port"]')" = "$PORT" ] || fail "repair changed the port"
+echo "$OUT2" | json 'd["admin"]["created"]' | grep -q False || fail "repair replaced the password"
+"$ROOT/violet" backup --json | json 'd["databases_checked"]' | grep -qv '^0$' || fail "backup"
+"$ROOT/violet" status --json | json 'd["service_state"]' | grep -q active || fail "status"
+pass "repair kept port and password; backup verified; status active"
+
+# 6. a broken upgrade rolls back by itself
+BROKEN="$WORK/broken"
+cp -r "$PROJECT" "$BROKEN"
+echo 'raise SystemExit("broken build")' > "$BROKEN/main.py"
+echo "9.9.9-broken" > "$BROKEN/VERSION"
+if bash "$BROKEN/install.sh" upgrade --root "$ROOT" --health-timeout 20 --json >/dev/null; then fail "broken upgrade reported success"; fi
+curl -fsS "http://127.0.0.1:$PORT/healthz" | grep -q violet || fail "old version not back after the failed upgrade"
+pass "broken upgrade rolled back automatically"
+
+# 7. uninstall keeps data, purge removes everything
+"$ROOT/violet" uninstall --json >/dev/null || fail "uninstall"
+[ -f "$ROOT/data/violet.db" ] || fail "uninstall removed the data"
+! curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1 || fail "still running after uninstall"
+[ "$MODE" != "systemd" ] || [ ! -e /etc/systemd/system/violet.service ] || fail "unit file left behind"
+python3 "$PROJECT/tools/violet_installer.py" uninstall --root "$ROOT" --purge --yes --json >/dev/null 2>&1 || true
+pass "uninstall kept data; purge cleaned up"
+echo "ALL PASSED"

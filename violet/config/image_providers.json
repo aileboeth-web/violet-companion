@@ -1,0 +1,119 @@
+{
+  "_comment": [
+    "Image provider registry (phase 6). One provider can list several models; entry id = provider_id/model_id.",
+    "Capabilities: verified | declared | unsupported. Only 'verified' ones are used by normal business calls.",
+    "A capability becomes verified by a passed dashboard check (POST /api/images/models/<entry>/verify/<capability>,",
+    "a real, possibly paid call, recorded in image_capability_checks for this exact configuration) or by editing it",
+    "here with a note in status_note saying how it was verified.",
+    "Keys: api_key_env names an environment variable; never put a key in this file (an entry with one is refused).",
+    "Pricing: without pricing.confirmed=true (or free=true) a model may only be called",
+    "pricing.unpriced_max_calls_per_day times (default 0 = never).",
+    "Nothing below has been checked against a real API yet: every real model is disabled and only 'declared'."
+  ],
+  "version": 1,
+  "budgets": {
+    "global": {"max_images_per_day": 20, "max_cost_per_day": 2.0, "currency": "USD"}
+  },
+  "providers": [
+    {
+      "provider_id": "mock",
+      "adapter_type": "mock",
+      "enabled": true,
+      "timeout": 5,
+      "models": [
+        {
+          "model_id": "mock-image-1",
+          "enabled": false,
+          "status_note": "Offline fake for development and tests only: never enable in production (it would send placeholder pictures).",
+          "capabilities": {"vision": "verified", "image_generation": "verified", "image_edit": "verified",
+                           "image_variation": "verified", "multiple_output_images": "verified", "return_base64": "verified"},
+          "limits": {"max_outputs": 4, "max_input_images": 4, "max_concurrency": 2},
+          "pricing": {"free": true},
+          "priority": 1000
+        }
+      ]
+    },
+    {
+      "provider_id": "sub2api",
+      "adapter_type": "openai_images",
+      "base_url": "http://127.0.0.1:666/v1",
+      "api_key_env": "LLM_API_KEY",
+      "enabled": true,
+      "timeout": 120,
+      "retry_policy": {"max_attempts": 2, "backoff_seconds": 3, "circuit_failures": 3, "circuit_seconds": 600},
+      "models": [
+        {
+          "model_id": "gpt-image-1",
+          "enabled": false,
+          "status_note": "Declared from the OpenAI Images API documentation; relay pass-through, sizes and price NOT verified.",
+          "capabilities": {"image_generation": "declared", "image_edit": "declared", "multiple_input_images": "declared",
+                           "multiple_output_images": "declared", "transparent_background": "declared",
+                           "return_base64": "declared"},
+          "limits": {"sizes": ["1024x1024", "1024x1536", "1536x1024"], "aspect_ratios": ["1:1", "2:3", "3:2"],
+                     "qualities": ["low", "medium", "high"], "max_outputs": 4, "max_input_images": 4,
+                     "input_formats": ["image/png", "image/jpeg", "image/webp"], "max_input_bytes": 25000000,
+                     "max_concurrency": 1, "max_images_per_day": 10},
+          "pricing": {"confirmed": false, "unpriced_max_calls_per_day": 0},
+          "priority": 10,
+          "fallback_candidates": []
+        },
+        {
+          "model_id": "6luna-image",
+          "enabled": false,
+          "adapter_type": "chat_completions",
+          "status_note": "6luna through sub2api. Protocol (images API vs chat completions returning images), model name, response shape and price are NOT confirmed; adapter choice is a placeholder until a test call.",
+          "capabilities": {"image_generation": "declared", "image_edit": "declared", "reference_images": "declared",
+                           "vision": "declared"},
+          "limits": {"max_outputs": 1, "max_input_images": 2, "max_concurrency": 1, "max_images_per_day": 10},
+          "pricing": {"confirmed": false, "unpriced_max_calls_per_day": 0},
+          "priority": 5,
+          "fallback_candidates": ["sub2api/gpt-image-1"]
+        },
+        {
+          "model_id": "vision",
+          "enabled": false,
+          "adapter_type": "chat_completions",
+          "status_note": "The alias used by the legacy ai/vision.py; whether it maps to a vision model upstream is NOT verified.",
+          "capabilities": {"vision": "declared"},
+          "limits": {"max_input_images": 1, "input_formats": ["image/png", "image/jpeg", "image/webp", "image/gif"],
+                     "max_input_bytes": 10000000, "max_concurrency": 2},
+          "options": {"max_tokens": 500},
+          "pricing": {"confirmed": false, "unpriced_max_calls_per_day": 0},
+          "priority": 10
+        }
+      ]
+    },
+    {
+      "provider_id": "gemini",
+      "adapter_type": "gemini_native",
+      "base_url": "https://generativelanguage.googleapis.com",
+      "api_key_env": "GEMINI_API_KEY",
+      "enabled": false,
+      "models": [
+        {
+          "model_id": "gemini-image",
+          "enabled": false,
+          "status_note": "Native protocol adapter not implemented: request/response format must be confirmed from official docs first.",
+          "capabilities": {"vision": "declared", "image_generation": "declared", "image_edit": "declared"},
+          "pricing": {"confirmed": false}
+        }
+      ]
+    },
+    {
+      "provider_id": "zhipu",
+      "adapter_type": "zhipu_native",
+      "base_url": "https://open.bigmodel.cn",
+      "api_key_env": "ZHIPU_API_KEY",
+      "enabled": false,
+      "models": [
+        {
+          "model_id": "cogview",
+          "enabled": false,
+          "status_note": "Native protocol adapter not implemented: request/response format must be confirmed from official docs first.",
+          "capabilities": {"image_generation": "declared"},
+          "pricing": {"confirmed": false}
+        }
+      ]
+    }
+  ]
+}

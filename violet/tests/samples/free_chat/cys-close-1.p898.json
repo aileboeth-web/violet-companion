@@ -1,0 +1,105 @@
+{
+ "source": "local/free_chat/cys-close-1 (real model cys, user-run 2026-10-21; fictional user 小满)",
+ "source_sha256": {
+  "events.jsonl": "0b4205ec7404793d335039413f8f2124158eb1dc3f09d5362943855a658586df",
+  "requests.jsonl": "ba69812cb414103edc80beab1e9871635afc6a214fddb9cd45e84b962924442c",
+  "session.json": "77785dd13106df31b5571c030471046e3a37d667aefa84933f6d34295983407f"
+ },
+ "seed_episode": "A4",
+ "scenario_start": "2026-11-06T20:30:00+08:00",
+ "steps": [
+  {
+   "user": "在干什么呢",
+   "intent": "{\n  \"route\": \"chat\",\n  \"should_reply\": true,\n  \"user_intent\": \"用户在随口问候、想和 Eve 闲聊互动\",\n  \"emotion\": \"轻松、亲近\",\n  \"silent_reason\": null,\n  \"active_task_id\": null,\n  \"task\": {\n    \"exists\": false,\n    \"name\": null,\n    \"description\": null\n  }\n}",
+   "chat": "窝在沙发上发呆呢，没做什么\n\n你这两天怎么样呀",
+   "sent": [
+    "窝在沙发上发呆呢，没做什么",
+    "你这两天怎么样呀"
+   ]
+  },
+  {
+   "user": "嗯~有点累课太多了",
+   "intent": "{\n  \"route\": \"chat\",\n  \"should_reply\": true,\n  \"user_intent\": \"用户在倾诉课太多很累，希望被关心和陪伴\",\n  \"emotion\": \"疲惫、有点委屈，带撒娇\",\n  \"silent_reason\": null,\n  \"active_task_id\": null,\n  \"task\": {\n    \"exists\": false,\n    \"name\": null,\n    \"description\": null\n  }\n}",
+   "chat": "课多是真的熬人\n\n有没有哪门能偷偷打个盹哈哈",
+   "sent": [
+    "课多是真的熬人",
+    "有没有哪门能偷偷打个盹哈哈"
+   ]
+  },
+  {
+   "user": "嘻嘻，你怎么知道我又偷偷摸鱼",
+   "intent": "{\n  \"route\": \"chat\",\n  \"should_reply\": true,\n  \"user_intent\": \"用户在轻松调侃自己上课偷偷摸鱼，想和 Eve 继续闲聊互动\",\n  \"emotion\": \"轻松、调皮、开心\",\n  \"silent_reason\": null,\n  \"active_task_id\": null,\n  \"task\": {\n    \"exists\": false,\n    \"name\": null,\n    \"description\": null\n  }\n}",
+   "chat": "猜的呀，课多成这样，不摸鱼怎么活\n\n今天摸的哪门课",
+   "sent": [
+    "猜的呀，课多成这样，不摸鱼怎么活",
+    "今天摸的哪门课"
+   ]
+  },
+  {
+   "user": "挺多的吧",
+   "intent": "{\n  \"route\": \"chat\",\n  \"should_reply\": true,\n  \"user_intent\": \"用户在回答 Eve 的提问，表示摸鱼的课挺多的，继续闲聊\",\n  \"emotion\": \"轻松、俏皮\",\n  \"silent_reason\": null,\n  \"active_task_id\": null,\n  \"task\": {\n    \"exists\": false,\n    \"name\": null,\n    \"description\": null\n  }\n}",
+   "chat": "那不奇怪，课这么满，谁扛得住呀\n\n累了就摸摸鱼，正常的",
+   "sent": [
+    "那不奇怪，课这么满，谁扛得住呀",
+    "累了就摸摸鱼，正常的"
+   ]
+  },
+  {
+   "advance": 3.0
+  },
+  {
+   "user": "看你兴趣喽，你喜欢看有画面感的书吗",
+   "intent": "{\n  \"route\": \"chat\",\n  \"should_reply\": true,\n  \"user_intent\": \"用户在回应 Eve 挑书的话题，反问 Eve 的兴趣并询问是否喜欢有画面感的书\",\n  \"emotion\": \"轻松、好奇\",\n  \"silent_reason\": null,\n  \"active_task_id\": null,\n  \"task\": {\n    \"exists\": false,\n    \"name\": null,\n    \"description\": null\n  }\n}",
+   "chat": "喜欢呀，画面感强的容易看进去，脑子不费劲\n\n不过我每次站在书架前都会纠结好久，最后拿的还是眼熟的那几本\n\n你平时看书吗",
+   "sent": [
+    "喜欢呀，画面感强的容易看进去，脑子不费劲",
+    "不过我每次站在书架前都会纠结好久，最后拿的还是眼熟的那几本",
+    "你平时看书吗"
+   ]
+  },
+  {
+   "user": "我平时会看看小说啊",
+   "intent": "{\n  \"route\": \"chat\",\n  \"should_reply\": true,\n  \"user_intent\": \"用户在回应 Eve 的提问，分享自己平时看小说的阅读习惯\",\n  \"emotion\": \"轻松、随意\",\n  \"silent_reason\": null,\n  \"active_task_id\": null,\n  \"task\": {\n    \"exists\": false,\n    \"name\": null,\n    \"description\": null\n  }\n}",
+   "chat": "小说好呀，我也在慢慢看《小王子》，刚开头，还没完全看进去\n\n你是喜欢看哪种类型的",
+   "sent": [
+    "小说好呀，我也在慢慢看《小王子》，刚开头，还没完全看进去",
+    "你是喜欢看哪种类型的"
+   ]
+  },
+  {
+   "user": "额，喜欢看轻松搞笑类的吧",
+   "intent": "{\n  \"route\": \"chat\",\n  \"should_reply\": true,\n  \"user_intent\": \"用户在回答 Eve 的问题，说自己喜欢看轻松搞笑类的小说\",\n  \"emotion\": \"轻松、随意\",\n  \"silent_reason\": null,\n  \"active_task_id\": null,\n  \"task\": {\n    \"exists\": false,\n    \"name\": null,\n    \"description\": null\n  }\n}",
+   "chat": "轻松搞笑的挺好，累的时候看正好不费脑子\n\n有推荐吗",
+   "sent": [
+    "轻松搞笑的挺好，累的时候看正好不费脑子",
+    "有推荐吗"
+   ]
+  },
+  {
+   "user": "没有哦，我也在找呢",
+   "intent": "{\"route\":\"chat\",\"should_reply\":true,\"user_intent\":\"用户回应没有小说推荐，表示自己也在找轻松搞笑类的小说\",\"emotion\":\"轻松、随意\",\"silent_reason\":null,\"active_task_id\":null,\"task\":{\"exists\":false,\"name\":null,\"description\":null}}",
+   "chat": "那正好，周末一起找吧\n\n我去书店的时候拍封面给你，你看哪个顺眼就一起看",
+   "sent": [
+    "那正好，周末一起找吧",
+    "我去书店的时候拍封面给你，你看哪个顺眼就一起看"
+   ]
+  },
+  {
+   "advance": 24.0
+  }
+ ],
+ "proactive": [
+  {
+   "decision": "{\"should_act\": true, \"action_type\": \"chat\", \"reason\": \"晚上适合轻轻找对方聊天，用 Eve 自己的小心事（想去书店挑书）自然地请他出个主意\", \"topic_key\": \"bookshop_pick\", \"mentioned_memory_ids\": [], \"mentioned_life_event_ids\": [], \"mentioned_web_finding_ids\": [], \"chat_brief\": {\"tone\": \"亲密、软、短句，带一点撒娇和犹豫，像随手发微信\", \"topic\": \"说自己周末想去书店挑一本新书，纠结挑什么类型，请对方帮她出个主意\", \"time_bucket\": \"evening\", \"must_not_say\": [\"任务不可用\", \"系统限制\", \"MCP\", \"要不要我帮你查\", \"课程太多很累吧（不追问白天的累）\"]}, \"task\": null}",
+   "chat": "周末想去书店挑本新书，躺床上想了半天也没定下来看什么类型\n\n你帮我拿个主意嘛"
+  },
+  {
+   "decision": "{\"should_act\": true, \"action_type\": \"chat\", \"reason\": \"隔了约 8 小时没聊，Eve 有点想对方，也正好可以接着聊周末去书店的事；两项任务都不可用，于是退化为普通的亲密问候\", \"topic_key\": \"bookstore\", \"mentioned_memory_ids\": [], \"mentioned_life_event_ids\": [], \"mentioned_web_finding_ids\": [], \"chat_brief\": {\"tone\": \"亲密、自然、短句，像刚醒来的微信语气，有点黏人但不埋怨对方没来找\", \"topic\": \"早上软软地叫对方一声，说昨晚想到书店的事还没定下来，有点想他，问要不要今天一起去逛或者等他挑封面给她选\", \"time_bucket\": \"morning\", \"must_not_say\": [\"任务不可用\", \"系统限制\", \"MCP\", \"要不要我帮你查询\", \"为什么不回我\", \"我帮你下单\"]}, \"task\": null}",
+   "chat": "早呀\n\n早上醒来就在想书店的事，一直没定下来到底去不去\n\n你要是有空，一起去逛逛吧"
+  },
+  {
+   "decision": "{\"should_act\": true, \"action_type\": \"chat\", \"reason\": \"中午时段，早上那条没得到回应，不再重复书店话题，换成轻松的日常关心\", \"topic_key\": \"daily_checkin\", \"mentioned_memory_ids\": [], \"mentioned_life_event_ids\": [], \"mentioned_web_finding_ids\": [], \"chat_brief\": {\"tone\": \"亲密、软软的、短句，不追问、不施压\", \"topic\": \"中午了，轻轻问一句下课没、吃饭没，可以顺带说说自己也在犯懒没想好吃什么，语气轻松\", \"time_bucket\": \"noon\", \"must_not_say\": [\"你怎么不回我\", \"为什么不理我\", \"书店的事你还没回答\", \"任务不可用\", \"系统限制\", \"要不要我帮你查\"]}, \"task\": {\"name\": null, \"description\": \"\", \"task_info\": {}, \"constraints\": {}}}",
+   "chat": "中午了，下课了没呀\n\n我在纠结吃什么，想了半天都没挑好"
+  }
+ ]
+}

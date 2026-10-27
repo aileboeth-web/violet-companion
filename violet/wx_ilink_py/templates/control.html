@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Violet Control Center</title>
+  <link rel="stylesheet" href="/static/control.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">Violet Control Center</div>
+  <nav class="tabs" id="tabs">
+    <button data-tab="setup">开始</button>
+    <button data-tab="overview" class="active">概览</button>
+    <button data-tab="diagnostics">诊断</button>
+    <button data-tab="chat">聊天记录</button>
+    <button data-tab="memories">记忆</button>
+    <button data-tab="settings">设置</button>
+    <button data-tab="channels">渠道</button>
+    <button data-tab="tools">工具</button>
+    <button data-tab="schedule">课表</button>
+    <button data-tab="history">修改记录</button>
+    <button data-tab="account">账号安全</button>
+  </nav>
+  <div class="links"><a href="/">旧版面板</a><a href="/persona">人设与生活</a></div>
+</header>
+<main>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <section id="tab-setup" class="tab">
+    <h2>初始化向导</h2>
+    <p class="note" id="setup-summary"></p>
+    <div id="setup-list" class="cards list"></div>
+    <h3>1. 模型服务</h3>
+    <p class="note">填写 OpenAI 兼容接口的地址和 API Key。保存后会用当前的 Chat 模型真实调用一次（很短的请求），只记录成功与否、耗时和错误类型。</p>
+    <form id="setup-api" class="stack" autocomplete="off">
+      <label>API 地址 <input id="setup-url" maxlength="300" placeholder="https://api.example.com/v1" autocomplete="off"></label>
+      <label>API Key <input id="setup-key" type="password" maxlength="512" autocomplete="new-password"></label>
+      <p class="err" id="setup-api-error"></p>
+      <div class="row"><button type="submit">保存并测试</button><span id="setup-test"></span></div>
+    </form>
+    <h3>2. 各 Agent 的模型</h3>
+    <p class="note">每个 Agent 可以用不同的模型；不清楚的话先全部用同一个。温度、备用模型等在“设置”页调整。</p>
+    <div class="row"><input id="setup-all" list="setup-model-names" maxlength="120" placeholder="模型名，例如 gpt-4o-mini">
+      <button class="ghost" id="setup-same" type="button">全部用这个</button>
+      <button class="ghost" id="setup-list-models" type="button">从服务获取模型列表</button></div>
+    <datalist id="setup-model-names"></datalist>
+    <div id="setup-models" class="stack"></div>
+    <p class="err" id="setup-models-error"></p>
+    <div class="row"><button id="setup-models-save" type="button">保存并测试</button></div>
+    <h3>3. 聊天渠道、4. 管理员密码、其他</h3>
+    <p class="note">在上面的清单里点“去设置”。人设、用户档案、工具、主动消息和虚拟生活都可以以后再调。</p>
+  </section>
+
+  <section id="tab-diagnostics" class="tab">
+    <div class="row"><h2>诊断</h2><button class="ghost" id="diag-refresh">刷新</button>
+      <button class="ghost" id="diag-deep">完整检查（含数据库）</button><button class="ghost" id="diag-net">检查外部网络</button></div>
+    <p class="note" id="diag-summary"></p>
+    <div id="diag-list" class="cards list"></div>
+    <p class="note">每条问题写明原因和建议；带按钮的是可以安全自动修复的。“轮次”是关联 ID：日志里同一轮的每一行都带着它（[turn …]）。最近一小时的模型 / 工具记录在内存里，重启后重新开始。</p>
+  </section>
+
+  <section id="tab-overview" class="tab active">
+    <div class="row"><h2>运行状态</h2><button class="ghost" id="ov-refresh">刷新</button></div>
+    <div id="ov-cards" class="cards"></div>
+    <h3>各 Agent 当前模型</h3>
+    <div class="table-wrap"><table id="ov-agents"></table></div>
+    <h3>最近的错误（只显示类型和时间，不显示内容）</h3>
+    <div class="table-wrap"><table id="ov-errors"></table></div>
+    <p class="note" id="ov-note"></p>
+  </section>
+
+  <section id="tab-chat" class="tab">
+    <div class="filters">
+      <label>日期 <select id="chat-day"><option value="">全部</option></select></label>
+      <label>谁说的 <select id="chat-role"><option value="">全部</option><option value="user">对方</option><option value="assistant">Violet</option></select></label>
+      <label class="grow">搜索 <input id="chat-q" type="search" maxlength="100" placeholder="消息里的文字"></label>
+      <button id="chat-search">查询</button>
+    </div>
+    <div class="legend"><span class="tag user">对方</span><span class="tag violet">Violet 回复</span><span class="tag proactive">Violet 主动</span><span class="tag reminder">提醒</span><span class="tag system">系统</span></div>
+    <div id="chat-list" class="timeline"></div>
+    <button id="chat-more" class="ghost wide" hidden>更早的消息</button>
+    <details class="export"><summary>导出聊天记录（JSON，只含文字和时间）</summary>
+      <div class="filters"><label>从 <input id="exp-from" type="date"></label><label>到 <input id="exp-to" type="date"></label>
+        <button id="exp-go">导出</button></div>
+      <p class="note">导出文件里有完整的聊天内容，请妥善保存。聊天记录在后台只能查看，不能修改或删除。</p>
+    </details>
+  </section>
+
+  <section id="tab-memories" class="tab">
+    <div class="filters">
+      <label>类型 <select id="mem-kind"><option value="event">事件记忆</option><option value="core">核心记忆</option></select></label>
+      <label>状态 <select id="mem-status"><option value="">全部</option></select></label>
+      <label class="grow">搜索 <input id="mem-q" type="search" maxlength="100" placeholder="记忆内容"></label>
+      <button id="mem-search">查询</button>
+    </div>
+    <p class="note" id="mem-total"></p>
+    <div id="mem-list" class="cards list"></div>
+    <div class="pager"><button class="ghost" id="mem-prev">上一页</button><button class="ghost" id="mem-next">下一页</button></div>
+  </section>
+
+  <section id="tab-settings" class="tab">
+    <p class="note">只列出代码里真正会读取的设置。“立即生效”保存后马上用于新的请求；“重启后生效”需要重启 Violet。保存前会整体检查，有任何一项不合格就一项也不改。</p>
+    <div id="set-groups"></div>
+    <div class="savebar"><input id="set-reason" maxlength="200" placeholder="修改原因（可选，会记在修改记录里）">
+      <button id="set-save" disabled>保存修改</button></div>
+    <h3>生活引擎</h3>
+    <div class="row"><span id="life-mode" class="pill"></span>
+      <button class="ghost" data-life="pause">暂停</button><button class="ghost" data-life="resume">恢复</button></div>
+  </section>
+
+  <section id="tab-channels" class="tab">
+    <p class="note">Violet 在哪些聊天平台上和你聊天。所有渠道共用同一个 Violet（同一份记忆、档案和人设）；只有绑定到你的账号发来的消息才会被处理，陌生人的消息不回复、不保存内容。
+      修改立即生效，不需要重启。凭据只能替换，不能查看。</p>
+    <div class="row"><label>主动消息发到 <select id="ch-proactive"></select></label>
+      <button class="ghost" id="ch-refresh">刷新状态</button></div>
+    <div id="ch-list" class="cards list"></div>
+    <h3>添加渠道</h3>
+    <form id="ch-add" class="stack" autocomplete="off">
+      <div class="filters">
+        <label>类型 <select id="ch-add-type"></select></label>
+        <label>标识 <input id="ch-add-id" maxlength="31" placeholder="例如 telegram" required></label>
+        <label class="grow">名称 <input id="ch-add-label" maxlength="30" placeholder="后台显示的名字（可选）"></label>
+      </div>
+      <p class="note" id="ch-add-help"></p>
+      <div id="ch-add-fields" class="stack"></div>
+      <p class="err" id="ch-add-error"></p>
+      <div class="row"><button type="submit">添加并启动</button></div>
+    </form>
+    <h3>绑定新账号</h3>
+    <p class="note">生成一次性绑定码（10 分钟有效），然后用你自己的账号给 Violet 发送“/bind 绑定码”。也可以在上面的联系人列表里直接批准。</p>
+    <div class="row"><select id="ch-pair-channel"></select><button class="ghost" id="ch-pair">生成绑定码</button>
+      <span class="pill" id="ch-pair-code"></span></div>
+    <h3>修改记录</h3>
+    <div id="ch-history" class="cards list"></div>
+  </section>
+
+  <section id="tab-tools" class="tab">
+    <p class="note">Violet 能用的外部工具（MCP）。只有连接成功、已启用、已分类并授权给 Agent 的工具才会告诉 Violet；修改立即生效，重启后仍然有效。
+      每个服务器下面写明了现在的问题和处理办法。凭据只能替换，不能查看。运行本地命令的（stdio）服务器只能在 .env 里配置。</p>
+    <div class="row"><button id="tools-refresh">检查全部连接</button><span class="note" id="tools-updated"></span></div>
+    <div id="tools-web" class="cards list"></div>
+    <div id="tools-list" class="cards list"></div>
+    <h3>添加 MCP 服务器</h3>
+    <form id="mcp-add" class="stack" autocomplete="off">
+      <div class="filters">
+        <label>名字 <input id="mcp-name" maxlength="31" placeholder="例如 phone" required></label>
+        <label class="grow">地址 <input id="mcp-url" maxlength="500" placeholder="https://example.com/mcp" required></label>
+        <label>传输 <select id="mcp-transport"><option value="streamable_http">Streamable HTTP</option><option value="sse">SSE</option></select></label>
+      </div>
+      <div class="filters">
+        <label>凭据请求头 <input id="mcp-header" maxlength="40" placeholder="Authorization"></label>
+        <label class="grow">凭据（可选，只能替换不能查看） <input id="mcp-header-value" type="password" maxlength="4096" autocomplete="new-password" placeholder="Bearer …"></label>
+      </div>
+      <div class="row"><span>授权给：</span>
+        <label class="check"><input type="checkbox" data-agent="chat" checked> Chat</label>
+        <label class="check"><input type="checkbox" data-agent="performer"> Performer</label>
+        <label class="check"><input type="checkbox" data-agent="proactive"> Proactive</label></div>
+      <p class="note">添加后会立即连接并列出工具。新工具默认都是“未分类（拒绝）”：请逐个选择只读 / 写入 / 高风险 / 拒绝；如果服务器的工具和已有模板一致，会提示一键套用。写入和高风险工具还要单独授权。</p>
+      <p class="err" id="mcp-add-error"></p>
+      <div class="row"><button type="submit">添加并检查</button></div>
+    </form>
+  </section>
+
+  <section id="tab-schedule" class="tab">
+    <p class="note" id="sch-banner"></p>
+    <div class="filters">
+      <label class="grow">学期 <select id="sch-term"></select></label>
+      <button id="sch-term-new" class="ghost">新建学期</button>
+      <button id="sch-term-edit" class="ghost">编辑学期</button>
+      <button id="sch-term-archive" class="ghost">归档</button>
+    </div>
+    <div id="sch-term-info" class="badges"></div>
+    <nav class="subtabs" id="sch-views">
+      <button data-view="week" class="active">周视图</button><button data-view="courses">课程</button>
+      <button data-view="periods">节次</button><button data-view="events">考试、假期、调课</button>
+      <button data-view="import">导入 / 导出</button><button data-view="history">修改历史</button>
+      <button data-view="delete">删除</button>
+    </nav>
+    <div class="sch-view active" id="sch-view-week">
+      <div class="row weekbar"><button class="ghost" id="sch-prev">‹ 上一周</button>
+        <select id="sch-week" aria-label="教学周"></select>
+        <button class="ghost" id="sch-this">本周</button><button class="ghost" id="sch-next">下一周 ›</button></div>
+      <div id="sch-conflicts"></div>
+      <div id="sch-week-grid" class="week-grid"></div>
+      <div class="legend"><span class="tag">照常</span><span class="tag changed">有变动 / 调入 / 加课</span><span class="tag cancelled">停课 / 已调走</span><span class="tag exam">考试</span><span class="tag conflict">时间冲突</span></div>
+      <p class="note">点一节课可以停课、调课、改时间、换教室或撤销变动；点日期旁的“加课”可以加一次课。这里的修改，Violet 下一次查课表时就能看到。</p>
+    </div>
+    <div class="sch-view" id="sch-view-courses">
+      <div class="row"><span class="note">停用的课程不再出现在课表里，可以恢复；彻底删除会连同它的修改历史一起删掉。</span><button id="sch-course-new">新增课程</button></div>
+      <div id="sch-courses" class="cards list"></div>
+    </div>
+    <div class="sch-view" id="sch-view-periods">
+      <p class="note">每一节课的开始、结束时间（同一天内）。按节次录入的上课时间都按这张表换算。</p>
+      <div class="table-wrap"><table id="sch-periods"></table></div>
+      <div class="row" style="margin-top:8px"><button class="ghost" id="sch-period-add">添加一节</button><button id="sch-period-save">保存节次表</button></div>
+    </div>
+    <div class="sch-view" id="sch-view-events">
+      <div class="row"><h3>考试</h3><button id="sch-exam-new">新增考试</button></div>
+      <div id="sch-exams" class="cards list"></div>
+      <div class="row"><h3>假期和调休补课</h3><button id="sch-holiday-new">新增假期 / 补课日</button></div>
+      <div id="sch-holidays" class="cards list"></div>
+      <div class="row"><h3>调课、停课、加课</h3><span class="note">新增变动请在周视图里点那一节课</span></div>
+      <div id="sch-exceptions" class="cards list"></div>
+    </div>
+    <div class="sch-view" id="sch-view-import">
+      <h3>导入 CSV / JSON</h3>
+      <p class="note">先预览：预览不会改动课表。确认后在一个事务里写入，任何一项失败都整体不改。
+        模板：<a id="sch-tpl-csv" href="/api/control/schedule/template/csv">CSV</a> ·
+        <a id="sch-tpl-json" href="/api/control/schedule/template/json">JSON</a> ·
+        <a id="sch-tpl-readme" href="/api/control/schedule/template/readme">填写说明</a></p>
+      <div class="filters">
+        <label class="grow">文件 <input type="file" id="sch-file" accept=".csv,.json,text/csv,application/json"></label>
+        <label>导入到 <select id="sch-import-target"><option value="selected">当前选中的学期</option><option value="file">按文件里的学期（仅 JSON）</option></select></label>
+        <button id="sch-preview">预览</button>
+      </div>
+      <fieldset class="card" id="sch-import-mode">
+        <legend>CSV 导入方式</legend>
+        <label class="check"><input type="radio" name="sch-import-mode" id="sch-mode-merge" value="merge" checked> 追加 / 更新（推荐）：只新增、更新文件里的课程，其他课程保持不变</label>
+        <label class="check"><input type="radio" name="sch-import-mode" id="sch-mode-replace" value="replace"> 整学期替换：这个学期以前导入的课程里，文件中没有的会被删除</label>
+        <p class="note">手动录入或手动改过的课程两种方式都不会覆盖、不会删除；只影响导入到的那个学期。JSON 文件不用选：按文件里写了的部分整体替换。</p>
+      </fieldset>
+      <div id="sch-preview-box"></div>
+      <h3>导出</h3>
+      <div class="filters">
+        <label>格式 <select id="sch-export-format"><option value="json">JSON（完整）</option><option value="csv">CSV（课程和上课时间）</option></select></label>
+        <label class="check"><input type="checkbox" id="sch-export-personal" checked> 包含老师、地点、座位号、备注</label>
+        <button class="ghost" id="sch-export">导出当前学期</button>
+      </div>
+      <h3>最近的导入</h3>
+      <div id="sch-imports" class="cards list"></div>
+    </div>
+    <div class="sch-view" id="sch-view-history">
+      <p class="note">课表的每一次修改（谁、什么时候、从哪里、改了什么）。彻底删除的内容不留原文，只留一条删除记录。</p>
+      <div id="sch-history" class="cards list"></div>
+      <button id="sch-history-more" class="ghost wide" hidden>更早的记录</button>
+    </div>
+    <div class="sch-view" id="sch-view-delete">
+      <div class="card danger-zone">
+        <h3>删除这个学期的课表</h3>
+        <p class="note" id="sch-del-term-scope"></p>
+        <button class="danger" id="sch-del-term">删除这个学期的全部课表…</button>
+      </div>
+      <div class="card danger-zone">
+        <h3>删除全部课表</h3>
+        <p class="note" id="sch-del-all-scope"></p>
+        <button class="danger" id="sch-del-all">删除全部课表…</button>
+      </div>
+      <p class="note">删除会同时清掉这些数据在修改历史里的旧副本（老师、地点、座位号、备注的原文），只留下“何时、谁、删了多少行”的记录，不能恢复。只想暂时不用，请用“归档”或“停用”。</p>
+    </div>
+  </section>
+
+  <section id="tab-history" class="tab">
+    <p class="note">每次保存都会记一条。回滚只恢复普通设置，不动 API Key；API Key 可以“恢复上一个值”。</p>
+    <div id="hist-list" class="cards list"></div>
+  </section>
+
+  <section id="tab-account" class="tab">
+    <div class="cards"><div class="card" id="acct-status"></div></div>
+    <h3>修改管理员密码</h3>
+    <form id="pw-form" class="stack" autocomplete="off">
+      <input type="password" id="pw-current" placeholder="当前密码（或管理令牌）" autocomplete="current-password" required>
+      <input type="password" id="pw-new" placeholder="新密码（至少 12 个字符）" autocomplete="new-password" minlength="12" required>
+      <input type="password" id="pw-confirm" placeholder="再输一次新密码" autocomplete="new-password" minlength="12" required>
+      <button type="submit">修改密码</button>
+    </form>
+    <p class="note">修改密码会让其他所有登录失效。</p>
+    <div class="row"><button class="danger" id="logout-all">退出所有登录</button>
+      <form method="post" action="/auth/logout"><button class="ghost" type="submit">退出</button></form></div>
+  </section>
+</main>
+
+<dialog id="confirm"><form method="dialog" class="stack">
+  <p id="confirm-text"></p>
+  <input id="confirm-reason" maxlength="200" placeholder="原因（可选）">
+  <div class="row"><button value="cancel" class="ghost">取消</button><button value="ok" class="danger" id="confirm-ok">确定</button></div>
+</form></dialog>
+<dialog id="editor"><form method="dialog" class="stack">
+  <h3 id="editor-title"></h3>
+  <textarea id="editor-text" rows="5" maxlength="1000"></textarea>
+  <input id="editor-reason" maxlength="200" placeholder="纠正原因（可选）">
+  <div id="editor-history" class="history"></div>
+  <div class="row"><button value="cancel" class="ghost">关闭</button><button value="ok" id="editor-save">保存纠正</button></div>
+</form></dialog>
+<dialog id="sch-form"><form method="dialog" class="stack" id="sch-form-form" novalidate>
+  <h3 id="sch-form-title"></h3>
+  <p class="note" id="sch-form-intro"></p>
+  <div id="sch-form-fields" class="stack"></div>
+  <p class="err" id="sch-form-error"></p>
+  <div class="row"><button type="button" class="ghost" id="sch-form-cancel">取消</button><button type="submit" id="sch-form-ok">保存</button></div>
+</form></dialog>
+<script src="/static/control.js"></script>
+<script src="/static/control_schedule.js"></script>
+<script src="/static/control_channels.js"></script>
+<script src="/static/control_setup.js"></script>
+<script src="/static/control_mcp.js"></script>
+<script src="/static/control_diag.js"></script>
+</body>
+</html>

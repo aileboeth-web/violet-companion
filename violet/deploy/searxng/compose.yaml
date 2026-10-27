@@ -1,0 +1,57 @@
+# Violet -- a private SearXNG for Violet's web_search (phase 9.3). See README.md.
+#
+# Started ONLY by "./searxng.sh up" (or by hand with docker compose). Nothing in Violet, start.sh or a git pull
+# ever installs Docker, pulls this image or starts this container.
+#
+# Not public: the only published port is on the host's loopback (127.0.0.1), for an Violet that runs directly on
+# the server (start.sh); an Violet that runs in Docker joins the "violet-searxng" network and uses http://searxng:8080.
+# Own project name, container name, network and port, so it never touches 1Panel / OpenResty / PostgreSQL /
+# Redis (no Redis / Valkey is needed: the limiter is off, only Violet uses this instance).
+name: violet-searxng
+
+services:
+  searxng:
+    image: ${SEARXNG_IMAGE:-docker.io/searxng/searxng:latest}
+    container_name: violet-searxng
+    restart: unless-stopped
+    # The official image has no USER (it would run as root) and its app files belong to 977:977 (searxng). Run as
+    # that user with no capabilities at all: nothing is chowned (FORCE_OWNERSHIP off), config/ stays as git left it
+    # (settings.yml only has to be readable), and only cache/ must belong to 977 ("./searxng.sh init" does that).
+    user: "977:977"
+    environment:
+      # the server secret: written into .env by "./searxng.sh init" (random), never committed
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?run ./searxng.sh init first (creates .env with a random SEARXNG_SECRET)}
+      SEARXNG_BASE_URL: http://searxng:8080/
+      SEARXNG_LIMITER: "false"
+      SEARXNG_PUBLIC_INSTANCE: "false"
+      FORCE_OWNERSHIP: "false"
+      GRANIAN_HOST: "0.0.0.0"             # the image defaults to "::"; IPv4 works on every Docker network
+      GRANIAN_PORT: "8080"
+    volumes:
+      - ./config:/etc/searxng:ro          # settings.yml (in git; JSON format on, limiter off); read-only
+      - ./cache:/var/cache/searxng:rw     # persistent cache (not in git), owned by 977:977
+    ports:
+      - "127.0.0.1:${SEARXNG_HOST_PORT:-18089}:8080"
+    networks:
+      violet-searxng:
+        aliases: [searxng]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: ${SEARXNG_MEM_LIMIT:-512m}
+    healthcheck:
+      # no wget / curl in the image; its Python lives in the app's virtualenv
+      test: ["CMD", "/usr/local/searxng/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "3"
+
+networks:
+  violet-searxng:
+    name: violet-searxng
+    driver: bridge

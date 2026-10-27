@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest==9.1.1
+# tests only (deploy/searxng compose / settings structure checks); Violet itself does not need it
+PyYAML==6.0.3

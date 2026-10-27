@@ -1,0 +1,21 @@
+{
+  "_comment": [
+    "Revision 2 of acceptance_dialogue_30.json (phase 7 B.4). The base plan is unchanged and stays bound to its hash;",
+    "this file only overrides rounds that no kept test directory has reached yet (tools/replay.py load_plan refuses otherwise).",
+    "Round 15: in the base plan it came 30 hours after round 14, but round 4 put the defense on 下周三 (the Wednesday of",
+    "the week after round 4). Round 15 now happens the morning after that Wednesday, so 答辩结束了 is said after the",
+    "defense date. The stored event and its content are not touched."
+  ],
+  "base": "acceptance_dialogue_30.json",
+  "base_sha256": "bbf5e0a4b1bc6c742e138d5d7c6fb44ec7d7d1d5462c9b6e67fdaaae19e15ec1",
+  "revision": 2,
+  "rounds": {
+    "15": {
+      "remove": ["advance_hours"],
+      "set": {
+        "time": {"base_round": 4, "weeks_ahead": 1, "weekday": 3, "plus_days": 1, "at": "10:00",
+                 "_meaning": "第 4 轮说的“下周三”（第 4 轮所在周的下一周星期三）的第二天上午 10 点"}
+      }
+    }
+  }
+}

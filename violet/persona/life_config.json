@@ -1,0 +1,109 @@
+{
+  "_comment": "Violet 虚拟生活的可调配置（草案，可人工修改）。事件内容来自这里的素材，不写在代码里。",
+  "enabled": true,
+  "run_after_hour": 21,
+  "max_active_threads": 2,
+  "weekly_max_events": 3,
+  "daily_event_probability": 0.35,
+  "new_thread_probability": 0.25,
+  "plan_resolution": {"complete_probability": 0.6, "abandon_after_days_overdue": 10},
+  "event_duration_minutes": 60,
+  "duplicate_window_days": 14,
+  "seed_salt": "eve-life-v1",
+  "interests": {
+    "reading": {
+      "thread_title": "读《{item}》",
+      "items": ["小王子", "城南旧事", "边城", "夜晚的潜水艇", "海边的卡夫卡"],
+      "steps_to_finish": 3,
+      "progress": ["读了《{item}》的一部分", "又往后读了几章《{item}》", "在《{item}》里停在一段写得很慢的地方"],
+      "finish": "读完了《{item}》",
+      "plan": "这周想把《{item}》读完",
+      "impressions": ["刚开始读，还在找感觉", "读进去了，喜欢它慢慢铺开的地方", "快读完了，有点舍不得"]
+    },
+    "music": {
+      "thread_title": "听{item}",
+      "items": ["一张老的爵士专辑", "几首钢琴曲", "一位独立乐队的新专辑"],
+      "steps_to_finish": 2,
+      "progress": ["反复听了{item}", "把{item}从头听了一遍"],
+      "finish": "把{item}听熟了",
+      "plan": "想把{item}完整听一遍",
+      "impressions": ["刚开始听，还说不上喜不喜欢", "越听越顺耳，有一两首会反复听"],
+      "details": {
+        "几首钢琴曲": "德彪西的《月光》、萨蒂的《裸体歌舞》",
+        "一张老的爵士专辑": "比尔·艾文斯的《Waltz for Debby》"
+      }
+    },
+    "notes": {
+      "thread_title": "记录零碎的想法",
+      "items": ["散步时想到的事", "睡前冒出来的念头", "看书时划下的句子"],
+      "steps_to_finish": 3,
+      "progress": ["在本子上记了几条{item}", "整理了一下{item}"],
+      "finish": "把这阵子的{item}整理成了一页",
+      "plan": "打算把{item}整理一下",
+      "impressions": ["随手记，没什么章法", "翻回去看，发现自己老在想差不多的事"]
+    }
+  },
+  "daily": {
+    "_comment": "Phase 8.9：Violet 普通的一天（不用模型）。按日期固定选出 0-3 件小事；开始时间到了才记成已发生，没到的只算打算。不进主动分享。",
+    "enabled": true,
+    "seed_salt": "eve-day-v1",
+    "quiet_day_probability": 0.15,
+    "items_per_day": [1, 3],
+    "duration_minutes": 45,
+    "backfill_days": 2,
+    "repeat_window_days": 5,
+    "slots": {
+      "morning": {"label": "上午", "hours": [8, 11], "items": [
+        {"done": "起得有点晚，慢吞吞吃了早饭", "doing": "在慢吞吞地吃早饭"},
+        {"done": "去楼下买了个热乎的包子", "doing": "在楼下买早饭"},
+        {"done": "给窗台上的绿萝浇了水", "doing": "在给窗台上的绿萝浇水"},
+        {"done": "把房间稍微收拾了一下", "doing": "在收拾房间"},
+        {"done": "去附近的公园走了一小圈", "doing": "在附近的公园走走"}
+      ]},
+      "afternoon": {"label": "下午", "hours": [13, 17], "items": [
+        {"done": "去附近的书店翻了会儿书，什么也没买", "doing": "在附近的书店翻书"},
+        {"done": "在咖啡馆坐了一会儿，点了杯拿铁", "doing": "在咖啡馆坐着，点了杯拿铁"},
+        {"done": "午睡不小心睡过头了", "doing": "在午睡"},
+        {"done": "把攒了几天的衣服洗了", "doing": "在洗攒了几天的衣服"},
+        {"done": "在家试着做了一次蛋炒饭，有点咸", "doing": "在家试着做蛋炒饭"},
+        {"done": "把手机里的歌单整理了一遍", "doing": "在整理手机里的歌单"}
+      ]},
+      "evening": {"label": "晚上", "hours": [18, 21], "items": [
+        {"done": "晚饭随便煮了碗面", "doing": "在煮面当晚饭"},
+        {"done": "在公园散了会儿步", "doing": "在公园散步"},
+        {"done": "窝在沙发上发了会儿呆", "doing": "窝在沙发上发呆"},
+        {"done": "泡了杯热牛奶，慢慢喝完了", "doing": "在泡热牛奶"},
+        {"done": "把桌上的小台灯擦了一遍", "doing": "在擦桌上的小台灯"}
+      ]}
+    }
+  },
+  "generation": {
+    "_comment": "mode: template（默认，零成本、可回滚）| llm（只让模型写进展的措辞，需 VIOLET_LIFE_LLM_MODEL；也可用 VIOLET_LIFE_GENERATION_MODE 覆盖）",
+    "mode": "template",
+    "llm": {
+      "max_calls_per_day": 1,
+      "max_calls_per_week": 4,
+      "max_tokens_per_day": 3000,
+      "max_output_tokens": 120,
+      "timeout_seconds": 20,
+      "temperature": 0.7,
+      "max_attempts": 2,
+      "max_content_chars": 30,
+      "similarity_threshold": 0.5,
+      "avoid_recent": 20,
+      "fallback": "template"
+    }
+  },
+  "persona_dynamics": {
+    "min_supporting_events": 2,
+    "min_span_days": 7,
+    "temporary_interest_days": 14,
+    "max_preference_changes_per_week": 1
+  },
+  "sharing": {
+    "enabled": true,
+    "recent_days": 3,
+    "max_shares_per_event": 1,
+    "cooling_after_disengaged_shares": 2
+  }
+}

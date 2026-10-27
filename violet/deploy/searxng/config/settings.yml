@@ -1,0 +1,44 @@
+# Violet -- settings of the private SearXNG (mounted at /etc/searxng/settings.yml). See ../README.md.
+# Everything not set here comes from SearXNG's own defaults (use_default_settings).
+use_default_settings: true
+
+general:
+  instance_name: "violet-searxng"
+  enable_metrics: false
+
+server:
+  # Placeholder only: the real secret comes from SEARXNG_SECRET (compose.yaml, written into .env by
+  # "./searxng.sh init"). Never put a real secret into this file -- it is in git.
+  secret_key: "set-by-SEARXNG_SECRET-environment-variable"
+  limiter: false            # a private instance only Violet uses (no bot protection, no Redis / Valkey needed)
+  public_instance: false
+  image_proxy: false
+  method: "GET"
+
+search:
+  safe_search: 1
+  autocomplete: ""
+  default_lang: "zh-CN"
+  # Violet calls /search?format=json -- without "json" here SearXNG answers 403
+  formats:
+    - html
+    - json
+
+outgoing:
+  # Violet gives up after VIOLET_WEB_SEARCH_TIMEOUT_SECONDS (10 s); answer before that with what the engines returned
+  request_timeout: 4.0
+  max_request_timeout: 8.0
+
+# Optional, for a server in mainland China where some default engines are unreachable (they only show up as
+# "unresponsive" and slow the answer down): keep only engines that answer from there. To enable, REPLACE the
+# "use_default_settings: true" line at the top with the block below (the key must appear once). Check the engine
+# names against the SearXNG version that is deployed before enabling this.
+#
+# use_default_settings:
+#   engines:
+#     keep_only:
+#       - bing
+#       - baidu
+#       - sogou
+#       - 360search
+#       - wikipedia

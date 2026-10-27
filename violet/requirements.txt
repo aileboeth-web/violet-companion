@@ -1,0 +1,17 @@
+# Runtime dependencies (versions match the production venv at /opt/violet).
+flask==3.1.3
+openai==3.17.0
+mcp==1.30.0
+requests==2.34.2
+pycryptodome==3.23.0
+qrcode==8.2
+python-dotenv==1.2.3
+markupsafe==3.0.3
+# Imported directly by Violet (phase 5B/6); also pulled in by mcp -- pinned so an mcp upgrade cannot move them
+httpx==0.28.1
+anyio==4.15.1
+# IANA time zones (VIOLET_TIMEZONE); required on Windows, harmless on Linux
+tzdata==2026.1
+
+# Optional
+# pilk                    # WeChat voice SILK <-> WAV conversion (not installed in production today)

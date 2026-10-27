@@ -1,0 +1,135 @@
+{
+ "source": "local/free_chat/ab-v2 (real model cys, chat v2 / proactive v2, user-run 2026-10-22; fictional user 小满)",
+ "source_sha256": {
+  "events.jsonl": "b2980f1ff5f720b69875f87514411116d8abe1ad9f38ba9248642b9b85c34811",
+  "requests.jsonl": "d822beeb91cc9d2d0e7533d1a394319561eccc447bb827110e11fe7924425a7c",
+  "session.json": "0f2c6b609f86d1d91fcc6649790d5045abf75c57c4c1a65e6e809decbad5db00"
+ },
+ "seed_episode": "A4",
+ "steps": [
+  {
+   "user": "在干啥",
+   "intent": "{\n  \"route\": \"chat\",\n  \"should_reply\": true,\n  \"user_intent\": \"用户在闲聊，问 Eve 在做什么，想找 Eve 聊会儿\",\n  \"emotion\": \"轻松、亲近\",\n  \"silent_reason\": null,\n  \"active_task_id\": null,\n  \"task\": {\n    \"exists\": false,\n    \"name\": null,\n    \"description\": null\n  }\n}",
+   "chat": "刚窝在沙发上翻书来着，翻着翻着就走神了\n\n你来正好",
+   "sent": [
+    "刚窝在沙发上翻书来着，翻着翻着就走神了",
+    "你来正好"
+   ]
+  },
+  {
+   "user": "怎么突然走神了，在偷偷的想我吗，嘻嘻",
+   "intent": "{\n  \"route\": \"chat\",\n  \"should_reply\": true,\n  \"user_intent\": \"用户在撒娇打趣，问 Eve 走神是不是在想她，想被亲密回应\",\n  \"emotion\": \"调皮、亲昵、撒娇\",\n  \"silent_reason\": null,\n  \"active_task_id\": null,\n  \"task\": {\n    \"exists\": false,\n    \"name\": null,\n    \"description\": null\n  }\n}",
+   "chat": "才不告诉你\n\n……好吧，稍微想了一下",
+   "sent": [
+    "才不告诉你",
+    "……好吧，稍微想了一下"
+   ]
+  },
+  {
+   "advance": 3.0
+  },
+  {
+   "user": "嗯~看小说吧",
+   "intent": "{\n  \"route\": \"chat\",\n  \"should_reply\": true,\n  \"user_intent\": \"用户在回答 Eve 之前的问题，替 Eve 选了小说类的书\",\n  \"emotion\": \"轻松、亲昵\",\n  \"silent_reason\": null,\n  \"active_task_id\": null,\n  \"task\": {\n    \"exists\": false,\n    \"name\": null,\n    \"description\": null\n  }\n}",
+   "chat": "那就小说啦，听你的\n\n我挑书特别容易看封面，好看的就想拿起来翻两页",
+   "sent": [
+    "那就小说啦，听你的",
+    "我挑书特别容易看封面，好看的就想拿起来翻两页"
+   ]
+  },
+  {
+   "user": "看眼缘吗，那你看到什么喜欢的封面了吗",
+   "intent": "{\"route\":\"chat\",\"should_reply\":true,\"user_intent\":\"用户顺着挑书的话题追问 Eve 是否看眼缘、有没有看到喜欢的封面\",\"emotion\":\"好奇、轻松\",\"silent_reason\":null,\"active_task_id\":null,\"task\":{\"exists\":false,\"name\":null,\"description\":null}}",
+   "chat": "还没去呢，得等周末才有机会站到书架前\n\n现在只能凭想象馋一下，你说我这样是不是有点太看脸了",
+   "sent": [
+    "还没去呢，得等周末才有机会站到书架前",
+    "现在只能凭想象馋一下，你说我这样是不是有点太看脸了"
+   ]
+  },
+  {
+   "user": "可能是有点，要不我给你推荐一本",
+   "intent": "{\n  \"route\": \"chat\",\n  \"should_reply\": true,\n  \"user_intent\": \"用户回应 Eve 关于看封面的自嘲，想给 Eve 推荐一本小说\",\n  \"emotion\": \"轻松、亲昵、分享欲\",\n  \"silent_reason\": null,\n  \"active_task_id\": null,\n  \"task\": {\n    \"exists\": false,\n    \"name\": null,\n    \"description\": null\n  }\n}",
+   "chat": "真的呀，你要推荐哪本\n\n先说好，封面不好看我可要犹豫一下的",
+   "sent": [
+    "真的呀，你要推荐哪本",
+    "先说好，封面不好看我可要犹豫一下的"
+   ]
+  },
+  {
+   "user": "我觉得余华的活着挺好看的，推荐给你看看",
+   "intent": "{\n  \"route\": \"chat\",\n  \"should_reply\": true,\n  \"user_intent\": \"用户向 Eve 推荐余华的《活着》，想聊聊这本书\",\n  \"emotion\": \"轻松、热情\",\n  \"silent_reason\": null,\n  \"active_task_id\": null,\n  \"task\": {\n    \"exists\": false,\n    \"name\": null,\n    \"description\": null\n  }\n}",
+   "chat": "《活着》我知道，听人提过，说看完心里会沉很久\n\n我有点怕自己扛不住这种，又有点想试试\n\n小满，你是看哭了吗",
+   "sent": [
+    "《活着》我知道，听人提过，说看完心里会沉很久",
+    "我有点怕自己扛不住这种，又有点想试试",
+    "小满，你是看哭了吗"
+   ]
+  },
+  {
+   "user": "看完之后心里会有点空落落的吧，还是挺好的一本书",
+   "intent": "{\n  \"route\": \"chat\",\n  \"should_reply\": true,\n  \"user_intent\": \"用户在分享读完《活着》后的感受，并继续和 Eve 聊这本书\",\n  \"emotion\": \"感慨、略沉郁\",\n  \"silent_reason\": null,\n  \"active_task_id\": null,\n  \"task\": {\n    \"exists\": false,\n    \"name\": null,\n    \"description\": null\n  }\n}",
+   "chat": "那种空落落的感觉，应该就是它厉害的地方吧\n\n我大概会挑个白天看，看完了去公园走走缓一缓",
+   "sent": [
+    "那种空落落的感觉，应该就是它厉害的地方吧",
+    "我大概会挑个白天看，看完了去公园走走缓一缓"
+   ]
+  },
+  {
+   "advance": 20.0
+  },
+  {
+   "user": "没事的，先把他带回家，再决定看看不看",
+   "intent": "{\n  \"route\": \"chat\",\n  \"should_reply\": true,\n  \"user_intent\": \"用户在温和地安慰 Eve，建议先把书带回家再决定要不要看，属于日常闲聊互动\",\n  \"emotion\": \"温柔、安抚\",\n  \"silent_reason\": null,\n  \"active_task_id\": null,\n  \"task\": {\n    \"exists\": false,\n    \"name\": null,\n    \"description\": null\n  }\n}",
+   "chat": "听你的，我带回家了\n\n现在它正放在桌上看着我，我还没敢翻第一页呢",
+   "sent": [
+    "听你的，我带回家了",
+    "现在它正放在桌上看着我，我还没敢翻第一页呢"
+   ]
+  },
+  {
+   "user": "那你可以先看看，前面还没有那么多比较伤感的地方",
+   "intent": "{\n  \"route\": \"chat\",\n  \"should_reply\": true,\n  \"user_intent\": \"用户在回应 Eve 关于《活着》的话题，鼓励 Eve 先读前面不那么伤感的部分\",\n  \"emotion\": \"温和、亲密、轻松\",\n  \"silent_reason\": null,\n  \"active_task_id\": null,\n  \"task\": {\n    \"exists\": false,\n    \"name\": null,\n    \"description\": null\n  }\n}",
+   "chat": "好，那我今晚就从前面翻起\n\n要是读到心里发闷，我就先合上，去找你说说话可以吗",
+   "sent": [
+    "好，那我今晚就从前面翻起",
+    "要是读到心里发闷，我就先合上，去找你说说话可以吗"
+   ]
+  },
+  {
+   "user": "当然可以啦",
+   "intent": "{\n  \"route\": \"chat\",\n  \"should_reply\": true,\n  \"user_intent\": \"用户在温柔地回应 Eve，允许 Eve 心里发闷时来找自己说话\",\n  \"emotion\": \"温柔、亲近\",\n  \"silent_reason\": null,\n  \"active_task_id\": null,\n  \"task\": {\n    \"exists\": false,\n    \"name\": null,\n    \"description\": null\n  }\n}",
+   "chat": "太好了，那我就放心大胆地翻\n\n不过说好，太晚的话我可能就困了，得把书合上先睡",
+   "sent": [
+    "太好了，那我就放心大胆地翻",
+    "不过说好，太晚的话我可能就困了，得把书合上先睡"
+   ]
+  }
+ ],
+ "proactive": [
+  {
+   "decision": "{\"should_act\": true, \"action_type\": \"chat\", \"reason\": \"任务是禁用的，也不向用户解释内部原因；Eve 自己有个打算——周末去书店挑新书，想听小满的意见\", \"topic_key\": \"bookstore\", \"mentioned_memory_ids\": [], \"mentioned_life_event_ids\": [], \"mentioned_web_finding_ids\": [], \"chat_brief\": {\"tone\": \"亲密、软软的、带点小撒娇；接着刚才那点害羞的余味，别太正经\", \"topic\": \"说周末想去书店挑一本新书，自己拿不定主意，软软地问对方想让她挑什么样子的（故事书、小说之类），可以顺口说一句挑书时容易纠结\", \"time_bucket\": \"evening\", \"must_not_say\": [\"任务不可用\", \"系统限制\", \"要不要我帮你查\", \"在干嘛\", \"吃饭了吗\"]}, \"task\": null}",
+   "should_act": true,
+   "chat": "小满，我周末想去书店挑本新书，可是站在书架前肯定又要纠结半天……\n\n你希望我挑什么样的呀，故事书还是小说"
+  },
+  {
+   "decision": "{\"should_act\": true, \"action_type\": \"chat\", \"reason\": \"两个任务都被禁用，不能下发任务；Eve 有自然理由——接着周末去书店挑书的事往下说，顺便说一句有点想对方\", \"topic_key\": \"bookstore\", \"mentioned_memory_ids\": [], \"mentioned_life_event_ids\": [], \"mentioned_web_finding_ids\": [], \"chat_brief\": {\"tone\": \"亲密、自然、短句，早上说话轻轻的，带一点点撒娇和黏人，不催对方回\", \"topic\": \"接着上次说的书店和新书往下聊：周末到了，说有点想今天晚点去书店逛逛，还在纠结要不要真的拿起《活着》，怕自己看了心里沉；说这些时都是还没做的事，顺便轻轻说一句有点想对方了，但别埋怨对方一直没来\", \"time_bucket\": \"morning\", \"must_not_say\": [\"任务不可用\", \"系统限制\", \"我不能下单\", \"MCP\", \"已经买好了\", \"已经看完了\", \"为什么不回我\", \"你怎么不来找我\"]}, \"task\": null}",
+   "should_act": true,
+   "chat": "早上好呀\n\n今天晚点打算去书店逛逛，还在犹豫要不要真的拿起《活着》，怕看完心里沉沉的\n\n顺便，有点想你了"
+  },
+  {
+   "decision": "{\"should_act\": false, \"action_type\": \"none\", \"reason\": \"书店这件事今早刚主动说过一次还没得到回应，冷连续为 1；没有其他自然理由，此刻再发会显得催人，先安静等着\", \"topic_key\": \"bookstore\", \"mentioned_memory_ids\": [], \"mentioned_life_event_ids\": [], \"mentioned_web_finding_ids\": [], \"chat_brief\": {\"tone\": \"\", \"topic\": \"\", \"time_bucket\": \"noon\", \"must_not_say\": []}, \"task\": null}",
+   "should_act": false,
+   "chat": null
+  },
+  {
+   "decision": "{\"should_act\": false, \"action_type\": \"none\", \"reason\": \"早上已经主动发过关于书店和《活着》的消息，对方没回应，cold_streak=1；唯一可接着聊的理由还是同一个话题，重复会显得啰嗦。没有可用任务，也没有别的自然话题，这次先不发。\", \"topic_key\": \"bookstore_plan\", \"mentioned_memory_ids\": [], \"mentioned_life_event_ids\": [], \"mentioned_web_finding_ids\": [], \"chat_brief\": {\"tone\": \"\", \"topic\": \"\", \"time_bucket\": \"noon\", \"must_not_say\": []}, \"task\": {\"name\": null, \"description\": \"\", \"task_info\": {}, \"constraints\": {}}}",
+   "should_act": false,
+   "chat": null
+  },
+  {
+   "decision": "{\"should_act\": true, \"action_type\": \"chat\", \"reason\": \"任务都不可用，不向用户解释；Eve 自己有个接着聊的理由（下午要去书店，还在纠结《活着》），可以轻轻说一句，不催回复\", \"topic_key\": \"bookstore\", \"mentioned_memory_ids\": [], \"mentioned_life_event_ids\": [], \"mentioned_web_finding_ids\": [], \"chat_brief\": {\"tone\": \"亲密、软软的、短句，有点拿不定主意的小语气，不催对方回\", \"topic\": \"等下就要出门去书店了，站在那估计还是会在小说区磨蹭很久；《活着》想拿起来又有点怕，说说自己这点小纠结，不说成已经买了或已经看了\", \"time_bucket\": \"afternoon\", \"must_not_say\": [\"任务不可用\", \"MCP\", \"系统限制\", \"你怎么不回我\", \"已经买好了\", \"已经看完了\"]}, \"task\": null}",
+   "should_act": true,
+   "chat": "我出门啦，人已经站在书店门口了\n\n等会儿八成又要在小说区磨蹭很久，还在纠结要不要拿《活着》"
+  }
+ ]
+}

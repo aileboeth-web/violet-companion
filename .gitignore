@@ -1,0 +1,80 @@
+# --- secrets / credentials ---------------------------------------------------
+.env
+.env.*
+!env_example
+**/data/
+credentials.json
+sync_buf.json
+admin_token
+*.key
+*.pem
+*.p12
+*.jks
+*token*.txt
+
+# --- databases (real chat history, memories) --------------------------------
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+backups/
+
+# --- media (received/sent images, voice, screenshots) -----------------------
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp
+*.mp4
+*.mov
+*.silk
+*.wav
+*.mp3
+assets/
+media/
+*.bmp
+*.heic
+*.heif
+*.avif
+*.tif
+*.tiff
+*.part
+
+# --- runtime -----------------------------------------------------------------
+logs/
+*.log
+*.pid
+main.pid
+
+# --- python / tooling --------------------------------------------------------
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.venv-*/
+venv/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+
+# --- archives / editor -------------------------------------------------------
+*.tar.gz
+*.zip
+*.bak
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# --- local test tool output (transcripts, scores) ---------------------------
+**/tools/output/
+
+# --- local-only folders --------------------------------------------------------
+# release archives made by tools/make_release.py
+**/dist/
+# machine-local data: migration state, archives, downloads, test work dirs
+/local/
+# Python virtual environment at the workspace root
+/.venv/

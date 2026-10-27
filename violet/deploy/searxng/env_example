@@ -1,0 +1,15 @@
+# Template of deploy/searxng/.env -- "./searxng.sh init" copies it and fills in a random SEARXNG_SECRET.
+# .env is NOT in git (repository .gitignore); never put a real secret into this template.
+
+# SearXNG server secret (random, 64 hex chars); empty here on purpose
+SEARXNG_SECRET=
+
+# Host port, bound to 127.0.0.1 only (never public). Violet on the host: VIOLET_WEB_SEARXNG_URL=http://127.0.0.1:18089
+SEARXNG_HOST_PORT=18089
+
+# Official image. After the first "./searxng.sh up" the pulled digest is in state/image-digests.log; to pin or
+# roll back, set e.g. SEARXNG_IMAGE=docker.io/searxng/searxng@sha256:<digest from that log>
+SEARXNG_IMAGE=docker.io/searxng/searxng:latest
+
+# Memory limit of the container
+SEARXNG_MEM_LIMIT=512m

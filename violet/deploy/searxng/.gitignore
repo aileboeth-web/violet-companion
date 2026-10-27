@@ -1,0 +1,7 @@
+# machine-local: the real secret, the cache and the deploy log never go into git
+/.env
+/cache/
+/state/
+# the image's entrypoint may add its own files (uwsgi.ini, limiter.toml, ...) next to settings.yml
+/config/*
+!/config/settings.yml

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Violet 待核对</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --bg:#0b1120; --bg2:#111827; --card:rgba(17,24,39,.82); --border:rgba(148,163,184,.15); --text:#e2e8f0; --muted:#64748b; }
+    body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:linear-gradient(135deg,var(--bg),var(--bg2));
+           color:var(--text); min-height:100vh; }
+    .topbar { display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid var(--border); }
+    .topbar h1 { font-size:17px; }
+    a.back, button { font-size:13px; color:var(--text); background:transparent; border:1px solid var(--border);
+                     border-radius:999px; padding:4px 10px; cursor:pointer; text-decoration:none; }
+    main { max-width:1100px; margin:0 auto; padding:16px; display:grid; gap:16px; }
+    section { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:16px; overflow-x:auto; }
+    h2 { font-size:15px; margin-bottom:6px; }
+    p.explain { color:var(--muted); font-size:12px; margin-bottom:10px; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { text-align:left; padding:6px; border-bottom:1px solid var(--border); vertical-align:top; word-break:break-all; }
+  </style>
+</head>
+<body>
+  <div class="topbar"><h1>重启后待核对的事项</h1><div><a class="back" href="/">返回</a> <button onclick="load()">刷新</button></div></div>
+  <main id="main"></main>
+<script>
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+// a value passed to an inline handler: a JSON string literal, HTML-escaped for the attribute (phase 9.0.1)
+const jsarg = v => esc(JSON.stringify(String(v ?? "")));
+const TITLES = {outbound: "消息（是否送达未知）", media: "图片（是否送达未知）", commitment: "提醒（是否送达未知）", image_task: "图片生成（可能已计费）"};
+const LABELS = {sent: "确认已送达", not_sent: "确认没有送达", charged_no_result: "已计费但没有结果", not_charged: "没有计费"};
+async function resolve(kind, id, resolution) {
+  if (!confirm(`将 ${TITLES[kind]} #${id} 标记为「${LABELS[resolution]}」？`)) return;
+  const r = await fetch(`/api/reconciliation/${kind}/${encodeURIComponent(id)}`, {method: "POST", credentials: "same-origin",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify({resolution})});
+  if (!r.ok) alert((await r.json()).error); load();
+}
+async function load() {
+  const d = await (await fetch("/api/reconciliation", {credentials: "same-origin"})).json();
+  document.getElementById("main").innerHTML = ["outbound", "media", "commitment", "image_task"].map(kind => {
+    const rows = d[kind] || [];
+    const idOf = x => kind === "image_task" ? x.task_id : x.id;
+    return `<section><h2>${esc(TITLES[kind])}：${rows.length} 项</h2><p class="explain">${esc(d.explanations[kind])}</p>
+      ${rows.length ? `<table><tr><th>编号</th><th>内容</th><th>说明</th><th>时间</th><th></th></tr>` + rows.map(x => `<tr>
+        <td>${esc(idOf(x))}</td><td>${esc(x.content || x.caption || x.kind || "")}</td><td>${esc(x.error || x.send_error || x.last_error || "")}</td>
+        <td>${esc((x.updated_at || "").slice(0, 16))}</td>
+        <td>${d.resolutions[kind].map(res => `<button onclick="resolve(${jsarg(kind)},${jsarg(idOf(x))},${jsarg(res)})">${esc(LABELS[res] || res)}</button>`).join(" ")}</td></tr>`).join("") + "</table>" : ""}</section>`;
+  }).join("");
+}
+load();
+</script>
+</body>
+</html>

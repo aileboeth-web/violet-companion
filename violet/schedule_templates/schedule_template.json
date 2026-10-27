@@ -1,0 +1,37 @@
+{
+ "format": "violet-schedule",
+ "version": 1,
+ "term": {"name": "2026 秋（示例）", "start_date": "2026-09-07", "end_date": "2027-01-15",
+          "week1_monday": "2026-09-07", "timezone": "Asia/Shanghai"},
+ "periods": [
+  {"no": 1, "start": "08:00", "end": "08:45"}, {"no": 2, "start": "08:55", "end": "09:40"},
+  {"no": 3, "start": "10:00", "end": "10:45"}, {"no": 4, "start": "10:55", "end": "11:40"},
+  {"no": 5, "start": "14:00", "end": "14:45"}, {"no": 6, "start": "14:55", "end": "15:40"}
+ ],
+ "courses": [
+  {"name": "高等数学（示例）", "code": "MATH101", "kind": "理论", "teacher": "示例老师甲",
+   "slots": [
+    {"weekday": 1, "periods": "1-2", "weeks": "1-16", "location": "示例楼101"},
+    {"weekday": 3, "periods": "3-4", "weeks": "1-16单", "location": "示例楼101"}
+   ]},
+  {"name": "大学物理（示例）", "kind": "理论",
+   "slots": [{"weekday": 2, "start": "14:00", "end": "15:40", "weeks": "1-16", "location": "示例楼203"}]},
+  {"name": "物理实验（示例）", "kind": "实验", "notes": "带实验报告",
+   "slots": [{"weekday": 4, "periods": "5-6", "weeks": "2-16双", "location": "示例实验楼3"}]}
+ ],
+ "exceptions": [
+  {"course": "高等数学（示例）", "kind": "停课", "date": "2026-09-21", "reason": "示例：老师出差"},
+  {"course": "大学物理（示例）", "kind": "调课", "date": "2026-09-22", "new_date": "2026-09-24",
+   "new_start": "16:00", "new_end": "17:40"},
+  {"course": "物理实验（示例）", "kind": "换教室", "date": "2026-09-17", "new_location": "示例实验楼5"},
+  {"course": "大学物理（示例）", "kind": "加课", "date": "2026-09-26", "new_periods": "3-4"}
+ ],
+ "exams": [
+  {"name": "高数期中（示例）", "kind": "期中", "date": "2026-11-11", "start": "10:00", "end": "11:40",
+   "course": "高等数学（示例）", "location": "示例楼301", "seat": "示例座位17"}
+ ],
+ "holidays": [
+  {"kind": "放假", "name": "国庆（示例）", "start_date": "2026-10-01", "end_date": "2026-10-07"},
+  {"kind": "补课", "name": "国庆补课（示例）", "start_date": "2026-10-10", "follows_date": "2026-10-07"}
+ ]
+}

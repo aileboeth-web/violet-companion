@@ -1,0 +1,46 @@
+{
+  "_comment": [
+    "Explicit MCP tool allowlist. Only tools listed here (or in a server's own \"tools\" config) are offered to the model.",
+    "Levels: read | write | high_risk. write/high_risk also need MCP_ALLOWED_RISKY_TOOLS=<server>__<tool> or the server's \"allow_tools\".",
+    "Keys under \"servers\" are MCP_SERVERS[].name values, or a \"tool_profile\" a server config refers to.",
+    "Unlisted tools are hidden and refused; the dashboard /api/health shows them as unclassified_tools so they can be reviewed."
+  ],
+  "version": 1,
+  "servers": {
+    "android-phone": {
+      "_source": "docs/TOOLS.md of the MCP repository (workspace D:\\unity\\aichat\\mcp, 1.2.x-eve): server-side read-only whitelist of 14 tools",
+      "tools": {
+        "get_foreground_app": "read",
+        "get_screen_state": "read",
+        "battery": "read",
+        "screen_info": "read",
+        "health": "read",
+        "get_app_usage_stats": "read",
+        "installed_apps": "read",
+        "app_info": "read",
+        "device_info": "read",
+        "system_properties": "read",
+        "permission_state": "read",
+        "storage_info": "read",
+        "locale_info": "read",
+        "time_now": "read"
+      }
+    },
+    "violet-web": {
+      "_source": "Built-in web MCP server (ai/web/mcp_server.py, phase 5B). Both tools only read public web pages through SafeFetcher.",
+      "tools": {
+        "web_search": "read",
+        "fetch_url": "read"
+      }
+    },
+    "violet-schedule": {
+      "_source": "Built-in timetable MCP server (ai/schedule/mcp_server.py, phase 9.4.2). All four tools only read the user's timetable through ScheduleStore.",
+      "tools": {
+        "get_day_schedule": "read",
+        "get_schedule_range": "read",
+        "find_course": "read",
+        "get_current_status": "read"
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+-- Phase 10 rollback: deliberately NON-destructive.
+-- Code from before phase 10 never reads the new columns (messages/inbound_messages/outbound_messages.channel,
+-- .peer_id) or the channel_identities / channel_pairing_codes tables, and its INSERT statements name their columns,
+-- so the older code runs unchanged on the newer database: a rollback is simply deploying the older code (the
+-- installer's "<install root>/violet rollback" does that and keeps the database). Nothing is dropped here: dropping the columns would need a table
+-- rebuild of the conversation history, and the identity tables are what keeps strangers out when phase 10 is
+-- deployed again.
+--
+-- To really remove the identity tables on a COPY (back the file up first):
+--   DROP TABLE IF EXISTS channel_pairing_codes;
+--   DROP TABLE IF EXISTS channel_identities;
+SELECT 'phase10_down: nothing dropped (see the comments above)';

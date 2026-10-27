@@ -1,0 +1,14 @@
+{
+  "_comment": [
+    "Per-model request parameter policy (ai/model_params.py). The defaults reproduce the current behaviour.",
+    "Add a model entry ONLY after a real test call showed what it accepts, and note how it was verified, e.g.:",
+    "\"some-model\": {\"send_temperature\": false, \"max_tokens_field\": \"max_completion_tokens\", \"_verified\": \"2026-xx-xx test call, relay log #...\"}",
+    "Nothing is filled in for any real model yet: none has been verified."
+  ],
+  "defaults": {
+    "send_temperature": true,
+    "max_tokens_field": "max_tokens",
+    "allowed_extra_params": ["reasoning_effort"]
+  },
+  "models": {}
+}

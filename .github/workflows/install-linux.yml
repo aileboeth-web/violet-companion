@@ -1,0 +1,25 @@
+# Linux acceptance of the one-command install (phase 10.7). Not run yet: the repository has no remote (the user
+# decides about publishing). On GitHub's Ubuntu VMs systemd is real, so this covers what a container cannot:
+# the systemd unit, enable-at-boot, restart after kill -9, unit removal on uninstall.
+name: install-linux
+on:
+  workflow_dispatch:
+  push:
+    paths: ["violet/install.sh", "violet/tools/violet_installer.py", "violet/tools/violet_setup.py",
+            "violet/tools/violet_service.py", "violet/requirements.txt", "violet/deploy/linux-e2e/**"]
+jobs:
+  systemd:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: one-command install, repair, backup, failed upgrade, uninstall (systemd)
+        run: sudo bash "violet/deploy/linux-e2e/install_e2e.sh"
+  containers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: debian / ubuntu / rocky containers (supervisor mode)
+        run: bash "violet/deploy/linux-e2e/run_in_docker.sh" debian:12 ubuntu:24.04 rockylinux:9

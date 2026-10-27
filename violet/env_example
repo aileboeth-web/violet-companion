@@ -1,0 +1,357 @@
+# 完成你的配置并重命名该文件为.env
+# LLM API Configuration
+LLM_API_KEY=
+LLM_API_URL=
+
+# Debug Mode (set to true/false or 1/0)
+DEBUG_MODE=0
+
+DEBOUNCE_NORMAL=10.0
+DEBOUNCE_EXTRA=15.0
+
+# ── 管理面板（Dashboard）安全 ─────────────────────────────────────────────────
+# 默认只监听本机回环地址；远程访问请用 SSH 隧道或带 TLS 的反向代理。
+VIOLET_DASHBOARD_HOST=127.0.0.1
+VIOLET_DASHBOARD_PORT=7100
+# 管理令牌（至少 16 位随机字符）。留空时首次启动会在 data/admin_token 自动生成并复用。
+# 可以不重启就禁用或更换：python -m tools.violet_admin token-disable / token-rotate / token-enable。
+VIOLET_ADMIN_TOKEN=
+# 通过 HTTPS 反向代理访问时设为 1：会话 Cookie 只走 HTTPS，并且不是 HTTPS 的请求一律拒绝
+# （本机直接连接、例如 SSH 隧道除外）。
+VIOLET_DASHBOARD_COOKIE_SECURE=0
+# Phase 9.0.1：后台只监听本机地址；VIOLET_DASHBOARD_HOST 填其他地址也会退回 127.0.0.1。
+# 同一台机器上有反向代理时设为 1：只对来自本机的连接按 X-Forwarded-For / X-Forwarded-Proto 识别真实客户端和 HTTPS。
+VIOLET_DASHBOARD_TRUST_PROXY=0
+# Phase 10.4：Violet 自己提供 HTTPS 的证书和私钥（安装器 --access lan / public 时自动生成）。两个文件都存在时，
+# VIOLET_DASHBOARD_HOST 才可以是本机以外的地址（例如 0.0.0.0）；这时请同时设 VIOLET_DASHBOARD_COOKIE_SECURE=1。
+VIOLET_DASHBOARD_TLS_CERT=
+VIOLET_DASHBOARD_TLS_KEY=
+# 登录会话：无操作多少分钟后失效、登录后最多多少小时失效。管理员密码用 python -m tools.violet_admin set-password 设置。
+VIOLET_DASHBOARD_IDLE_MINUTES=120
+VIOLET_DASHBOARD_SESSION_HOURS=12
+# /proactive/test 的 send=true 会真实发送微信消息，默认禁止。
+VIOLET_ALLOW_MANUAL_PROACTIVE_SEND=0
+
+# ── 消息运行时 ────────────────────────────────────────────────────────────────
+# 数据目录（登录凭据、sync_buf、媒体、admin_token），相对启动目录。
+VIOLET_DATA_DIR=./data
+# 模型整轮失败时发给用户的兜底回复；留空则不发送（错误仍会记录）。
+VIOLET_FALLBACK_REPLY=我这边刚刚卡了一下，没接上你的话，你再说一次好不好
+# 启动通知；留空则不发送。
+VIOLET_STARTUP_MESSAGE=Violet Online.
+# 进程崩溃后，重启时只补回复这么多秒以内收到、尚未处理的消息；更早的只入库不回复。
+VIOLET_RECOVERY_MAX_AGE_SECONDS=600
+# 发送失败的重试次数（仅对“请求未到达服务器”的连接错误重试）。
+VIOLET_SEND_MAX_ATTEMPTS=2
+VIOLET_SIMULATE_TYPING=1
+VIOLET_LOG_LEVEL=INFO
+
+# ── LLM 调用超时与重试 ────────────────────────────────────────────────────────
+# SDK 自带重试已关闭，只保留这里的业务重试，并受总时长上限约束。
+LLM_REQUEST_TIMEOUT_SECONDS=90
+LLM_CONNECT_TIMEOUT_SECONDS=10
+LLM_MAX_RETRY_ATTEMPTS=3
+LLM_RETRY_BASE_DELAY=3
+LLM_TOTAL_TIMEOUT_SECONDS=180
+# 可选备用模型：主模型重试失败后各尝试一次，例如 CHAT_LLM_FALLBACK_MODEL=gpt-5-mini
+CHAT_LLM_FALLBACK_MODEL=
+INTENT_LLM_FALLBACK_MODEL=
+# 识图模型别名与超时（与原来一致，默认 "vision"）。
+VISION_LLM_MODEL=vision
+VISION_TIMEOUT_SECONDS=60
+
+# ── MCP ───────────────────────────────────────────────────────────────────────
+# MCP_SERVERS 为 JSON 列表，原有字段不变。可选新字段：
+#   "agents": ["chat","performer"]  允许使用该服务器的 agent（缺省见 MCP_DEFAULT_AGENTS）
+#   "enabled": false                停用
+#   "connect_timeout": 8, "call_timeout": 30
+#   "tool_permissions": {"工具名": "read|write|high_risk"}  覆盖自动分级
+#   "allow_tools": ["工具名"]       显式放行某个写入/高风险工具
+# 例：MCP_SERVERS=[{"name":"android-phone","transport":"streamable_http","url":"http://127.0.0.1:8787/mcp","headers":{"Authorization":"Bearer <手机令牌>"}}]
+MCP_SERVERS=
+MCP_DEFAULT_AGENTS=chat,performer,proactive
+MCP_CONNECT_TIMEOUT_SECONDS=8
+MCP_CALL_TIMEOUT_SECONDS=30
+MCP_TOOLS_CACHE_TTL_SECONDS=600
+MCP_CIRCUIT_FAILURE_THRESHOLD=2
+MCP_CIRCUIT_BASE_SECONDS=30
+MCP_CIRCUIT_MAX_SECONDS=600
+MCP_RESULT_MAX_CHARS=6000
+# Phase 9.2：工具调用时连接中途断开，重新连接再试几次（只对断线；超时、设备离线不重试）。
+MCP_CALL_RETRIES=1
+# Phase 9.2：Intent 判断这一轮需要查询工具时，Chat 的第一次调用必须先用工具（tool_choice=required）；
+# 接口不支持 required 时自动退回 auto。设为 0 就始终由模型自己决定。
+VIOLET_TOOL_CHOICE_REQUIRED=1
+# Phase 9.2：MCP_SERVERS 也可以用本地子进程（stdio，不占端口、不联网）：
+# {"name":"campus","transport":"stdio","command":["python","-m","some_server"],"tools":{"get_course_schedule":"read"}}
+# 局域网 / 公网地址必须是 https；只有 127.0.0.1 / localhost 可以用 http。"offer":"always" 表示每轮都把这个服务器的工具给 Chat
+# （默认 "on_demand"：只有 Intent 判断需要查时才给）。启停、超时、替换凭据可以在管理后台“工具”页操作。
+# 工具白名单（第二阶段）：只有在 mcp_tool_policy.json 或服务器配置 "tools" 中显式列出的工具才会提供给模型；
+# 未列出的工具一律隐藏并拒绝调用（不再根据工具名推测权限）。可用下面的变量指向另一份白名单文件。
+MCP_TOOL_POLICY_FILE=
+# 白名单中标为 write/high_risk 的工具还需要第二把钥匙：按 "服务器名__工具名" 逐个放行（逗号分隔）。
+MCP_ALLOWED_RISKY_TOOLS=
+
+# ── 记忆与主动行为（第二阶段）──────────────────────────────────────────────────
+# 记忆整理在回复发送后后台执行；设为 0 可退回旧的同步方式。
+VIOLET_ASYNC_MEMORY=1
+VIOLET_MEMORY_MAX_ATTEMPTS=3
+VIOLET_MEMORY_RETRY_BASE_SECONDS=30
+VIOLET_MEMORY_WAIT_REPLY_SECONDS=120
+# 相似记忆只作为“请确认是否同一件事”的候选，绝不自动合并；该阈值只影响候选范围。
+VIOLET_MEMORY_LINK_CANDIDATE_SIMILARITY=0.4
+# 有效期（天）：过期只标记 expired，不删除，不推断事件已结束。
+VIOLET_EVENT_VALID_DAYS=14
+VIOLET_ENDED_EVENT_VALID_DAYS=7
+VIOLET_BACKGROUND_VALID_DAYS=3
+# Phase 9.1：每晚衰减不再删除记忆（最低到 forgotten，仍可检索）；重要度或情绪权重达到这个值的记忆最低到 archived（很久以前）。
+VIOLET_MEMORY_KEEP_CLEAR_WEIGHT=3
+# Phase 9.1：检索时看多少条记忆（按记忆强度从高到低；原来固定 300，记忆多了以后旧记忆根本不参与检索）。
+VIOLET_MEMORY_SEARCH_WINDOW=5000
+# Phase 9.1：用户这句话和某条记忆有相同的关键词时，由代码直接带给 Chat（不管 Intent 有没有调用 query_memory），最多几条；0 或开关为 0 时关闭。
+VIOLET_MEMORY_WORD_RECALL=1
+VIOLET_MEMORY_WORD_RECALL_LIMIT=3
+# Phase 9.1：用户问“还记得…吗”而这次没找到相关记忆时，提醒 Chat 这不代表对方没说过。
+VIOLET_MEMORY_NOT_FOUND_NOTE=1
+# 用户明确要求的提醒：只给日期时的默认时刻；生成失败时使用的兜底模板（{content} 为提醒内容）。
+VIOLET_COMMITMENT_DEFAULT_TIME=09:00
+VIOLET_COMMITMENT_FALLBACK_TEMPLATE=提醒你一下：{content}
+# “提醒我+日期”的明确请求在回复前由代码保存，回复按真实结果确认或说明没设成（1）；0 = 只由记忆整理在回复后创建。
+VIOLET_REMINDER_BEFORE_REPLY=1
+# 回复前保存的提醒事项最长字数，超过就请用户说清楚（20）
+VIOLET_REMINDER_MAX_CONTENT_CHARS=20
+# 话题疲劳：不超过该字数的回复（及“嗯/哦/好的”等）视为没有继续交流的意愿。
+VIOLET_SHORT_REPLY_MAX_CHARS=3
+VIOLET_UNANSWERED_AFTER_HOURS=6
+VIOLET_TOPIC_COOLING_THRESHOLD=2
+VIOLET_TOPIC_MAX_UNENGAGED_RAISES=3
+# 主动消息生成后若明显谈到受限话题（未结束/已结束事件、冷却话题）则不发送。
+VIOLET_PROACTIVE_TOPIC_GUARD=1
+VIOLET_TOPIC_GUARD_MIN_RATIO=0.25
+
+# ── 用户理解与情境（第三阶段）──────────────────────────────────────────────────
+# IANA 时区；在 Windows 上需要 tzdata 包，无法加载时退回固定 UTC+08:00。
+VIOLET_TIMEZONE=Asia/Shanghai
+# 敏感个人信息（健康、财务、证件号、联系方式、精确住址等）默认不自动保存。
+VIOLET_PROFILE_STORE_SENSITIVE=0
+# 上下文预算：参考资料总字数、档案事实条数、近期对话条数与字数。
+VIOLET_CONTEXT_MAX_CHARS=4000
+VIOLET_CONTEXT_MAX_FACTS=8
+VIOLET_CONTEXT_MAX_LEGACY=12
+VIOLET_CONTEXT_HISTORY_MESSAGES=20
+# Phase 8.9.8: 历史按“轮”计（同一方连发的几行算一轮），最多这么多轮；0 = 只按 VIOLET_CONTEXT_HISTORY_MESSAGES 条数
+VIOLET_CONTEXT_HISTORY_TURNS=24
+VIOLET_CONTEXT_HISTORY_MAX_CHARS=4000
+# Phase 8.4：Chat 看到的上下文写法。natural（默认）= 不带来源/日期标签、偏好写成做法、标出消息之间的真实间隔、
+# 已发出的提醒标为“已经提醒过了”、给出认识时长；legacy = 与之前各阶段逐字相同（用于复核历史运行和 8.3 A/B）。
+VIOLET_CONTEXT_STYLE=natural
+# 历史消息之间、以及最后一条消息到现在，间隔达到这么多小时才标出时间（短于它视为同一段聊天）。
+VIOLET_CONTEXT_SESSION_GAP_HOURS=3
+# Phase 8.8：用户明确说过不喜欢被追问、这句只是平常分享，而回复仍以提问结尾时，重写一次（多一次 Chat 调用）。
+# 重写后仍然提问、或没通过一致性检查，就保留原回复；不会删掉问号。只在 natural 写法下生效。0 = 关闭。
+VIOLET_FOLLOW_UP_CHECK=1
+# Phase 8.8：IntentAgent 能看到的最近几条消息（带时间），用来判断互道晚安后的“嗯嗯”要不要回复。0 = 不给。
+VIOLET_INTENT_RECENT_MESSAGES=6
+# Phase 8.9：Violet 普通的一天（persona/life_config.json 的 daily；不用模型，按日期固定）。只在 natural 写法下进入聊天上下文。0 = 关闭。
+VIOLET_DAILY_LIFE=1
+# Phase 8.9：根据聊天记录判断你们熟到什么程度（聊天天数、对方主动找她、亲近的话、明确要保持距离），写进“你们的相处”。0 = 关闭。
+VIOLET_RELATIONSHIP_STATE=1
+# Phase 8.9：告诉 Chat 这次聊天里她自己的回复已经叮嘱了几次、几条以问句结尾，避免一直重复。0 = 关闭。
+VIOLET_REPLY_HABIT_NOTE=1
+
+# ── 稳定人设与虚拟生活（第四阶段）──────────────────────────────────────────────
+# 人设与生活配置目录（默认 violet/persona）：persona_core.json 只能人工编辑；life_config.json 可调参数与素材。
+# VIOLET_PERSONA_DIR=
+# 生活引擎总开关（每天至多运行一次，晚于 life_config.run_after_hour；重启不重复、停机不补写）。
+VIOLET_LIFE_ENGINE=1
+# 把人设与生活状态放进对话上下文。
+VIOLET_PERSONA_CONTEXT=1
+# 回复一致性检查：enforce（重写一次，仍冲突则删去冲突的句子）| flag（只记录）| off。
+VIOLET_PERSONA_REPLY_GUARD=enforce
+
+# ── 生活调度、LLM 提案与语义校验（第五阶段 A）──────────────────────────────────
+# 生活引擎独立线程的检查间隔（秒）；暂停/恢复在 Dashboard「人设与生活」页，不影响聊天和主动消息。
+VIOLET_LIFE_CHECK_INTERVAL_SECONDS=600
+# 生活事件措辞：template（默认）| llm（只让模型写进展措辞，程序校验后才保存；预算见 persona/life_config.json 的 generation.llm）
+VIOLET_LIFE_GENERATION_MODE=template
+# llm 模式使用的模型（为空 = 退回模板措辞）
+VIOLET_LIFE_LLM_MODEL=
+# 语义一致性复核：off（默认）| on。只复核规则无法确定的“自身经历”句子；模型只给判断和证据，不能改生活记录。
+VIOLET_SEMANTIC_GUARD=off
+VIOLET_SEMANTIC_GUARD_MODEL=
+VIOLET_SEMANTIC_GUARD_TIMEOUT_SECONDS=8
+VIOLET_SEMANTIC_GUARD_MAX_ATTEMPTS=2
+VIOLET_SEMANTIC_GUARD_MAX_OUTPUT_TOKENS=300
+VIOLET_SEMANTIC_GUARD_MAX_CALLS_PER_DAY=60
+VIOLET_SEMANTIC_GUARD_MAX_TOKENS_PER_DAY=60000
+
+# ── 联网搜索与自主探索（第五阶段 B）────────────────────────────────────────────
+# 内置 Web MCP（web_search / fetch_url，进程内 MCP，仅 ChatAgent 可用，主动消息不可用）。默认关闭。
+VIOLET_WEB_ENABLED=0
+# Phase 9.3：on_demand（默认）= IntentAgent 判断这一轮需要联网时才把工具给 Chat（一个工具 required，多个 auto）；
+# always = 每轮都给 Chat（第五阶段 B 的做法，由模型自己决定）。后台“工具”页也能改。
+VIOLET_WEB_OFFER=on_demand
+# 搜索后端：searxng（默认，自建开源 SearXNG，部署见 deploy/searxng/README.md）| none（不搜索）
+# | mock（离线虚构结果，仅开发）| bocha / brave（可选的付费搜索 API，Phase 9.3）
+VIOLET_WEB_SEARCH_PROVIDER=searxng
+# SearXNG 地址（JSON 输出已在 deploy/searxng/config/settings.yml 打开）。这是唯一受信任的内部地址：只有搜索
+# 请求能去，fetch_url 永远不能去。http 只允许本机 / 内网 / Docker 服务名，其他地址必须 https。
+#   Violet 直接跑在服务器上（start.sh）：http://127.0.0.1:18089（compose 只把端口发布到本机回环）
+#   Violet 也在 Docker 里、加入 violet-searxng 网络：http://searxng:8080
+# 不设置 = 搜索显示“未配置”，其他照常。可选认证只从环境变量读取，不写进代码或日志。
+VIOLET_WEB_SEARXNG_URL=http://127.0.0.1:18089
+# bocha / brave 的 API Key（也可以在后台替换，后台的优先；只发给搜索服务自己的地址）；SearXNG 不需要
+VIOLET_WEB_SEARCH_API_KEY=
+# 可选：覆盖 bocha / brave 的接口地址（默认用官方地址）
+VIOLET_WEB_SEARCH_ENDPOINT=
+VIOLET_WEB_SEARCH_AUTH_HEADER=Authorization
+VIOLET_WEB_SEARCH_LANGUAGE=zh-CN
+VIOLET_WEB_SEARCH_TIMEOUT_SECONDS=10
+# 同样的搜索在这么多秒内再问，直接用上次结果，不再请求（不计入每日次数）
+VIOLET_WEB_SEARCH_CACHE_SECONDS=600
+# ── 课表（Phase 9.4）──────────────────────────────────────────────────────────
+# 内置只读课表 MCP（violet-schedule：get_day_schedule / get_schedule_range / get_current_status / find_course），
+# 只给 ChatAgent、按需提供（Intent 决定），主动联系不调用。默认关闭。课表数据在 Violet 自己的数据库里。
+VIOLET_SCHEDULE_ENABLED=0
+VIOLET_SCHEDULE_TOOL_TIMEOUT_SECONDS=10
+# 哪些个人字段可以在对方明确问到时返回（地点 / 老师 / 考试座位号）；去掉某项就永远不返回
+VIOLET_SCHEDULE_DETAIL_FIELDS=location,teacher,seat
+# Phase 9.4.4（都需要 VIOLET_SCHEDULE_ENABLED=1）。主动联系的课表闸门：按课表在上课（课前 5 分钟到课后 5 分钟）或考试
+# （考前 30 分钟到考完）时不发普通主动消息、不补发；另给主动决策可选的小背景（明天考试只祝一次、今天的课按计划上完了、
+# 这几天课多）。用户要求的提醒不受影响。默认关闭。
+VIOLET_SCHEDULE_PROACTIVE=0
+# 聊天时在情境里加一行“按课表对方可能在上课（到几点）”，只是计划，照常回复。默认关闭。
+VIOLET_SCHEDULE_CONTEXT=0
+
+# 每日硬上限（所有来源合计；被拦截/超预算的请求不计入）
+VIOLET_WEB_MAX_SEARCHES_PER_DAY=30
+VIOLET_WEB_MAX_FETCHES_PER_DAY=40
+# 每轮对话最多联网调用次数；结果条数；网页正文最大字数；外部发现过期天数；查询词最大长度
+VIOLET_WEB_MAX_CALLS_PER_TURN=3
+VIOLET_WEB_MAX_RESULTS=5
+VIOLET_WEB_MAX_TEXT_CHARS=3000
+VIOLET_WEB_FINDING_TTL_DAYS=14
+VIOLET_WEB_QUERY_MAX_CHARS=80
+# 网络安全（默认值即推荐值）：只允许标准端口；超时；大小；重定向；额外屏蔽的主机
+VIOLET_WEB_ALLOWED_PORTS=80,443
+VIOLET_WEB_CONNECT_TIMEOUT_SECONDS=5
+VIOLET_WEB_READ_TIMEOUT_SECONDS=10
+VIOLET_WEB_TOTAL_TIMEOUT_SECONDS=20
+VIOLET_WEB_MAX_BYTES=2000000
+VIOLET_WEB_MAX_REDIRECTS=3
+VIOLET_WEB_BLOCKED_HOSTS=
+VIOLET_WEB_TOOL_TIMEOUT_SECONDS=30
+# 自主探索：部署授权开关（默认关闭）。开启后还需在 Dashboard「联网与探索」页打开；参数见 persona/explore_config.json
+VIOLET_WEB_EXPLORER=0
+VIOLET_WEB_EXPLORER_LLM_MODEL=
+
+# ── 图片系统（第六阶段）──────────────────────────────────────────────────────
+# 总开关。关闭时（默认）收图沿用旧的 ai/vision.py，聊天里没有任何图片工具。
+VIOLET_IMAGE_ENABLED=0
+# 模型注册表（能力矩阵、价格、优先级、备用模型）。密钥只写环境变量名（api_key_env），不写进文件。
+# VIOLET_IMAGE_PROVIDERS_FILE=config/image_providers.json
+# 媒体文件目录（默认 <VIOLET_DATA_DIR>/media，已被 Git 忽略）与保留天数
+# VIOLET_MEDIA_DIR=
+VIOLET_MEDIA_INBOUND_RETENTION_DAYS=7
+VIOLET_MEDIA_GENERATED_RETENTION_DAYS=30
+# 单张图片上限（字节 / 像素）
+VIOLET_IMAGE_MAX_BYTES=10000000
+VIOLET_IMAGE_MAX_PIXELS=40000000
+# 每轮对话最多生成/编辑几张；可编辑或查看的用户图片的时间范围（小时）
+VIOLET_IMAGE_MAX_PER_TURN=1
+VIOLET_IMAGE_RECENT_HOURS=24
+# 没有可用的识图模型时，退回旧的 ai/vision.py 识图
+VIOLET_IMAGE_LEGACY_VISION=1
+# 仅 Dashboard 测试：允许使用“已声明但未验证”的能力（正式聊天永远不用）
+VIOLET_IMAGE_ALLOW_UNVERIFIED=0
+# 独立运行的 Web MCP（stdio）的每日预算状态文件（默认 <VIOLET_DATA_DIR>/web_budget_state.json）
+# VIOLET_WEB_BUDGET_FILE=
+
+# ── 运行与运维（第七阶段 A.1 补充说明；以下均为可选，括号内为默认值）────────────────
+# 配置与数据位置：.env 路径（项目根目录 .env）、数据库路径（项目根目录 violet.db）
+# VIOLET_ENV_FILE=
+# VIOLET_DB_PATH=
+# 日志：设置后写入按大小轮转的日志文件，并把 print/stderr 一并收进去（start.sh 默认设为 logs/main.log）
+# VIOLET_LOG_FILE=
+VIOLET_LOG_MAX_BYTES=20971520
+VIOLET_LOG_BACKUP_COUNT=5
+VIOLET_LOG_CAPTURE_STDOUT=1
+# 每个模型的请求参数策略（是否发送 temperature、用哪个输出长度字段）；默认 config/model_params.json
+# VIOLET_MODEL_PARAMS_FILE=
+# 微信轮询：长轮询超时秒数（3）、两次轮询间隔秒数（1.0）
+VIOLET_POLL_TIMEOUT_SECONDS=3
+VIOLET_POLL_INTERVAL_SECONDS=1.0
+# 下载 / 识别收到的媒体的并发线程数（2）
+VIOLET_MEDIA_WORKERS=2
+# 模拟打字：每条消息的最短 / 最长等待秒数（1.0 / 20.0）；发送失败重试前的等待秒数（2.0）
+VIOLET_TYPING_MIN_DELAY_SECONDS=1.0
+VIOLET_TYPING_MAX_DELAY_SECONDS=20.0
+VIOLET_SEND_RETRY_DELAY_SECONDS=2.0
+# 上下文里最多列出几条待办的约定提醒（3）
+VIOLET_CONTEXT_MAX_COMMITMENTS=3
+# 用户拒绝回答了解类问题后，多少分钟内不再问（240）
+VIOLET_ONBOARDING_DECLINE_WINDOW_MINUTES=240
+# 隐式交流偏好：最多参考最近几次观察（10）
+VIOLET_PREF_MAX_OBSERVATIONS=10
+# 话题判断：不超过几个二字组的短话题按宽松规则匹配（4）
+VIOLET_SHORT_TOPIC_MAX_BIGRAMS=4
+# 只用于开发：mock 搜索后端的虚构数据文件（JSON 列表）
+# VIOLET_WEB_MOCK_DATA=
+# 图片相关文字（提示词、识别描述）的保留天数（30）；旧识图回退每天最多调用次数（50）
+VIOLET_IMAGE_TEXT_RETENTION_DAYS=30
+VIOLET_IMAGE_LEGACY_VISION_MAX_PER_DAY=50
+# 自然的初次认识：每次最多一个问题；两次之间至少间隔这么多小时和用户轮次；被拒绝的不再问。
+VIOLET_ONBOARDING=1
+VIOLET_ONBOARDING_MIN_HOURS=12
+VIOLET_ONBOARDING_MIN_TURNS=6
+VIOLET_ONBOARDING_REASK_DAYS=14
+VIOLET_ONBOARDING_MAX_MESSAGE_CHARS=30
+# 隐式交流偏好：需要窗口期内多次一致的观察，置信度有上限，可随行为变化恢复。
+VIOLET_PREF_WINDOW_DAYS=14
+VIOLET_PREF_MIN_OBSERVATIONS=4
+VIOLET_PREF_MIN_SHARE=0.75
+VIOLET_PREF_IMPLICIT_MAX_CONFIDENCE=0.6
+# 用户在这么久没有收到 Violet 消息后开口，视为用户主动发起对话（重置冷场计数）。
+VIOLET_USER_INITIATED_GAP_MINUTES=30
+
+
+# ── Intent Agent ─────────────────────────────────────────────────────────────
+INTENT_LLM_MODEL=grok-4.2
+INTENT_LLM_MODEL_TEMPERATURE=0.2
+# 提示词默认在 persona/prompts/intent.txt；设置 INTENT_LLM_PROMPT 会覆盖它
+
+
+# ── Performer Agent ───────────────────────────────────────────────────────────
+PERFORMER_LLM_MODEL=gpt-5.4
+PERFORMER_LLM_MODEL_TEMPERATURE=0.2
+# 提示词默认在 persona/prompts/performer.txt；设置 PERFORMER_LLM_PROMPT 会覆盖它
+# ── Chat Agent ────────────────────────────────────────────────────────────────
+CHAT_LLM_MODEL=grok-4.2
+CHAT_LLM_MODEL_TEMPERATURE=0.8
+# 提示词默认是 persona/chat_prompt_versions/chat.v1.txt（后台可选其他版本）；设置 CHAT_LLM_PROMPT 会覆盖它
+
+
+# ── Memory Agent ──────────────────────────────────────────────────────────────
+MEMORY_LLM_MODEL_TEMPERATURE=0.2
+MEMORY_LLM_MODEL=gpt-5-mini
+# 提示词默认在 persona/prompts/memory.txt；设置 MEMORY_LLM_PROMPT 会覆盖它
+
+PROACTIVE_LLM_MODEL=gpt-5-mini
+PROACTIVE_LLM_MODEL_TEMPERATURE=0.2
+# 提示词默认是 persona/proactive_prompt_versions/proactive.v1.txt（后台可选其他版本）；设置 PROACTIVE_LLM_PROMPT 会覆盖它
+
+# --- Phase 7 B.1: local test tools (python -m tools.violet_test_chat / dialogue_eval / model_compat) ---
+# Shell-only switches for the test tools; Violet itself never reads them. Never put a key in this file.
+# VIOLET_TEST_ALLOW_REAL_API=0      # 1 = the test tools MAY call a real model (still needs --real and yes)
+# VIOLET_TEST_API_URL=              # test endpoint, OpenAI compatible
+# VIOLET_TEST_API_KEY=              # separate test key; set in the shell only, or type it at the hidden prompt
+
+# --- Phase 7 B.2: fewer model calls ---
+# 1 = IntentAgent is not offered query_memory while no event memory could be found (saves a call)
+VIOLET_INTENT_HIDE_EMPTY_MEMORY_TOOL=1
+# 1 = background memory jobs may end right after successful writes when the model calls memory_done
+VIOLET_MEMORY_FINISH_SIGNAL=1
+# 1 = MemoryAgent is not offered query_memory while there is no event memory at all (user-disabled ones count)
+VIOLET_MEMORY_HIDE_EMPTY_QUERY_TOOL=1
+# 1 = old nickname core memories are not shown to Chat while a confirmed profile name exists
+VIOLET_CONTEXT_HIDE_LEGACY_NICKNAME=1

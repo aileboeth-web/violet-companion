@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Violet 人设与生活</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --bg:#0b1120; --bg2:#111827; --card:rgba(17,24,39,.82); --border:rgba(148,163,184,.15);
+            --text:#e2e8f0; --muted:#64748b; --accent:#6366f1; --red:#f87171; --green:#4ade80; --amber:#f59e0b; }
+    body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:linear-gradient(135deg,var(--bg),var(--bg2));
+           color:var(--text); min-height:100vh; }
+    .topbar { display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid var(--border); }
+    .topbar h1 { font-size:17px; }
+    a.back, button { font-size:13px; color:var(--text); background:transparent; border:1px solid var(--border);
+                     border-radius:999px; padding:5px 12px; cursor:pointer; text-decoration:none; }
+    button.primary { background:var(--accent); border-color:var(--accent); }
+    main { max-width:1100px; margin:0 auto; padding:16px; display:grid; gap:16px; }
+    section { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:16px; overflow-x:auto; }
+    h2 { font-size:15px; margin-bottom:10px; }
+    .muted { color:var(--muted); font-size:12px; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { text-align:left; padding:6px; border-bottom:1px solid var(--border); vertical-align:top; }
+    .tag { font-size:11px; padding:1px 8px; border-radius:999px; border:1px solid var(--border); }
+    .s-active,.s-happened,.s-completed { color:var(--green); } .s-paused,.s-proposed,.s-planned { color:var(--amber); }
+    .s-retracted,.s-rejected,.s-cancelled,.s-abandoned { color:var(--red); }
+    ul { padding-left:18px; font-size:13px; line-height:1.7; }
+    pre { white-space:pre-wrap; font-size:12px; color:var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="topbar"><h1>Violet 人设与虚拟生活</h1><div><a class="back" href="/">返回</a> <button onclick="load()">刷新</button></div></div>
+  <main>
+    <section><h2>核心人设 <span id="core-ver" class="muted"></span></h2><p id="core-note" class="muted"></p><div id="core"></div></section>
+    <section><h2>人设动态（缓慢变化，需有原因）</h2><table id="dyn"></table></section>
+    <section><h2>生活引擎 <span id="engine-mode" class="muted"></span></h2>
+      <button onclick="act('/api/life/engine/pause')">暂停</button> <button onclick="act('/api/life/engine/resume')">恢复</button>
+      <p class="muted">暂停只停止虚拟生活推进，不影响聊天和主动消息；关闭需设置 VIOLET_LIFE_ENGINE=0。</p></section>
+    <section><h2>生活线</h2><table id="threads"></table></section>
+    <section><h2>计划</h2><table id="plans"></table></section>
+    <section><h2>生活事件（虚拟）</h2><table id="events"></table></section>
+    <section><h2>一致性标记（待人工处理）</h2><table id="flags"></table></section>
+    <section><h2>修订历史</h2><pre id="history">点击任意“历史”查看。</pre></section>
+  </main>
+<script>
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const tag = s => `<span class="tag s-${esc(s)}">${esc(s)}</span>`;
+async function api(path, method = "GET", data) {
+  const r = await fetch(path, {method, credentials: "same-origin",
+    headers: data ? {"Content-Type": "application/json"} : {}, body: data ? JSON.stringify(data) : undefined});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { alert(j.error || r.status); throw new Error(j.error); }
+  return j;
+}
+async function act(path, data) { await api(path, "POST", data || {}); load(); }
+async function history(entity, id) {
+  const path = entity === "persona_dynamic" ? `/api/persona/dynamics/${id}/history` : `/api/life/${entity}/${id}/history`;
+  document.getElementById("history").textContent = JSON.stringify(await api(path), null, 2);
+}
+async function correct(id, old) {
+  const content = prompt("更正后的内容（只改 Violet 的虚拟经历）", old); if (!content) return;
+  const reason = prompt("更正原因"); if (!reason) return;
+  await api(`/api/life/events/${id}`, "PATCH", {content, reason}); load();
+}
+async function retract(id) { const reason = prompt("撤回原因"); if (reason) act(`/api/life/events/${id}/retract`, {reason}); }
+function list(title, items) { return items && items.length ? `<p class="muted">${esc(title)}</p><ul>${items.map(i => `<li>${esc(typeof i === "string" ? i : i.label)}</li>`).join("")}</ul>` : ""; }
+async function load() {
+  const p = await api("/api/persona"), l = await api("/api/life");
+  const d = p.core.data;
+  document.getElementById("engine-mode").textContent = `模式：${l.engine.mode}`;
+  document.getElementById("core-ver").textContent = `v${p.core.version} · ${p.core.sha256.slice(0, 12)}`;
+  document.getElementById("core-note").textContent = p.core.edit_policy;
+  document.getElementById("core").innerHTML = `<p>${esc(d.identity.virtual_declaration)}</p>` + list("性格", d.personality)
+    + list("说话习惯", d.communication_habits) + list("长期兴趣", d.long_term_interests) + list("价值观", d.values)
+    + list("缺点", d.flaws) + list("生活边界", d.living_constraints);
+  document.getElementById("dyn").innerHTML = "<tr><th>方面</th><th>类别</th><th>值</th><th>之前</th><th>原因</th><th>状态</th><th></th></tr>" +
+    p.dynamics.map(x => `<tr><td>${esc(x.aspect_key)}</td><td>${esc(x.category)}</td><td>${esc(x.value)}</td><td>${esc(x.previous_value)}</td>
+      <td>${esc(x.reason)}</td><td>${tag(x.status)}</td><td>${x.status === "proposed" ? `<button onclick="act('/api/persona/dynamics/${+x.id}/decide',{approve:true})">批准</button>
+      <button onclick="act('/api/persona/dynamics/${+x.id}/decide',{approve:false})">拒绝</button>` : ""}
+      <button onclick="history('persona_dynamic',${+x.id})">历史</button></td></tr>`).join("");
+  document.getElementById("threads").innerHTML = "<tr><th>标题</th><th>兴趣</th><th>状态</th><th>进度</th><th>开始</th><th></th></tr>" +
+    l.threads.map(t => `<tr><td>${esc(t.title)}</td><td>${esc(t.interest_key)}</td><td>${tag(t.status)}</td><td>${esc(t.progress_steps)}</td>
+      <td>${esc((t.started_at || "").slice(0, 10))}</td><td>${t.status === "active" ? `<button onclick="act('/api/life/threads/${+t.id}/pause')">暂停</button>` : ""}
+      ${t.status === "paused" ? `<button onclick="act('/api/life/threads/${+t.id}/resume')">恢复</button>` : ""}
+      ${["active", "paused"].includes(t.status) ? `<button onclick="act('/api/life/threads/${+t.id}/abandon')">放弃</button>` : ""}
+      <button onclick="history('thread',${+t.id})">历史</button></td></tr>`).join("");
+  document.getElementById("plans").innerHTML = "<tr><th>内容</th><th>计划时间</th><th>状态</th><th></th></tr>" +
+    l.plans.map(x => `<tr><td>${esc(x.content)}</td><td>${esc((x.planned_for || "").slice(0, 16))}</td><td>${tag(x.status)}</td>
+      <td>${["planned", "active", "paused"].includes(x.status) ? `<button onclick="act('/api/life/plans/${+x.id}/cancel')">取消</button>` : ""}
+      <button onclick="history('plan',${+x.id})">历史</button></td></tr>`).join("");
+  document.getElementById("events").innerHTML = "<tr><th>时间</th><th>内容</th><th>类型</th><th>状态</th><th>来源</th><th>已告诉用户</th><th></th></tr>" +
+    l.events.slice().reverse().map(e => `<tr><td>${esc((e.occurred_at || "").slice(0, 16))}</td><td>${esc(e.content)}</td><td>${esc(e.event_type)}</td>
+      <td>${tag(e.status)}</td><td>${esc(e.source)}</td><td>${e.share_count ? "是" : "否"}</td>
+      <td>${e.status === "happened" ? `<button onclick="correct(${+e.id}, ${esc(JSON.stringify(e.content))})">更正</button> <button onclick="retract(${+e.id})">撤回</button>` : ""}
+      <button onclick="history('event',${+e.id})">历史</button></td></tr>`).join("");
+  document.getElementById("flags").innerHTML = "<tr><th>时间</th><th>对象</th><th>检查</th><th>详情</th><th></th></tr>" +
+    l.flags.map(f => `<tr><td>${esc((f.created_at || "").slice(0, 16))}</td><td>${esc(f.entity)}</td><td>${esc(f.check_name)}</td>
+      <td>${esc(f.detail)}</td><td><button onclick="act('/api/life/flags/${+f.id}/resolve')">已处理</button></td></tr>`).join("");
+}
+load();
+</script>
+</body>
+</html>
