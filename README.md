@@ -42,7 +42,7 @@ sudo bash violet/install.sh
 | `docs/` | 设计决策、测试记录、开发交接 |
 | `scripts/` | 开发用的检查脚本 |
 
-配套的安卓只读手机状态 MCP 服务器是另一个仓库。
+配套的安卓只读手机状态服务 Violet MCP 在另一个仓库：[aileboeth-web/violet-mcp](https://github.com/aileboeth-web/violet-mcp)（可选，装在手机上，让 Violet 在你允许的范围内知道手机的状态）。
 
 ## 许可证
 

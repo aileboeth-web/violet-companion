@@ -41,7 +41,7 @@ def allowlisted_server(url, token=TEST_TOKEN, **extra):
 
 
 def phone_style(url, token=TEST_TOKEN, **extra):
-    """Same shape as docs/EVE_INTEGRATION.md of the MCP repository (D:\\unity\\aichat\\mcp)."""
+    """Same shape as docs/VIOLET_INTEGRATION.md of the MCP repository (D:\\unity\\aichat\\mcp)."""
     cfg = {
         "name": "android-phone",
         "transport": "streamable_http",
