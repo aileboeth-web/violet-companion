@@ -354,7 +354,7 @@ def test_a_release_contains_the_program_without_secrets_and_a_matching_checksum(
     script = (dist / "install.sh").read_text(encoding="utf-8")
     assert "__VIOLET_RELEASE_BASE__" not in script and "https://example.org/violet/latest/violet.tar.gz" not in script
     assert 'release_base="${VIOLET_RELEASE_BASE:-https://example.org/violet/latest}"' in script and "\r" not in script
-    assert meta["install_command"] == "curl -fsSL https://example.org/violet/latest/install.sh | sudo bash"
+    assert meta["install_command"] == "curl -fsSL https://example.org/violet/latest/install.sh | bash"
     digest = hashlib.sha256((dist / "violet.tar.gz").read_bytes()).hexdigest()
     assert (dist / "violet.tar.gz.sha256").read_text().split()[0] == digest
     with tarfile.open(dist / "violet.tar.gz") as tar:
@@ -398,7 +398,8 @@ def test_the_one_line_remote_install_downloads_verifies_and_installs(tmp_path):
         env.pop("MSYS_NO_PATHCONV", None)        # Git bash: any value turns the /tmp -> C:\... conversion off
         for key in ("VIOLET_DATA_DIR", "VIOLET_DB_PATH", "VIOLET_ENV_FILE", "VIOLET_ADMIN_TOKEN", "LLM_API_KEY", "LLM_API_URL"):
             env.pop(key, None)
-        command = (f"curl -fsSL {base}/install.sh | bash -s -- --root '{root.as_posix()}' --port {port} "
+        # a normal user installing into a folder of their own: --user-install (no root, no sudo)
+        command = (f"curl -fsSL {base}/install.sh | bash -s -- --user-install --root '{root.as_posix()}' --port {port} "
                    f"--service supervisor --reuse-venv '{Path(sys.prefix).as_posix()}' --json")
         done = subprocess.run([_git_bash(), "-c", command], capture_output=True, text=True, encoding="utf-8",
                               timeout=300, env=env)
@@ -409,7 +410,8 @@ def test_the_one_line_remote_install_downloads_verifies_and_installs(tmp_path):
         assert inst.probe_eve(port) is not None
         # a tampered archive is refused before anything is installed
         (dist / "violet.tar.gz.sha256").write_text("0" * 64 + "  violet.tar.gz\n")
-        bad = subprocess.run([_git_bash(), "-c", f"curl -fsSL {base}/install.sh | bash -s -- --root '{(tmp_path / 'r2').as_posix()}'"],
+        bad = subprocess.run([_git_bash(), "-c",
+                              f"curl -fsSL {base}/install.sh | bash -s -- --user-install --root '{(tmp_path / 'r2').as_posix()}'"],
                              capture_output=True, text=True, encoding="utf-8", timeout=120, env=env)
         assert bad.returncode != 0 and "校验失败" in bad.stderr and not (tmp_path / "r2").exists()
     finally:

@@ -2,12 +2,15 @@
 # Violet one-command installer (phase 10.4 / 10.7).
 #
 # On a fresh server -- nothing to download first, no git, no Python setup:
-#     curl -fsSL __VIOLET_RELEASE_BASE__/install.sh | sudo bash
+#     curl -fsSL __VIOLET_RELEASE_BASE__/install.sh | bash
+# The same command everywhere: as root it installs directly (Debian minimal has no sudo); as a normal user it runs
+# itself again through sudo (asks for the password); a normal user without sudo is told to switch to root (su -).
+# --user-install keeps it in the current user's home instead (~/.local/share/violet, no root needed).
 # Options go after "-s --":
-#     curl -fsSL __VIOLET_RELEASE_BASE__/install.sh | sudo bash -s -- --access public
-#     curl -fsSL __VIOLET_RELEASE_BASE__/install.sh | sudo bash -s -- upgrade
+#     curl -fsSL __VIOLET_RELEASE_BASE__/install.sh | bash -s -- --access public
+#     curl -fsSL __VIOLET_RELEASE_BASE__/install.sh | bash -s -- upgrade
 # From an unpacked release or a source checkout the same script works locally:
-#     sudo bash install.sh [install|upgrade|status|backup|uninstall ...] [options]
+#     bash install.sh [install|upgrade|status|backup|uninstall ...] [options]
 #
 # What this script does itself: find Python 3.11+ with venv (as root, install it with the system package manager --
 # set VIOLET_NO_SYSTEM_PACKAGES=1 to forbid that), and -- when it is not next to the program -- download the release
@@ -28,6 +31,39 @@ violet_main() {
   say() { printf '%s\n' "$*" >&2; }
   die() { say "失败：$*"; exit 1; }
   is_root() { [ "$(id -u 2>/dev/null || echo 1)" = "0" ]; }
+
+  # --user-install: stay the current user on purpose (no root, no sudo)
+  local user_install=0 arg
+  local -a rest=()
+  for arg in "$@"; do
+    if [ "$arg" = "--user-install" ]; then user_install=1; else rest+=("$arg"); fi
+  done
+  set -- ${rest[@]+"${rest[@]}"}
+
+  if ! is_root && [ "$user_install" = "0" ] && [ "${VIOLET_NO_ELEVATE:-0}" != "1" ]; then
+    local script=""
+    if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then script="${BASH_SOURCE[0]}"; fi
+    if command -v sudo >/dev/null 2>&1; then
+      say "== 需要管理员权限：用 sudo 重新运行（可能要输入你的密码）"
+      local code=0 tmp_script=""
+      if [ -z "$script" ]; then
+        # arrived through a pipe: fetch this same script again to hand it to sudo
+        case "$release_base" in
+          __VIOLET_RELEASE_BASE*) die "请以 root 运行，或在前面加 sudo" ;;
+        esac
+        tmp_script="$(mktemp)"
+        if command -v curl >/dev/null 2>&1; then curl -fsSL --retry 3 "$release_base/install.sh" -o "$tmp_script"
+        elif command -v wget >/dev/null 2>&1; then wget -q -O "$tmp_script" "$release_base/install.sh"
+        else die "需要 curl 或 wget"; fi
+        script="$tmp_script"
+      fi
+      sudo bash "$script" "$command" "$@" || code=$?
+      [ -z "$tmp_script" ] || rm -f "$tmp_script"
+      exit "$code"
+    fi
+    die "需要 root 权限，但这台机器没有 sudo。请先切换到 root（执行 su - 并输入 root 密码）后重新运行这条命令；
+或者加 --user-install 只装到当前用户（不注册系统服务，没有自动更新）"
+  fi
 
   find_python() {
     local candidate

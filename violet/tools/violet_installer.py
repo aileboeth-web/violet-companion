@@ -1,6 +1,6 @@
 """Violet Installer (phase 10.4). Standard library only: it runs before Violet's virtual environment exists.
 
-    sudo bash install.sh                      (Linux; the script finds Python 3.11+ and runs this module)
+    bash install.sh                           (Linux; as root, or a sudo user -- it elevates itself; finds Python 3.11+)
     python tools/violet_installer.py install     (any OS; same thing)
 
 Commands (all take --root, the install directory; default /opt/violet as root, ~/.local/share/violet
@@ -309,7 +309,7 @@ def preflight(layout: Layout, python: str = sys.executable, platform_info: dict 
     parent = _existing_parent(layout.root)
     writable = os.access(parent, os.W_OK)
     checks.append(Check("writable", writable, f"可以写入 {parent}" if writable else
-                        f"没有权限写入 {parent}（用 sudo 运行，或用 --root 指定自己的目录）"))
+                        f"没有权限写入 {parent}（以 root 运行，或用 --root 指定自己的目录）"))
     free_mb = shutil.disk_usage(parent).free // (1024 * 1024)
     checks.append(Check("disk", free_mb >= MIN_DISK_MB, f"可用磁盘 {free_mb} MB"
                         + ("" if free_mb >= MIN_DISK_MB else f"，至少需要 {MIN_DISK_MB} MB")))
@@ -766,7 +766,7 @@ class Service:
                 self._ctl("enable", f"{SERVICE_NAME}.service")
             note = f"systemd 服务 {SERVICE_NAME}（崩溃后 5 秒自动重启" + ("，开机自启）" if autostart else "）")
             if self.mode == "systemd-user":
-                note += "；用户服务要在退出登录后继续运行，请执行：sudo loginctl enable-linger " + (self.user or "$USER")
+                note += "；用户服务要在退出登录后继续运行，请以 root 执行：loginctl enable-linger " + (self.user or "$USER")
             return note
         return "Violet 自带的守护进程（崩溃后自动重启）"
 
@@ -1440,7 +1440,7 @@ def update(opts: Options, check_only: bool = False, release: dict | None = None,
     if (os.name == "nt") if windows is None else windows:
         raise InstallError(f"Windows 上请下载 {rel['tag']} 的程序，在其目录里运行 python tools/violet_installer.py upgrade")
     if state.get("service") == "systemd" and not _is_root():
-        raise InstallError(f"需要 root 权限：sudo {layout.root / 'violet'} update")
+        raise InstallError(f"需要 root 权限：以 root 运行 {layout.root / 'violet'} update")
     work = Path(tempfile.mkdtemp(prefix="violet-update-"))
     try:
         script = work / "install.sh"
@@ -1633,8 +1633,23 @@ def write_cli(layout: Layout) -> None:
                                              encoding="utf-8")
     else:
         path = layout.root / "violet"
-        path.write_text(f'#!/bin/sh\nexec "{py}" "{installer}" "$@" --root "{layout.root}"\n', encoding="utf-8")
+        path.write_text(cli_script(py, installer, layout.root, elevate=_is_root()), encoding="utf-8")
         os.chmod(path, 0o755)
+
+
+def cli_script(py: Path, installer: Path, root: Path, elevate: bool) -> str:
+    """The <root>/violet wrapper. An installation made by root manages root-owned files and services: run by a normal
+    user it runs itself again through sudo, so the same command works on Debian as root (no sudo there) and on Ubuntu
+    as a sudo user."""
+    lines = ["#!/bin/sh"]
+    if elevate:
+        lines += ['if [ "$(id -u)" != "0" ]; then',
+                  '  if command -v sudo >/dev/null 2>&1; then exec sudo "$0" "$@"; fi',
+                  '  echo "需要 root 权限：先切换到 root（su -）再运行" >&2',
+                  '  exit 1',
+                  'fi']
+    lines.append(f'exec "{py}" "{installer}" "$@" --root "{root}"')
+    return "\n".join(lines) + "\n"
 
 
 # ------------------------------------------------------------------------------------------------ output
@@ -1662,7 +1677,7 @@ def render_result(result: dict[str, Any]) -> str:
         lines += [f"初始密码：{admin['password']}", "  这个密码只显示这一次；第一次登录后必须修改。"]
     else:
         lines.append("密码：沿用已有的密码")
-    lines.append(f"  忘记了：sudo {Path(result.get('root', '.')) / 'violet'} info（地址和用户名）| reset-password（新的初始密码）")
+    lines.append(f"  忘记了：{Path(result.get('root', '.')) / 'violet'} info（地址和用户名）| reset-password（新的初始密码）")
     lines += ["", "网络检查："]
     marks = {"ok": "通过", "fail": "失败", "not_checked": "未验证", "not_applicable": "不适用"}
     for layer in result.get("network") or []:
@@ -1771,7 +1786,7 @@ def main(argv: list[str] | None = None) -> int:
                 for note in (result.get("firewall"), result.get("note")):
                     if note:
                         out("  " + note)
-                out(f"  新地址：sudo {root / 'violet'} info 查看")
+                out(f"  新地址：{root / 'violet'} info 查看")
                 return 0
         elif args.command == "auto-update":
             result = auto_update(opts)

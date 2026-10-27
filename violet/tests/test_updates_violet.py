@@ -173,7 +173,7 @@ def test_check_reports_a_newer_release_and_caches_it(updates, tmp_path):
     clock = lambda: t[0]  # noqa: E731
     first = updates.check(fetch=fetch, now=clock, root=root)
     assert first["newer"] and first["latest"] == "0.2.0" and first["current"] == "0.1.0"
-    assert first["command"] == f"sudo {root.parent / 'violet'} update" and first["url"].startswith("https://github.com/")
+    assert first["command"] == f"{root.parent / 'violet'} update" and first["url"].startswith("https://github.com/")
     t[0] += 3600
     assert updates.check(fetch=fetch, now=clock, root=root)["newer"]   # an hour later: from the cache
     assert len(calls) == 1
@@ -218,6 +218,6 @@ def test_the_release_workflow_publishes_what_make_release_builds():
 
 
 def test_the_readme_and_install_guide_give_the_github_one_liner():
-    line = "curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | sudo bash"
+    line = "curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash"
     assert line in (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     assert line in (PROJECT / "INSTALL.md").read_text(encoding="utf-8")

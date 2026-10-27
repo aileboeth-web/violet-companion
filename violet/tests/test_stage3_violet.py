@@ -446,3 +446,27 @@ def test_a_feed_release_points_at_its_own_install_script(tmp_path):
     assert rel["version"] == "0.4.0" and rel["install_url"] == "http://127.0.0.1:18765/install.sh"
     with pytest.raises(inst.InstallError):
         inst.feed_release("http://127.0.0.1:18765/release.json", opener=lambda req, timeout: Response(b'{"a": 1}'))
+
+
+# ------------------------------------------------------------------------------------------------ root / sudo (Debian)
+
+def test_the_violet_command_of_a_root_install_elevates_itself():
+    script = inst.cli_script(Path("/opt/violet/venv/bin/python"), Path("/opt/violet/app/tools/violet_installer.py"),
+                             Path("/opt/violet"), elevate=True).replace("\\", "/")
+    assert 'if [ "$(id -u)" != "0" ]' in script and 'exec sudo "$0" "$@"' in script and "su -" in script
+    assert script.rstrip().endswith('--root "/opt/violet"')
+    user = inst.cli_script(Path("/h/v/venv/bin/python"), Path("/h/v/app/tools/violet_installer.py"), Path("/h/v"),
+                           elevate=False)
+    assert "sudo" not in user                         # a --user-install stays the user
+
+
+def test_one_command_for_root_without_sudo_and_for_sudo_users():
+    """Debian minimal: root, no sudo. Ubuntu: a user with sudo. The documented command has no sudo in it."""
+    sh = (PROJECT / "install.sh").read_text(encoding="utf-8")
+    assert "--user-install" in sh and 'sudo bash "$script" "$command" "$@"' in sh and "su -" in sh
+    assert sh.index("! is_root") < sh.index("find_python || true")       # elevate before anything is installed
+    import tools.make_release as mr
+    assert '| bash"' in (PROJECT / "tools" / "make_release.py").read_text(encoding="utf-8") and mr
+    for doc in (PROJECT / "INSTALL.md", PROJECT.parent / "README.md"):
+        text = doc.read_text(encoding="utf-8")
+        assert "| sudo bash" not in text and "sudo /opt/violet" not in text, doc

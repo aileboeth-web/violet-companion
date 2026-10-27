@@ -418,7 +418,7 @@ function renderEntranceNote(entrance, port) {
   $("#acct-entrance-note").textContent = (entrance
     ? `后台地址：${base}/${entrance}（没有带安全入口的访问一律显示 404）。`
     : "没有设置安全入口：任何人都能打开登录页，建议设置一个。") +
-    " 修改端口需要重启服务，请在服务器上执行 sudo /opt/violet/violet set-port 新端口；忘记地址或密码时执行 sudo /opt/violet/violet info / reset-password。";
+    " 修改端口需要重启服务，请在服务器上执行 /opt/violet/violet set-port 新端口；忘记地址或密码时执行 /opt/violet/violet info / reset-password。";
 }
 $("#acct-entrance-random").addEventListener("change", (ev) => { $("#acct-entrance").disabled = ev.target.checked; });
 $("#acct-form").addEventListener("submit", async (ev) => {

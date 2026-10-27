@@ -18,6 +18,17 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+      - name: a normal user with sudo runs the same one-line command (through a pipe)
+        run: |
+          set -o pipefail
+          python3 violet/tools/make_release.py --base http://127.0.0.1:18766 --out /tmp/rel --worktree >/dev/null
+          (cd /tmp/rel && nohup python3 -m http.server 18766 --bind 127.0.0.1 >/dev/null 2>&1 &)
+          sleep 1
+          [ "$(id -u)" != "0" ]
+          curl -fsSL http://127.0.0.1:18766/install.sh | bash -s -- doctor --json 2>&1 | tee doctor.log
+          grep -q "用 sudo 重新运行" doctor.log
+          grep -q '"root": "/opt/violet"' doctor.log
+          echo "PASS normal user with sudo: install.sh ran itself again as root"
       - name: one-command install, repair, backup, failed upgrade, uninstall (systemd)
         run: |
           set -o pipefail

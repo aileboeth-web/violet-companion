@@ -2,8 +2,8 @@
 #   git tag v0.1.0 && git push origin v0.1.0
 # The job builds the release files with violet/tools/make_release.py from the tagged commit and attaches them to a
 # GitHub Release. Then
-#   curl -fsSL https://github.com/<owner>/<repo>/releases/latest/download/install.sh | sudo bash   installs it,
-#   sudo /opt/violet/violet update                                                                upgrades to it,
+#   curl -fsSL https://github.com/<owner>/<repo>/releases/latest/download/install.sh | bash        installs it,
+#   /opt/violet/violet update                                                                     upgrades to it,
 # and the Control Center's "开始" page shows that a newer version exists.
 name: release
 on:

@@ -5,10 +5,12 @@
 在一台全新的 Linux 服务器上（不需要先下载源码、装 git 或配置 Python）：
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | sudo bash
+curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash
 ```
 
-装的是 GitHub Releases 上最新发布的版本。选项放在 `-s --` 后面，例如 `| sudo bash -s -- --access public`。自己发布到别的地址时：`tools/make_release.py --base <发布地址>` 生成发布文件，`release.json` 里的 `install_command` 就是对应的命令。
+各种 Linux 都用这一条：以 root 登录的（例如 Debian 最小安装，没有 sudo）直接安装；普通用户会自动通过 sudo 重新运行（输入你的密码）；普通用户而且没有 sudo 的，会提示先执行 `su -` 切换到 root。下面的 `/opt/violet/violet …` 命令也是一样，不需要自己加 sudo。
+
+装的是 GitHub Releases 上最新发布的版本。选项放在 `-s --` 后面，例如 `| bash -s -- --access public`。自己发布到别的地址时：`tools/make_release.py --base <发布地址>` 生成发布文件，`release.json` 里的 `install_command` 就是对应的命令。
 
 安装程序会依次：找到或自动安装 Python 3.11+（root 时用系统包管理器；系统自带的版本太旧时，例如 Ubuntu 22.04，再装 python3.11）→ 下载程序并核对 SHA-256 → 检查系统（venv、磁盘、内存、目录权限）→ 复制程序到 `/opt/violet/app` → 创建虚拟环境并安装依赖 → 生成配置 `config/violet.env` 和数据目录 → 选择端口（默认 7100，被占用就自动选下一个空闲的）→ 生成随机的安全入口、用户名和一次性的初始密码 → 创建系统用户 `violet`、注册 systemd 服务（崩溃自动重启、开机自启）→ 启动并做健康检查 → 输出后台地址、用户名、初始密码和网络检查结果。
 
@@ -22,7 +24,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 初始密码：Xb7…（只显示这一次；第一次登录后必须修改）
 ```
 
-已经有程序目录时也可以在目录里运行：`sudo bash install.sh`。不用 sudo：装到 `~/.local/share/violet`，用 systemd 用户服务（没有 systemd 时用 Violet 自带的守护进程）。Windows / macOS：`python tools/violet_installer.py install`。
+已经有程序目录时也可以在目录里运行：`bash install.sh`。不想用 root：加 `--user-install`，装到 `~/.local/share/violet`，用 systemd 用户服务（没有 systemd 时用 Violet 自带的守护进程；这种方式没有自动更新）。Windows / macOS：`python tools/violet_installer.py install`。
 
 同一份数据只能运行一个 Violet：已经有 Violet 在运行时，再启动一个会直接退出并说明原因（避免同一条消息被回复两次）。
 
@@ -56,11 +58,11 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 |---|---|
 | 自动更新（默认） | 每 6 小时检查一次 GitHub Releases，有新版本就在服务器上自动升级：先备份，新版本起不来自动退回旧版本。同一个版本升级失败后 24 小时内不再自动重试 |
 
-升级（以及重新运行安装做修复）前做的备份：成功并通过健康检查后**自动删除**，不占硬盘；失败时保留在 `backups/`，用来恢复。自己用 `violet backup` 做的备份不会被自动删除。想在升级后还能退回旧数据，升级前先执行一次 `sudo /opt/violet/violet backup`。
+升级（以及重新运行安装做修复）前做的备份：成功并通过健康检查后**自动删除**，不占硬盘；失败时保留在 `backups/`，用来恢复。自己用 `violet backup` 做的备份不会被自动删除。想在升级后还能退回旧数据，升级前先执行一次 `/opt/violet/violet backup`。
 | 自动检查，只提醒 | “开始”页的“版本与更新”显示有新版本，点“立即更新”才升级 |
 | 手动检查 | 只在你点“检查更新”时才查询 |
 
-自动更新靠安装时注册的 root 定时任务（`violet-update.timer`），只有 root + systemd 的安装才有（一行命令安装就是这种）。Violet 自己以普通用户 `violet` 运行，它只能“请求更新到官方最新版”，不能指定下载地址。其他安装方式在页面上给出命令：`sudo /opt/violet/violet update`。
+自动更新靠安装时注册的 root 定时任务（`violet-update.timer`），只有 root + systemd 的安装才有（一行命令安装就是这种）。Violet 自己以普通用户 `violet` 运行，它只能“请求更新到官方最新版”，不能指定下载地址。其他安装方式在页面上给出命令：`/opt/violet/violet update`。
 
 改用自己的分支发布：安装时加 `--update-repo 你的用户名/仓库名`。
 
@@ -75,17 +77,17 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 /opt/violet/violet stop | start | restart
 /opt/violet/violet backup        # 配置 + 数据（数据库在线一致备份）到 backups/
 /opt/violet/violet restore backups/violet-backup-....tar.gz   # 恢复前会先备份当前状态
-sudo /opt/violet/violet update   # 升级到 GitHub 上的最新版本：先备份，失败自动退回旧版本（加 --check 只查询）
-sudo bash install.sh upgrade       # 或者：在新版本的程序目录里执行
+/opt/violet/violet update   # 升级到 GitHub 上的最新版本：先备份，失败自动退回旧版本（加 --check 只查询）
+bash install.sh upgrade       # 或者：在新版本的程序目录里执行
 /opt/violet/violet rollback      # 退回上一个版本的程序（数据不动）
 /opt/violet/violet uninstall     # 删除服务和程序，保留配置、数据和备份
 /opt/violet/violet uninstall --purge --yes   # 连数据一起删除（不可恢复）
-sudo /opt/violet/violet info             # 后台地址（带安全入口）和用户名；密码不能查看
-sudo /opt/violet/violet reset-password   # 生成新的初始密码（只显示一次），所有登录失效
-sudo /opt/violet/violet reset-entrance   # 换一个随机的安全入口（--entrance 自己指定；--no-entrance 取消）
-sudo /opt/violet/violet set-port 8443    # 换后台端口：检查端口空闲、重启、健康检查，失败自动改回（加 --open-firewall 放行防火墙）
+/opt/violet/violet info             # 后台地址（带安全入口）和用户名；密码不能查看
+/opt/violet/violet reset-password   # 生成新的初始密码（只显示一次），所有登录失效
+/opt/violet/violet reset-entrance   # 换一个随机的安全入口（--entrance 自己指定；--no-entrance 取消）
+/opt/violet/violet set-port 8443    # 换后台端口：检查端口空闲、重启、健康检查，失败自动改回（加 --open-firewall 放行防火墙）
 ```
 
-重新运行 `install.sh` 就是修复：配置、数据、密钥、端口、用户名、安全入口和密码都保留。忘记地址或用户名：`sudo /opt/violet/violet info`；忘记密码：`sudo /opt/violet/violet reset-password`。
+重新运行 `install.sh` 就是修复：配置、数据、密钥、端口、用户名、安全入口和密码都保留。忘记地址或用户名：`/opt/violet/violet info`；忘记密码：`/opt/violet/violet reset-password`。
 
-从 0.1.0 升级上来的安装没有用户名和安全入口（升级不会自动加，免得你不知道新地址）：在后台“账号安全”页设置，或执行 `sudo /opt/violet/violet reset-entrance`。
+从 0.1.0 升级上来的安装没有用户名和安全入口（升级不会自动加，免得你不知道新地址）：在后台“账号安全”页设置，或执行 `/opt/violet/violet reset-entrance`。

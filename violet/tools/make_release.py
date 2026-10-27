@@ -5,7 +5,7 @@
 
 Output (upload all of it to the address given as --base):
   install.sh                   the installer with the download address filled in
-                               -> users run:  curl -fsSL <base>/install.sh | sudo bash
+                               -> users run:  curl -fsSL <base>/install.sh | bash   (root or a sudo user)
   violet.tar.gz           the program (folder violet/): tracked files of "violet" at HEAD, without
                                tests, local data, .env, databases or reports
   violet.tar.gz.sha256    its SHA-256 (install.sh refuses an archive that does not match)
@@ -116,7 +116,7 @@ def build(base: str, out: Path, worktree: bool = False, ref: str = "HEAD") -> di
     (out / "install.sh").write_bytes(installer.replace(PLACEHOLDER, base).encode("utf-8"))
     meta = {"version": version, "commit": "" if worktree else _commit(), "worktree": worktree, "base": base,
             "built_at": datetime.datetime.now().isoformat(timespec="seconds"), "files": len(files),
-            "install_command": f"curl -fsSL {base}/install.sh | sudo bash"}
+            "install_command": f"curl -fsSL {base}/install.sh | bash"}
     (out / "release.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
     sums = [f"{hashlib.sha256((out / n).read_bytes()).hexdigest()}  {n}"
             for n in ("install.sh", "violet.tar.gz", "violet.tar.gz.sha256", "release.json")]

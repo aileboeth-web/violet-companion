@@ -106,7 +106,7 @@ _LOGIN_PAGE = """<!doctype html>
   <input type="hidden" name="next" value="{{ next_url }}">
   <button type="submit">登录</button>
   <div class="hint">第一次登录请用安装完成时显示的用户名和初始密码，登录后需要先改成自己的密码。忘记了：在服务器上执行
-  sudo /opt/violet/violet info（查看用户名和地址）或 sudo /opt/violet/violet reset-password（生成新的初始密码）。</div>
+  /opt/violet/violet info（查看用户名和地址）或 /opt/violet/violet reset-password（生成新的初始密码）。</div>
 </form></body></html>"""
 
 _NOT_FOUND = "404 Not Found\n"

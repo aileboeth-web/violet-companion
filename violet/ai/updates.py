@@ -6,7 +6,7 @@ unless the admin asks again.
 
 Update mode (setting VIOLET_UPDATE_MODE, Violet stage 3):
   auto    checked automatically; a newer release is installed automatically
-  notify  checked automatically; installing waits for "update now" (or `sudo <root>/violet update`)
+  notify  checked automatically; installing waits for "update now" (or `<root>/violet update`)
   manual  nothing is fetched until the admin presses "check for updates"
 
 Violet runs as an unprivileged user and never replaces its own program. A root + systemd install has a root update
@@ -59,8 +59,8 @@ def install_state(root: Path = PROJECT_ROOT) -> dict:
 def update_command(root: Path = PROJECT_ROOT) -> str:
     installed = install_root(root)
     if installed is None:
-        return "这份程序不是用安装器装的：下载新版本后在其目录里运行 sudo bash install.sh upgrade"
-    return f"sudo {installed / 'violet'} update"
+        return "这份程序不是用安装器装的：下载新版本后在其目录里运行 bash install.sh upgrade"
+    return f"{installed / 'violet'} update"          # elevates itself through sudo when run by a normal user
 
 
 def mode() -> str:
