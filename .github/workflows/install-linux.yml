@@ -29,10 +29,15 @@ jobs:
           grep -q "用 sudo 重新运行" doctor.log
           grep -q '"root": "/opt/violet"' doctor.log
           echo "PASS normal user with sudo: install.sh ran itself again as root"
+      - name: a restrictive host firewall (INPUT policy DROP, as with 1Panel / CSF)
+        run: |
+          sudo iptables -I INPUT 1 -i lo -s 127.0.0.0/8 -j ACCEPT
+          sudo iptables -I INPUT 2 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+          sudo iptables -P INPUT DROP
       - name: one-command install, repair, backup, failed upgrade, uninstall (systemd)
         run: |
           set -o pipefail
-          sudo bash "violet/deploy/linux-e2e/install_e2e.sh" 2>&1 | tee e2e.log
+          sudo VIOLET_E2E_STRICT_FIREWALL=1 bash "violet/deploy/linux-e2e/install_e2e.sh" 2>&1 | tee e2e.log
       - name: report the failure
         if: failure()
         run: |

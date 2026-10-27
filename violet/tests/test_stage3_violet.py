@@ -562,3 +562,129 @@ def test_purge_removes_the_folder_but_not_foreign_files(tmp_path):
             assert not layout.data.exists()
         else:
             assert not root.exists() and result["note"] == "已全部删除"
+
+
+# ------------------------------------------------------------------------------------------------ host firewalls
+
+ONEPANEL_IPTABLES = """-P INPUT ACCEPT
+-P FORWARD ACCEPT
+-N 1PANEL_BASIC
+-N ufw-before-input
+-A INPUT -j 1PANEL_BASIC
+-A 1PANEL_BASIC -p tcp --dport 22 -j ACCEPT
+-A 1PANEL_BASIC -j DROP
+"""
+NFT_NATIVE = json.dumps({"nftables": [
+    {"metainfo": {"version": "1.0.6"}},
+    {"chain": {"family": "inet", "table": "filter", "name": "input", "hook": "input", "policy": "drop"}},
+    {"chain": {"family": "ip", "table": "filter", "name": "INPUT", "hook": "input", "policy": "accept"}},
+    {"chain": {"family": "inet", "table": "firewalld", "name": "filter_INPUT", "hook": "input", "policy": "accept"}},
+    {"rule": {"family": "inet", "table": "firewalld", "chain": "filter_INPUT", "expr": [{"reject": None}]}},
+    {"chain": {"family": "inet", "table": "open", "name": "input", "hook": "input", "policy": "accept"}},
+]})
+
+
+class FakeHost:
+    """iptables / ip6tables / nft / ufw / firewall-cmd as a server with 1Panel and a native nftables drop chain."""
+
+    def __init__(self, iptables=ONEPANEL_IPTABLES, nft=NFT_NATIVE, ufw="Status: inactive", firewalld=None):
+        self.rules = {"iptables": [], "ip6tables": []}
+        self.nft_rules = []
+        self.calls = []
+        self.iptables, self.nft, self.ufw, self.firewalld = iptables, nft, ufw, firewalld
+
+    def __call__(self, cmd, **kw):
+        self.calls.append(cmd)
+        ok = lambda out="": subprocess.CompletedProcess(cmd, 0, out, "")  # noqa: E731
+        bad = subprocess.CompletedProcess(cmd, 1, "", "no")
+        tool = cmd[0]
+        if tool in ("iptables", "ip6tables"):
+            if cmd[1] == "-S":
+                return ok(self.iptables if tool == "iptables" else "-P INPUT ACCEPT\n")
+            spec = tuple(cmd[2:])
+            if cmd[1] == "-C":
+                return ok() if spec in self.rules[tool] else bad
+            if cmd[1] == "-I":
+                self.rules[tool].append(spec)
+                return ok()
+            if cmd[1] == "-D":
+                if spec in self.rules[tool]:
+                    self.rules[tool].remove(spec)
+                    return ok()
+                return bad
+        if tool == "nft":
+            if cmd[1:3] == ["-j", "list"]:
+                return ok(self.nft)
+            if cmd[1:3] == ["-a", "list"]:
+                return ok("\n".join(f'tcp dport {p} accept comment "violet" # handle {h}'
+                                    for h, p in self.nft_rules))
+            if cmd[1] == "insert":
+                self.nft_rules.append((str(len(self.nft_rules) + 7), int(cmd[cmd.index("dport") + 1])))
+                return ok()
+            if cmd[1] == "delete":
+                self.nft_rules = [r for r in self.nft_rules if r[0] != cmd[-1]]
+                return ok()
+        if tool == "ufw":
+            return ok(self.ufw)
+        if tool == "firewall-cmd":
+            return ok(self.firewalld) if self.firewalld else bad
+        return ok()
+
+
+@pytest.fixture()
+def host(monkeypatch):
+    monkeypatch.setattr(inst.shutil, "which", lambda name: f"/usr/sbin/{name}" if name in
+                        ("iptables", "ip6tables", "nft", "ufw", "firewall-cmd") else None)
+    monkeypatch.setattr(inst.os.path, "isdir", lambda p: False)
+    return FakeHost()
+
+
+def test_a_1panel_server_and_a_native_nftables_drop_chain_are_found(host):
+    found = inst.firewall_layers(host)
+    assert [l["tool"] for l in found["layers"]] == ["iptables", "nftables"]       # ufw inactive, ip6tables open
+    assert found["layers"][1] == {"tool": "nftables", "family": "inet", "table": "filter", "chain": "input"}
+    assert found["panels"] == ["1Panel"]
+
+
+def test_the_port_is_opened_in_every_layer_once_and_the_note_says_where(host):
+    records, note = inst.open_port_everywhere(7101, host)
+    assert [r["tool"] for r in records] == ["iptables", "nftables"]
+    assert host.rules["iptables"] == [tuple(inst._ipt_rule(7101))] and len(host.nft_rules) == 1
+    assert "iptables" in note and "nftables" in note and "1Panel" in note and "7101" in note
+    inst.open_port_everywhere(7101, host)                                          # idempotent
+    assert len(host.rules["iptables"]) == 1 and len(host.nft_rules) == 1
+
+
+def test_ufw_and_firewalld_use_their_own_tools(host):
+    host.iptables, host.nft, host.ufw, host.firewalld = "-P INPUT ACCEPT\n", "", "Status: active", "running"
+    records, _note = inst.open_port_everywhere(8443, host)
+    assert [r["tool"] for r in records] == ["ufw", "firewalld"]
+    assert ["ufw", "allow", "8443/tcp"] in host.calls
+    assert ["firewall-cmd", "--permanent", "--add-port=8443/tcp"] in host.calls
+
+
+def test_nothing_filtering_means_nothing_to_do(host):
+    host.iptables, host.nft = "-P INPUT ACCEPT\n-P FORWARD ACCEPT\n", ""
+    assert inst.open_port_everywhere(7101, host) == ([], None)
+
+
+def test_runtime_rules_are_put_back_and_only_ours_are_removed(host, tmp_path):
+    layout = inst.Layout(tmp_path / "root")
+    layout.root.mkdir()
+    records, _ = inst.open_port_everywhere(7101, host)
+    inst.save_state(layout, {"version": "0.3.4", "firewall_rules": records})
+    host.rules["iptables"].clear()
+    host.nft_rules.clear()                                       # a reboot / a panel reloading its rules
+    assert inst.firewall_apply(layout, host)["applied"] == ["iptables:7101", "nftables:7101"]
+    assert host.rules["iptables"] and host.nft_rules
+    host.rules["iptables"].append(("INPUT", "-p", "tcp", "--dport", "22", "-j", "ACCEPT"))    # not ours
+    for r in records:
+        inst.remove_rule(r, host)
+    assert host.rules["iptables"] == [("INPUT", "-p", "tcp", "--dport", "22", "-j", "ACCEPT")] and host.nft_rules == []
+
+
+def test_the_service_puts_the_rules_back_before_every_start():
+    unit = inst.systemd_unit(inst.Layout(Path("/opt/violet")), "violet").replace("\\", "/")
+    assert "ExecStartPre=-+/opt/violet/violet firewall-apply --json" in unit
+    assert "1panel.service" in unit and "nftables.service" in unit
+    assert "ExecStartPre" not in inst.systemd_unit(inst.Layout(Path("/home/u/v")), None, user_mode=True)

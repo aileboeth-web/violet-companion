@@ -42,10 +42,21 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 
 | 安装参数 | 后台在哪里能打开 |
 |---|---|
-| `--access public`（root 安装的默认） | 公网和局域网都能打开：`https://服务器公网IP:端口/安全入口`，强制 HTTPS（自签名证书，浏览器会提示“不安全”，核对安装输出里的证书指纹后继续访问）。安装时自动装 openssl、查询公网 IP（和 1Panel 一样问外部服务）、在本机防火墙（ufw / firewalld）放行端口（加 `--keep-firewall` 不动防火墙）。云服务器还要在控制台安全组里放行这个端口 |
+| `--access public`（root 安装的默认） | 公网和局域网都能打开：`https://服务器公网IP:端口/安全入口`，强制 HTTPS（自签名证书，浏览器会提示“不安全”，核对安装输出里的证书指纹后继续访问）。安装时自动装 openssl、查询公网 IP（和 1Panel 一样问外部服务）、在本机所有防火墙里放行端口（加 `--keep-firewall` 不动防火墙，见下文）。云服务器还要在控制台安全组里放行这个端口 |
 | `--access lan` | 只给局域网用，同样是 HTTPS；本机防火墙只给出放行命令 |
 | `--access local`（普通用户 `--user-install` 的默认） | 只有服务器本机。远程管理：`ssh -L 7100:127.0.0.1:7100 用户@服务器`，再在自己电脑打开 `http://127.0.0.1:7100/安全入口` |
 | `--access proxy` | 你自己的 HTTPS 反向代理（Caddy / Nginx，同一台机器）转发到 127.0.0.1 |
+
+**本机防火墙**（公网访问时自动处理）：
+
+| 检测到 | 怎么放行 | 重启后 |
+|---|---|---|
+| ufw（Ubuntu / Debian；宝塔、aaPanel 常用） | `ufw allow 端口/tcp` | ufw 自己保存 |
+| firewalld（Rocky / CentOS / Alma；宝塔常用） | `firewall-cmd --permanent --add-port` | firewalld 自己保存 |
+| iptables 里有拦截规则（1Panel、CSF、手写规则、默认 DROP） | 在 INPUT 最前面加一条标记为 `violet` 的放行规则（IPv4 / IPv6） | Violet 每次启动前自动补回 |
+| nftables 自己的拦截链 | 在那条链最前面加一条标记为 `violet` 的放行规则 | 同上 |
+
+1Panel、宝塔这类面板的防火墙页面不一定显示这条规则，想在面板里看到也可以再手动加一条。卸载（`--purge`）只删带 `violet` 标记的、和安装时记录下来的规则。云服务商的安全组在服务器外面，只能在控制台里放行。
 
 已经装好的随时可以切换：重新运行安装命令并加上 `-s -- --access public`（或 local / lan / proxy），数据、账号、端口都保留，只改监听地址和证书。
 

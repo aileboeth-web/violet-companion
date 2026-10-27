@@ -476,6 +476,169 @@ def firewall_status(run: Callable[..., Any] = subprocess.run) -> dict[str, Any]:
     return {"tool": None, "active": False}
 
 
+# ------------------------------------------------------------------------------------------------ host firewalls
+# Violet stage 3 (user, 2026-10-27, after a 1Panel server kept the port closed): not only ufw / firewalld -- every
+# common way a Linux server drops new ports is found and opened: ufw and firewalld through their own tools
+# (persistent), and direct iptables / native nftables rules (1Panel's 1PANEL_* chains, CSF, hand-written rules, a DROP
+# policy) with one ACCEPT rule marked "violet" at the top of the input chain. Those two are runtime rules: violet.service
+# puts them back before every start (ExecStartPre, as root). Only rules marked "violet" are ever removed.
+
+RULE_MARK = "violet"
+_IPT_TABLES = {("ip", "filter"), ("ip6", "filter")}          # iptables-nft's own tables: handled with iptables
+
+
+def _out(run: Callable[..., Any], cmd: list[str], timeout: float = 10) -> str | None:
+    if shutil.which(cmd[0]) is None:
+        return None
+    try:
+        done = run(cmd, capture_output=True, text=True, timeout=timeout)
+        return (done.stdout or "") + (done.stderr or "")
+    except Exception:
+        return None
+
+
+def firewall_layers(run: Callable[..., Any] = subprocess.run) -> dict[str, Any]:
+    """{"layers": [...], "panels": [...]}. A layer is a place where packets to a new port can be dropped:
+    ufw | firewalld | iptables (filtering rules exist) | ip6tables | nftables (a native input chain that drops)."""
+    layers: list[dict[str, Any]] = []
+    panels = []
+    if shutil.which("1pctl") or os.path.isdir("/opt/1panel"):
+        panels.append("1Panel")
+    if os.path.isdir("/www/server/panel"):
+        panels.append("宝塔 / aaPanel")
+    if shutil.which("csf"):
+        panels.append("CSF")
+    text = _out(run, ["ufw", "status"])
+    if text is not None and "Status: active" in text:
+        layers.append({"tool": "ufw"})
+    text = _out(run, ["firewall-cmd", "--state"])
+    if text is not None and text.strip().startswith("running"):
+        layers.append({"tool": "firewalld"})
+    for tool in ("iptables", "ip6tables"):
+        rules = _out(run, [tool, "-S"])
+        if rules and (re.search(r"^-P INPUT (DROP|REJECT)", rules, re.M) or re.search(r"-j (DROP|REJECT)\b", rules)
+                      or re.search(r"^-N (1PANEL|BT_|ufw-|f2b-|LOCALINPUT|ALLOWIN)", rules, re.M)):
+            layers.append({"tool": tool})
+    layers += nft_drop_chains(run)
+    if any(l["tool"] == "iptables" for l in layers) and "1Panel" not in panels and \
+            "1PANEL" in (_out(run, ["iptables", "-S"]) or ""):
+        panels.append("1Panel")
+    return {"layers": layers, "panels": panels}
+
+
+def nft_drop_chains(run: Callable[..., Any] = subprocess.run) -> list[dict[str, Any]]:
+    """Native nftables input chains that drop (policy drop, or a drop / reject rule) -- not iptables-nft's tables and
+    not firewalld's (those are opened with their own tools)."""
+    text = _out(run, ["nft", "-j", "list", "ruleset"])
+    if not text:
+        return []
+    try:
+        items = json.loads(text[text.index("{"):]).get("nftables") or []
+    except ValueError:
+        return []
+    chains, dropping = {}, set()
+    for item in items:
+        chain = item.get("chain")
+        if chain and chain.get("hook") == "input":
+            key = (chain.get("family"), chain.get("table"), chain.get("name"))
+            if (key[0], key[1]) in _IPT_TABLES or key[1] == "firewalld":
+                continue
+            chains[key] = chain
+            if chain.get("policy") == "drop":
+                dropping.add(key)
+        rule = item.get("rule")
+        if rule:
+            key = (rule.get("family"), rule.get("table"), rule.get("chain"))
+            if any(("drop" in e or "reject" in e) for e in rule.get("expr") or [] if isinstance(e, dict)):
+                dropping.add(key)
+    return [{"tool": "nftables", "family": k[0], "table": k[1], "chain": k[2]} for k in chains if k in dropping]
+
+
+def _ipt_rule(port: int) -> list[str]:
+    return ["INPUT", "-p", "tcp", "--dport", str(port), "-m", "comment", "--comment", RULE_MARK, "-j", "ACCEPT"]
+
+
+def _nft_handles(run: Callable[..., Any], layer: dict[str, Any], port: int) -> list[str]:
+    text = _out(run, ["nft", "-a", "list", "chain", layer["family"], layer["table"], layer["chain"]]) or ""
+    return re.findall(rf"tcp dport {port} accept comment \"{RULE_MARK}\" # handle (\d+)", text)
+
+
+def ensure_rule(layer: dict[str, Any], port: int, run: Callable[..., Any] = subprocess.run) -> bool:
+    """Open port in one layer (idempotent). True when the port is open there afterwards."""
+    tool = layer["tool"]
+    if tool == "ufw":
+        return run(["ufw", "allow", f"{port}/tcp"], capture_output=True, text=True).returncode == 0
+    if tool == "firewalld":
+        ok = run(["firewall-cmd", "--permanent", f"--add-port={port}/tcp"], capture_output=True, text=True).returncode == 0
+        run(["firewall-cmd", "--reload"], capture_output=True)
+        return ok
+    if tool in ("iptables", "ip6tables"):
+        if run([tool, "-C", *_ipt_rule(port)], capture_output=True).returncode == 0:
+            return True
+        return run([tool, "-I", *_ipt_rule(port)], capture_output=True).returncode == 0
+    if tool == "nftables":
+        if _nft_handles(run, layer, port):
+            return True
+        return run(["nft", "insert", "rule", layer["family"], layer["table"], layer["chain"], "tcp", "dport", str(port),
+                    "accept", "comment", f'"{RULE_MARK}"'], capture_output=True).returncode == 0
+    return False
+
+
+def remove_rule(record: dict[str, Any], run: Callable[..., Any] = subprocess.run) -> None:
+    """Remove a rule this installer added (only ours: ufw / firewalld entries we recorded, iptables / nft rules marked
+    "violet")."""
+    tool, port = record.get("tool"), int(record.get("port") or 0)
+    if tool == "ufw" and shutil.which("ufw"):
+        run(["ufw", "delete", "allow", f"{port}/tcp"], capture_output=True)
+    elif tool == "firewalld" and shutil.which("firewall-cmd"):
+        run(["firewall-cmd", "--permanent", f"--remove-port={port}/tcp"], capture_output=True)
+        run(["firewall-cmd", "--reload"], capture_output=True)
+    elif tool in ("iptables", "ip6tables") and shutil.which(tool):
+        for _ in range(10):                                       # every copy of our rule
+            if run([tool, "-D", *_ipt_rule(port)], capture_output=True).returncode != 0:
+                break
+    elif tool == "nftables" and shutil.which("nft"):
+        for handle in _nft_handles(run, record, port):
+            run(["nft", "delete", "rule", record["family"], record["table"], record["chain"], "handle", handle],
+                capture_output=True)
+
+
+def open_port_everywhere(port: int, run: Callable[..., Any] = subprocess.run,
+                         detected: dict[str, Any] | None = None) -> tuple[list[dict[str, Any]], str | None]:
+    """Open port in every host firewall layer found. (records of what was opened, a note for the user)."""
+    found = detected or firewall_layers(run)
+    records, failed = [], []
+    for layer in found["layers"]:
+        if ensure_rule(layer, port, run):
+            records.append({**layer, "port": port})
+        else:
+            failed.append(layer["tool"])
+    names = {"ufw": "ufw", "firewalld": "firewalld", "iptables": "iptables", "ip6tables": "ip6tables (IPv6)",
+             "nftables": "nftables"}
+    parts = []
+    if records:
+        parts.append(f"已在本机防火墙放行端口 {port}：" + "、".join(dict.fromkeys(names[r['tool']] for r in records)))
+    if failed:
+        parts.append("放行失败：" + "、".join(failed) + f"（请手动放行 TCP {port}）")
+    if found["panels"]:
+        parts.append("检测到 " + "、".join(found["panels"]) + "：规则加在系统防火墙里，面板的防火墙页面不一定显示；"
+                     f"也可以在面板里再添加一条 TCP {port} 放行")
+    return records, "；".join(parts) or None
+
+
+def firewall_apply(layout: "Layout", run: Callable[..., Any] = subprocess.run) -> dict[str, Any]:
+    """`violet firewall-apply` (violet.service runs it as root before every start): put back the runtime rules
+    (iptables / nftables) recorded at install -- a reboot or a panel reloading its rules removes them."""
+    state = load_state(layout)
+    done = []
+    for record in state.get("firewall_rules") or []:
+        if record.get("tool") in ("iptables", "ip6tables", "nftables") and shutil.which(
+                "nft" if record["tool"] == "nftables" else record["tool"]):
+            if ensure_rule(record, int(record["port"]), run):
+                done.append(f"{record['tool']}:{record['port']}")
+    return {"ok": True, "applied": done}
+
+
 def firewall_open_command(tool: str | None, port: int) -> list[str] | None:
     if tool == "ufw":
         return ["ufw", "allow", f"{port}/tcp"]
@@ -741,7 +904,9 @@ def systemd_unit(layout: Layout, user: str | None, user_mode: bool = False) -> s
     lines = [
         "[Unit]",
         "Description=Violet (AI companion and Control Center)",
-        "After=network-online.target",
+        # after the services that load firewall rules, so the port rules put back below are not flushed again
+        "After=network-online.target nftables.service firewalld.service ufw.service docker.service 1panel.service "
+        "1panel-core.service bt.service",
         "Wants=network-online.target",
         "",
         "[Service]",
@@ -750,6 +915,8 @@ def systemd_unit(layout: Layout, user: str | None, user_mode: bool = False) -> s
         f"Environment=VIOLET_ENV_FILE={layout.env_file}",
         "Environment=PYTHONUNBUFFERED=1",
         f"ExecStart={venv_python(layout)} -u main.py",
+        # as root ("+"), failures ignored ("-"): the iptables / nftables port rules a reboot or a panel removed
+        *([f"ExecStartPre=-+{layout.root / 'violet'} firewall-apply --json"] if user and not user_mode else []),
         "Restart=on-failure",
         "RestartSec=5",
         "StartLimitIntervalSec=300",
@@ -1226,13 +1393,16 @@ def install(opts: Options) -> dict[str, Any]:
                            + str(layout.logs / "main.log"))
     if repair_backup is not None and service_mode != "none" and _remove_backup(repair_backup):
         state["last_backup"] = None                 # a repair that came up healthy: its own safety backup is not needed
-    # public: open the port in the local firewall like 1Panel does (--keep-firewall leaves it alone); lan: suggest
-    fw = firewall_status()
-    firewall_note = open_firewall_port(port, access, opts.open_firewall or (access == "public" and not opts.keep_firewall),
-                                       firewall=lambda: fw)
-    if firewall_note and firewall_note.startswith("已在本机防火墙放行") and fw.get("tool"):
-        rules = [r for r in state.get("firewall_rules") or [] if r != {"tool": fw["tool"], "port": port}]
-        state["firewall_rules"] = rules + [{"tool": fw["tool"], "port": port}]     # removed again by uninstall --purge
+    # public (or --open-firewall): open the port in every host firewall found -- ufw, firewalld, iptables rules
+    # (1Panel, CSF, hand-written), native nftables (--keep-firewall leaves them alone); lan: only suggest
+    firewall_note = None
+    if access in ("lan", "public") and os.name != "nt" and _is_root() and \
+            (opts.open_firewall or (access == "public" and not opts.keep_firewall)):
+        records, firewall_note = open_port_everywhere(port)
+        old = [r for r in state.get("firewall_rules") or [] if r not in records]
+        state["firewall_rules"] = old + records             # removed again by uninstall --purge
+    elif access in ("lan", "public"):
+        firewall_note = open_firewall_port(port, access, False)
     network = network_report(port, bind_host, public_url=opts.public_url,
                              fetch=(lambda url: _fetch_ok(url)) if opts.public_url else None) \
         if service_mode != "none" else []
@@ -1342,7 +1512,12 @@ def set_port(opts: Options, run: Callable[..., Any] = subprocess.run) -> dict[st
         layout.env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
         _restrict(layout.env_file)
 
-    firewall_note = open_firewall_port(port, state.get("access", "local"), opts.open_firewall, run=run)
+    access = state.get("access", "local")
+    opened: list[dict[str, Any]] = []
+    if access == "public" and os.name != "nt" and _is_root() and not opts.keep_firewall:
+        opened, firewall_note = open_port_everywhere(port, run)      # the new port, in every firewall layer
+    else:
+        firewall_note = open_firewall_port(port, access, opts.open_firewall, run=run)
     write(port)
     service = Service(layout, state.get("service", "supervisor"), state.get("user"))
     if state.get("service") != "none":
@@ -1353,10 +1528,15 @@ def set_port(opts: Options, run: Callable[..., Any] = subprocess.run) -> dict[st
             write(old)
             service.start()
             raise InstallError(f"换到端口 {port} 后健康检查没有通过，已改回 {old}。查看日志：{layout.logs / 'main.log'}")
-    state.update(port=port, updated_at=int(time.time()))
+    rules = state.get("firewall_rules") or []
+    for record in [r for r in rules if int(r.get("port") or 0) == old] if opened else []:
+        remove_rule(record, run)                                     # our rules for the old port go
+    state.update(port=port, updated_at=int(time.time()),
+                 firewall_rules=[r for r in rules if not opened or int(r.get("port") or 0) != old] +
+                 [r for r in opened if r not in rules])
     save_state(layout, state)
     return {"ok": True, "port": port, "previous": old, "changed": True, "firewall": firewall_note,
-            "note": "旧端口的防火墙规则没有删除，不再需要时可以手动关闭" if firewall_note else None}
+            "note": None if opened or not firewall_note else "旧端口的防火墙规则没有删除，不再需要时可以手动关闭"}
 
 
 def _fetch_ok(url: str) -> bool:
@@ -1706,15 +1886,12 @@ def purge_system(layout: Layout, state: dict, run: Callable[..., Any] = subproce
     if not (linux_root if linux_root is not None else (os.name != "nt" and _is_root())):
         return removed
     for rule in state.get("firewall_rules") or []:
-        port, tool = int(rule.get("port") or 0), rule.get("tool")
-        if tool == "ufw" and shutil.which("ufw"):
-            run(["ufw", "delete", "allow", f"{port}/tcp"], capture_output=True)
-        elif tool == "firewalld" and shutil.which("firewall-cmd"):
-            run(["firewall-cmd", "--permanent", "--remove-port", f"{port}/tcp"], capture_output=True)
-            run(["firewall-cmd", "--reload"], capture_output=True)
-        else:
+        if rule.get("tool") not in ("ufw", "firewalld", "iptables", "ip6tables", "nftables"):
             continue
-        removed.append(f"防火墙规则 {port}/tcp")
+        remove_rule(rule, run)
+        label = f"防火墙规则 {int(rule.get('port') or 0)}/tcp"
+        if label not in removed:
+            removed.append(label)
     user = state.get("user")
     if user:
         done = run(["getent", "passwd", user], capture_output=True, text=True)
@@ -1837,7 +2014,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="violet-installer", description="Violet installer")
     parser.add_argument("command", choices=["install", "upgrade", "update", "rollback", "status", "backup", "restore",
                                             "uninstall", "doctor", "start", "stop", "restart", "info",
-                                            "reset-password", "reset-entrance", "set-port", "auto-update"])
+                                            "reset-password", "reset-entrance", "set-port", "auto-update",
+                                            "firewall-apply"])
     parser.add_argument("--update-feed", help=argparse.SUPPRESS)  # install: a release.json instead of GitHub
     parser.add_argument("--update-repo", help="install: GitHub owner/repo to update from (a fork)")
     parser.add_argument("--check", action="store_true", help="update: only report whether a newer release exists")
@@ -1912,6 +2090,8 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
         elif args.command == "auto-update":
             result = auto_update(opts)
+        elif args.command == "firewall-apply":
+            result = firewall_apply(Layout(root))
         elif args.command == "rollback":
             result = rollback(opts)
         elif args.command == "status":

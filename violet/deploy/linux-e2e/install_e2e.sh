@@ -49,6 +49,17 @@ echo "$OUT" | json 'd["access"]' | grep -qx public || fail "a root install is no
 grep -q '^VIOLET_DASHBOARD_HOST=0.0.0.0' "$ROOT/config/violet.env" || fail "not listening on every interface"
 pass "installed on port $PORT, public over HTTPS by default ($(echo "$OUT" | json 'd["urls"][0]')), initial password shown once"
 
+# 2b. a restrictive host firewall (VIOLET_E2E_STRICT_FIREWALL=1: the runner's iptables INPUT policy is DROP, as with
+#     1Panel / CSF): the installer opened the port -- reachable on the LAN address, through a rule marked "violet"
+STRICT="${VIOLET_E2E_STRICT_FIREWALL:-0}"
+LANIP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+violet_rule() { iptables -S INPUT | grep -q -- "--dport $1 -m comment --comment violet"; }
+if [ "$STRICT" = "1" ]; then
+  curl -fsSk --max-time 5 "https://$LANIP:$PORT/healthz" | grep -q violet || fail "port $PORT not opened (DROP policy)"
+  violet_rule "$PORT" || fail "no iptables rule marked violet for $PORT"
+  pass "restrictive firewall: port $PORT opened (reachable on $LANIP)"
+fi
+
 # 3. service manager
 MODE="$(python3 -c "import json;print(json.load(open('$ROOT/install.json'))['service'])")"
 if [ "$MODE" = "systemd" ]; then
@@ -59,6 +70,16 @@ if [ "$MODE" = "systemd" ]; then
   for _ in $(seq 1 30); do curl -fsSk "$SCHEME://127.0.0.1:$PORT/healthz" >/dev/null 2>&1 && break; sleep 1; done
   [ "$(systemctl show -p MainPID --value violet)" != "$MAINPID" ] || fail "not restarted after a crash"
   pass "systemd: active, enabled, restarted after kill -9"
+  if [ "$STRICT" = "1" ]; then
+    # a reboot or a panel reloading its rules drops ours: the next start of Violet puts it back (ExecStartPre)
+    iptables -D INPUT -p tcp --dport "$PORT" -m comment --comment violet -j ACCEPT
+    ! violet_rule "$PORT" || fail "could not remove the rule for the test"
+    systemctl restart violet
+    for _ in $(seq 1 30); do curl -fsSk "$SCHEME://127.0.0.1:$PORT/healthz" >/dev/null 2>&1 && break; sleep 1; done
+    violet_rule "$PORT" || fail "the firewall rule was not put back on start"
+    curl -fsSk --max-time 5 "https://$LANIP:$PORT/healthz" | grep -q violet || fail "not reachable after the rule came back"
+    pass "restrictive firewall: a removed rule is put back when Violet starts"
+  fi
 else
   pass "service mode: $MODE"
 fi
@@ -96,6 +117,10 @@ OLD_PORT="$PORT"; PORT=$((PORT + 37))
 "$ROOT/violet" set-port "$PORT" --json | json 'd["port"]' | grep -qx "$PORT" || fail "set-port"
 curl -fsSk "$SCHEME://127.0.0.1:$PORT/healthz" | grep -q violet || fail "not answering on the new port"
 ! curl -fsSk "$SCHEME://127.0.0.1:$OLD_PORT/healthz" >/dev/null 2>&1 || fail "still answering on the old port"
+if [ "$STRICT" = "1" ]; then
+  curl -fsSk --max-time 5 "https://$LANIP:$PORT/healthz" | grep -q violet || fail "new port $PORT not opened"
+  ! violet_rule "$OLD_PORT" || fail "the rule for the old port $OLD_PORT was not removed"
+fi
 pass "info, reset-entrance, reset-password and set-port ($OLD_PORT -> $PORT)"
 
 # 4c. automatic updates (root + systemd): "update now" in the Control Center -> the root update service installs a
@@ -168,6 +193,9 @@ pass "uninstall kept data"
 curl -fsSL "http://127.0.0.1:$PORT_HTTP/install.sh" | bash -s -- uninstall --root "$ROOT" --purge --yes --json \
   || fail "uninstall --purge"
 [ ! -e "$ROOT" ] || { ls -la "$ROOT"; fail "$ROOT left behind"; }
+if [ "$STRICT" = "1" ]; then
+  ! iptables -S | grep -q -- "--comment violet" || { iptables -S | grep violet; fail "firewall rules left behind"; }
+fi
 if [ "$MODE" = "systemd" ]; then
   ! id violet >/dev/null 2>&1 || fail "system account violet left behind"
   for unit in violet.service violet-update.service violet-update.timer violet-update.path; do
