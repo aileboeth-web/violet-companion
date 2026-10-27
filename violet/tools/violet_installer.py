@@ -1100,9 +1100,11 @@ def install(opts: Options) -> dict[str, Any]:
     fresh = not state
     for folder in (layout.root, layout.config, layout.data, layout.logs, layout.backups):
         folder.mkdir(parents=True, exist_ok=True)
+    repair_backup: Path | None = None
     if not fresh and layout.data.exists() and any(layout.data.iterdir()):
         log("  已有安装：先备份配置和数据…")
-        state["last_backup"] = str(backup(layout, "before-install"))
+        repair_backup = backup(layout, "before-install")
+        state["last_backup"] = str(repair_backup)
     service_mode = Service.pick(info, opts.service if opts.service != "auto" else state.get("service", "auto"))
     service = Service(layout, service_mode, opts.user or state.get("user"))
     if not fresh and service_mode != "none":
@@ -1158,6 +1160,8 @@ def install(opts: Options) -> dict[str, Any]:
     if not healthy:
         raise InstallError("服务启动了，但 " + f"{opts.health_timeout:.0f} 秒内健康检查没有通过。查看日志："
                            + str(layout.logs / "main.log"))
+    if repair_backup is not None and service_mode != "none" and _remove_backup(repair_backup):
+        state["last_backup"] = None                 # a repair that came up healthy: its own safety backup is not needed
     firewall_note = open_firewall_port(port, access, opts.open_firewall)
     network = network_report(port, bind_host, public_url=opts.public_url,
                              fetch=(lambda url: _fetch_ok(url)) if opts.public_url else None) \
@@ -1331,11 +1335,24 @@ def upgrade(opts: Options) -> dict[str, Any]:
             running = ("，旧版本已重新运行" if wait_healthy(state["port"], "127.0.0.1", opts.health_timeout, _scheme(layout))
                        else "，但旧版本启动后健康检查没有通过，请运行 status 查看")
         raise InstallError(f"升级失败，已恢复到 {old_version}{running}。数据备份：{archive}。原因：{exc}") from None
+    # the new version is running and healthy: the backup made for this upgrade is not needed any more (user decision,
+    # 2026-10-27: no disk space used without reason). A failed upgrade keeps it (see above); `violet backup` archives
+    # are never touched here. Without a service (--service none) nothing proved that the new version runs: kept.
+    removed = state.get("service") != "none" and _remove_backup(archive)
     state.update(version=source_version(opts.source), previous_version=old_version, updated_at=int(time.time()),
-                 last_backup=str(archive))
+                 last_backup=None if removed else str(archive))
     save_state(layout, state)
     write_cli(layout)
-    return {"ok": True, "from": old_version, "to": state["version"], "backup": str(archive)}
+    return {"ok": True, "from": old_version, "to": state["version"], "backup": None if removed else str(archive),
+            "backup_removed": removed}
+
+
+def _remove_backup(archive: Path) -> bool:
+    try:
+        archive.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
 
 
 def _scheme(layout: Layout) -> str:
@@ -1372,7 +1389,8 @@ def _replace(source: Path, target: Path, attempts: int = 20) -> None:
 
 def rollback(opts: Options) -> dict[str, Any]:
     """The program of the previous version back. Data is NOT rolled back automatically (a newer schema is readable by
-    design); to also go back in data, restore the "before-upgrade" backup."""
+    design). The "before-upgrade" backup is deleted once an upgrade succeeded; to be able to go back in data too, make
+    a backup (`violet backup`) before upgrading."""
     layout = Layout(opts.root)
     state = load_state(layout)
     service = Service(layout, state.get("service", "supervisor"), state.get("user"))
@@ -1387,7 +1405,8 @@ def rollback(opts: Options) -> dict[str, Any]:
     state.update(version=source_version(layout.app), previous_version=None, updated_at=int(time.time()))
     save_state(layout, state)
     return {"ok": healthy is not False, "version": state["version"], "healthy": healthy,
-            "note": "数据没有回滚；需要时用 restore 恢复升级前的备份", "backup": state.get("last_backup")}
+            "note": "数据没有回滚。升级成功后，升级前的备份会自动删除；如果有自己用 violet backup 做的备份，可以用 restore 恢复",
+            "backup": state.get("last_backup")}
 
 
 def _download(url: str, target: Path, limit: int = 1_000_000) -> None:
@@ -1733,7 +1752,8 @@ def main(argv: list[str] | None = None) -> int:
                 elif not result["updated"]:
                     out(f"有新版本：{result['latest']}（当前 {result['current']}）。升级：{root / 'violet'} update")
                 else:
-                    out(f"已升级到 {result['to']}；升级前的备份：{result['backup']}")
+                    out(f"已升级到 {result['to']}" + (f"；升级前的备份：{result['backup']}" if result.get("backup")
+                                                     else "；升级成功，升级前的备份已删除"))
         elif args.command in ("info", "reset-password", "reset-entrance"):
             result = account(opts, args.command, "" if args.no_entrance else args.entrance)
             if not args.json:

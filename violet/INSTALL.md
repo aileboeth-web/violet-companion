@@ -55,6 +55,8 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 | 方式 | 效果 |
 |---|---|
 | 自动更新（默认） | 每 6 小时检查一次 GitHub Releases，有新版本就在服务器上自动升级：先备份，新版本起不来自动退回旧版本。同一个版本升级失败后 24 小时内不再自动重试 |
+
+升级（以及重新运行安装做修复）前做的备份：成功并通过健康检查后**自动删除**，不占硬盘；失败时保留在 `backups/`，用来恢复。自己用 `violet backup` 做的备份不会被自动删除。想在升级后还能退回旧数据，升级前先执行一次 `sudo /opt/violet/violet backup`。
 | 自动检查，只提醒 | “开始”页的“版本与更新”显示有新版本，点“立即更新”才升级 |
 | 手动检查 | 只在你点“检查更新”时才查询 |
 

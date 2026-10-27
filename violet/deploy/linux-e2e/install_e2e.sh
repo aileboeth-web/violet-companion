@@ -130,6 +130,7 @@ if [ "$MODE" = "systemd" ]; then
   for _ in $(seq 1 30); do curl -fsS "http://127.0.0.1:$PORT/healthz" 2>/dev/null | grep -q violet && break; sleep 1; done
   curl -fsS "http://127.0.0.1:$PORT/healthz" | grep -q violet || fail "not answering after the automatic update"
   [ ! -e "$ROOT/data/control/update-request" ] || fail "update request left behind"
+  ! ls "$ROOT"/backups/*before-upgrade* >/dev/null 2>&1 || fail "backup of a successful update not deleted"
   pass "automatic update from the Control Center: $OLD_VERSION -> $NEXT (root update service, healthy)"
 fi
 
@@ -149,7 +150,8 @@ echo "9.9.9-broken" > "$BROKEN/VERSION"
 if bash "$BROKEN/install.sh" upgrade --root "$ROOT" --health-timeout 20 --json >/dev/null; then fail "broken upgrade reported success"; fi
 for _ in $(seq 1 30); do curl -fsS "http://127.0.0.1:$PORT/healthz" 2>/dev/null | grep -q violet && break; sleep 1; done
 curl -fsS "http://127.0.0.1:$PORT/healthz" | grep -q violet || fail "old version not back after the failed upgrade"
-pass "broken upgrade rolled back automatically"
+ls "$ROOT"/backups/*before-upgrade* >/dev/null 2>&1 || fail "a failed upgrade must keep its backup"
+pass "broken upgrade rolled back automatically (its backup kept)"
 
 # 7. uninstall keeps data, purge removes everything
 "$ROOT/violet" uninstall --json >/dev/null || fail "uninstall"

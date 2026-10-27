@@ -291,10 +291,14 @@ def test_real_install_status_upgrade_rollback_and_uninstall_on_this_machine(tmp_
         # repair: run install again -> same port, same password, data kept
         code2, again = _run(["install", "--service", "supervisor", "--reuse-venv", str(Path(sys.prefix))], root)
         assert code2 == 0 and again["port"] == port and again["admin"]["created"] is False and not again["fresh"]
-        assert any(p.name.endswith("before-install.tar.gz") for p in (root / "backups").iterdir())
-        # backup
+        # the repair came up healthy: its own safety backup was deleted (no disk space used without reason)
+        backups = lambda kind: [p for p in (root / "backups").iterdir() if p.name.endswith(kind + ".tar.gz")]  # noqa
+        assert backups("before-install") == []
+        # backup (made by hand: never deleted automatically)
         code3, bk = _run(["backup"], root)
         assert code3 == 0 and bk["databases_checked"] >= 1
+        manual = backups("manual")
+        assert len(manual) == 1
         # a broken upgrade is rolled back automatically
         broken = tmp_path / "broken-src"
         import shutil
@@ -306,6 +310,13 @@ def test_real_install_status_upgrade_rollback_and_uninstall_on_this_machine(tmp_
         assert inst.probe_eve(port) is not None                    # the old version answers again
         assert (root / "app" / "VERSION").read_text(encoding="utf-8").strip() == \
             (PROJECT / "VERSION").read_text(encoding="utf-8").strip()           # the version installed before
+        kept = backups("before-upgrade")
+        assert len(kept) == 1 and str(kept[0]) in failed["error"]          # a failed upgrade keeps its backup
+        # a good upgrade: its own backup is deleted; the failed one's and the hand-made one stay
+        code_u, good = _run_upgrade(PROJECT, root)
+        assert code_u == 0 and good["backup_removed"] is True and good["backup"] is None, good
+        assert backups("before-upgrade") == kept and backups("manual") == manual
+        assert inst.load_state(inst.Layout(root))["last_backup"] is None
         # status
         code5, st = _run(["status"], root)
         assert code5 == 0 and st["installed"] and st["service_state"] == "active"
