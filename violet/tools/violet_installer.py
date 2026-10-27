@@ -36,6 +36,7 @@ import ipaddress
 import json
 import os
 import platform
+import re
 import secrets
 import shutil
 import socket
@@ -182,6 +183,46 @@ def latest_release(repo: str | None = None, opener: Callable[..., Any] | None = 
     return {"tag": tag, "version": tag.lstrip("vV"), "url": str(data.get("html_url") or ""),
             "published_at": data.get("published_at"), "notes": str(data.get("body") or "")[:4000],
             "install_url": f"https://github.com/{repo}/releases/download/{tag}/install.sh"}
+
+
+def feed_url_checked(url: str) -> str:
+    """A release.json address (tools/make_release.py writes one next to install.sh): https, or http on this machine
+    for tests -- the same rule make_release applies to --base."""
+    url = (url or "").strip()
+    if not re.match(r"^(https://[^\s/?#@]+|http://(127\.0\.0\.1|localhost)(:\d+)?)(/[^\s?#@]*)?$", url) \
+            or not url.endswith("release.json"):
+        raise InstallError("--update-feed 要是 https:// 开头、以 release.json 结尾的地址（http 只允许 127.0.0.1）")
+    return url
+
+
+def feed_release(url: str, opener: Callable[..., Any] | None = None, timeout: float = 10.0) -> dict:
+    """The release described by a release.json (instead of GitHub Releases)."""
+    request = urllib.request.Request(feed_url_checked(url), headers={"User-Agent": "violet-updater"})
+    try:
+        with (opener or urllib.request.urlopen)(request, timeout=timeout) as response:
+            data = json.loads(response.read(100_000).decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise InstallError(f"读取 {url} 失败：{exc.__class__.__name__}") from None
+    version, base = str(data.get("version") or ""), str(data.get("base") or "").rstrip("/")
+    if not version_key(version) or not base:
+        raise InstallError(f"{url} 不是 Violet 的 release.json")
+    return {"tag": "v" + version, "version": version, "url": "", "published_at": data.get("built_at"), "notes": "",
+            "install_url": base + "/install.sh"}
+
+
+def release_for(state: dict) -> dict:
+    """The newest release for this installation: its own feed if the installer was given one, else GitHub (the
+    repository given at install time, else the official one). Only root-owned install.json decides this."""
+    if state.get("update_feed"):
+        return feed_release(state["update_feed"])
+    return latest_release(state.get("update_repo") or update_repo())
+
+
+def repo_checked(repo: str) -> str:
+    repo = (repo or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}", repo):
+        raise InstallError("--update-repo 的格式是 GitHub 的 owner/repo")
+    return repo
 
 
 # ------------------------------------------------------------------------------------------------ system checks
@@ -663,6 +704,34 @@ def systemd_unit(layout: Layout, user: str | None, user_mode: bool = False) -> s
     return "\n".join(lines)
 
 
+UPDATER_NAME = f"{SERVICE_NAME}-update"
+
+
+def updater_units(layout: Layout) -> dict[str, str]:
+    """Violet stage 3 -- automatic updates for a root + systemd install. Violet itself runs as an unprivileged user and
+    cannot replace its own program, so a root oneshot service does it:
+
+      <UPDATER_NAME>.service  runs `<root>/violet auto-update` (reads the update mode the admin chose; a newer GitHub
+                              release is installed with the normal `update`: backup first, rollback on failure)
+      <UPDATER_NAME>.timer    every 6 hours (plus 20 minutes after boot), randomised by up to 30 minutes
+      <UPDATER_NAME>.path     the Control Center's "update now": Violet may create <data>/control/update-request. That
+                              is ALL it can do -- the release source comes only from root-owned install.json / the
+                              built-in repository, never from a file the service user can write."""
+    request = layout.data / "control" / "update-request"
+    return {
+        f"{UPDATER_NAME}.service": "\n".join([
+            "[Unit]", "Description=Violet automatic update", "After=network-online.target",
+            "Wants=network-online.target", "", "[Service]", "Type=oneshot",
+            f"ExecStart={layout.root / 'violet'} auto-update --json", "TimeoutStartSec=1800", ""]),
+        f"{UPDATER_NAME}.timer": "\n".join([
+            "[Unit]", "Description=Check for Violet updates", "", "[Timer]", "OnBootSec=20min", "OnUnitActiveSec=6h",
+            "RandomizedDelaySec=30min", f"Unit={UPDATER_NAME}.service", "", "[Install]", "WantedBy=timers.target", ""]),
+        f"{UPDATER_NAME}.path": "\n".join([
+            "[Unit]", "Description=Violet update requested from the Control Center", "", "[Path]",
+            f"PathExists={request}", f"Unit={UPDATER_NAME}.service", "", "[Install]", "WantedBy=paths.target", ""]),
+    }
+
+
 class Service:
     """systemd (system) | systemd-user | supervisor (tools/violet_service.py, any OS)."""
 
@@ -722,8 +791,29 @@ class Service:
             return (done.stdout or "").strip() or "unknown"
         return "active" if supervisor_pid(self.layout) else "inactive"
 
+    def register_updater(self) -> bool:
+        """The automatic-update units (system systemd only, see updater_units). Never restarts the update service
+        itself: an update running right now re-registers them from inside that service."""
+        if self.mode != "systemd":
+            return False
+        folder = self.unit_path().parent
+        for name, text in updater_units(self.layout).items():
+            (folder / name).write_text(text, encoding="utf-8")
+        self._ctl("daemon-reload")
+        self._ctl("enable", "--now", f"{UPDATER_NAME}.timer", f"{UPDATER_NAME}.path")
+        return True
+
+    def unregister_updater(self) -> None:
+        if self.mode != "systemd":
+            return
+        self._ctl("disable", "--now", f"{UPDATER_NAME}.timer", f"{UPDATER_NAME}.path")
+        for name in updater_units(self.layout):
+            (self.unit_path().parent / name).unlink(missing_ok=True)
+        self._ctl("daemon-reload")
+
     def unregister(self) -> None:
         if self.mode.startswith("systemd"):
+            self.unregister_updater()
             self._ctl("disable", "--now", f"{SERVICE_NAME}.service")
             try:
                 self.unit_path().unlink()
@@ -988,6 +1078,8 @@ class Options:
     health_timeout: float = HEALTH_TIMEOUT
     json_output: bool = False
     log: Callable[[str], None] = field(default=print)
+    update_feed: str | None = None       # a release.json URL instead of GitHub (own mirror; Linux acceptance test)
+    update_repo: str | None = None       # a fork's GitHub owner/repo instead of the official releases
 
 
 def bind_host_for(access: str) -> str:
@@ -1053,7 +1145,14 @@ def install(opts: Options) -> dict[str, Any]:
     if service_mode != "none":
         service_note = service.register(autostart=opts.autostart)
         log(f"  {service_note}")
+        if service.register_updater():
+            state["auto_update_agent"] = "systemd"
+            log("  自动更新：已注册（每 6 小时检查一次；可在后台“设置 → 版本更新”改成只提醒或手动）")
         service.start()
+    if opts.update_feed:
+        state["update_feed"] = feed_url_checked(opts.update_feed)
+    if opts.update_repo:
+        state["update_repo"] = repo_checked(opts.update_repo)
     scheme = "https" if tls else "http"
     healthy = service_mode == "none" or wait_healthy(port, "127.0.0.1", opts.health_timeout, scheme)
     if not healthy:
@@ -1214,6 +1313,8 @@ def upgrade(opts: Options) -> dict[str, Any]:
         if state.get("service") == "systemd" and state.get("user"):
             ensure_service_user(layout, state["user"])         # files the initialiser created as root
             Service(layout, "systemd", state["user"]).register()  # the unit of the new version
+        if state.get("service") == "systemd" and _is_root() and Service(layout, "systemd").register_updater():
+            state["auto_update_agent"] = "systemd"             # installs from before automatic updates get them now
         if state.get("service") != "none":
             service.start()
             if not wait_healthy(state["port"], "127.0.0.1", opts.health_timeout, _scheme(layout)):
@@ -1311,7 +1412,7 @@ def update(opts: Options, check_only: bool = False, release: dict | None = None,
     if not state:
         raise InstallError(f"{layout.root} 没有安装 Violet")
     current = state.get("version") or source_version(layout.app)
-    rel = release or latest_release()
+    rel = release or release_for(state)
     newer = is_newer(rel["version"], current)
     result = {"ok": True, "current": current, "latest": rel["version"], "newer": newer, "release_url": rel["url"],
               "published_at": rel.get("published_at")}
@@ -1338,6 +1439,107 @@ def update(opts: Options, check_only: bool = False, release: dict | None = None,
     if done.returncode != 0 or not outcome.get("ok"):
         raise InstallError(outcome.get("error") or ("升级失败：" + (done.stderr or done.stdout or "")[-1500:]))
     return {**result, "updated": True, "to": outcome.get("to"), "backup": outcome.get("backup")}
+
+
+UPDATE_MODES = ("auto", "notify", "manual")
+FAILED_RETRY_SECONDS = 24 * 3600
+
+
+def _read_small(path: Path, limit: int = 65536) -> bytes | None:
+    """A file in a folder the service user owns, read as root: never through a symlink, never more than ``limit``."""
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path, flags)
+        try:
+            return os.read(fd, limit)
+        finally:
+            os.close(fd)
+    except OSError:
+        return None
+
+
+def update_mode(layout: Layout) -> str:
+    """auto | notify | manual -- the Control Center setting (data/control/settings.json), else the configuration
+    file, else auto. Only one of three words is taken from these service-owned files; anything else means auto."""
+    raw = _read_small(layout.data / "control" / "settings.json")
+    try:
+        value = (json.loads(raw.decode("utf-8")).get("values") or {}).get("VIOLET_UPDATE_MODE") if raw else None
+    except (ValueError, AttributeError):
+        value = None
+    if value in UPDATE_MODES:
+        return value
+    env = _env(layout)
+    if env.get("VIOLET_UPDATE_MODE") in UPDATE_MODES:
+        return env["VIOLET_UPDATE_MODE"]
+    if env.get("VIOLET_UPDATE_CHECK", "").strip().lower() in ("0", "false", "no", "off"):
+        return "manual"                                     # 0.2.0 switched the check off this way
+    return "auto"
+
+
+def take_update_request(layout: Layout) -> str | None:
+    """"manual" (the admin pressed "update now"), "auto" (the page saw a newer release in automatic mode) or None.
+    The request file is removed first, so the path unit does not start the update again."""
+    path = layout.data / "control" / "update-request"
+    if not (path.is_symlink() or path.exists()):
+        return None
+    raw = _read_small(path, 32) or b""
+    try:
+        path.unlink()
+    except OSError:
+        pass
+    return "auto" if raw.strip() == b"auto" else "manual"
+
+
+def record_auto_update(layout: Layout, **fields: Any) -> dict:
+    """Store the outcome in install.json (root-owned; the Control Center reads it). Re-read first: an update has just
+    rewritten that file with the new version."""
+    state = load_state(layout)
+    entry = {**(state.get("auto_update") or {}), **fields, "last_run_at": int(time.time())}
+    state["auto_update"] = entry
+    save_state(layout, state)
+    return entry
+
+
+def auto_update(opts: Options, release: dict | None = None, now: Callable[[], float] = time.time,
+                do_update: Callable[..., dict] | None = None) -> dict[str, Any]:
+    """`violet auto-update` (the root update service): update when the admin asked for it, or when the mode is
+    "auto" and a newer release exists. A release that failed to install is not tried again by itself for 24 hours
+    (pressing "update now" always tries)."""
+    layout = Layout(opts.root)
+    state = load_state(layout)
+    if not state:
+        raise InstallError(f"{layout.root} 没有安装 Violet")
+    request = take_update_request(layout)
+    mode = update_mode(layout)
+    if request is None and mode != "auto":
+        return {"ok": True, "action": "skipped", "mode": mode}
+    try:
+        rel = release or release_for(state)
+    except InstallError as exc:
+        record_auto_update(layout, last_result="error", last_message=str(exc), requested=request)
+        raise
+    current = state.get("version") or source_version(layout.app)
+    if not is_newer(rel["version"], current):
+        record_auto_update(layout, last_result="up_to_date", last_message=f"已经是最新版本 {current}",
+                           latest=rel["version"], requested=request)
+        return {"ok": True, "action": "up_to_date", "mode": mode, "current": current, "latest": rel["version"]}
+    previous = state.get("auto_update") or {}
+    if request != "manual" and previous.get("failed_version") == rel["version"] and \
+            now() - float(previous.get("failed_at") or 0) < FAILED_RETRY_SECONDS:
+        return {"ok": True, "action": "waiting", "mode": mode, "latest": rel["version"],
+                "note": f"{rel['version']} 上次安装失败，24 小时内不再自动重试"}
+    try:
+        result = (do_update or update)(opts, release=rel)
+    except InstallError as exc:
+        record_auto_update(layout, last_result="failed", last_message=str(exc)[:1000], latest=rel["version"],
+                           failed_version=rel["version"], failed_at=int(now()), requested=request)
+        raise
+    record_auto_update(layout, last_result="updated", last_message=f"已从 {current} 升级到 {rel['version']}",
+                       latest=rel["version"], updated_from=current, updated_to=rel["version"], failed_version=None,
+                       failed_at=None, requested=request)
+    return {"ok": True, "action": "updated", "mode": mode, **result}
 
 
 def status(opts: Options) -> dict[str, Any]:
@@ -1480,7 +1682,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="violet-installer", description="Violet installer")
     parser.add_argument("command", choices=["install", "upgrade", "update", "rollback", "status", "backup", "restore",
                                             "uninstall", "doctor", "start", "stop", "restart", "info",
-                                            "reset-password", "reset-entrance", "set-port"])
+                                            "reset-password", "reset-entrance", "set-port", "auto-update"])
+    parser.add_argument("--update-feed", help=argparse.SUPPRESS)  # install: a release.json instead of GitHub
+    parser.add_argument("--update-repo", help="install: GitHub owner/repo to update from (a fork)")
     parser.add_argument("--check", action="store_true", help="update: only report whether a newer release exists")
     parser.add_argument("archive", nargs="?", help="restore: the backup file; set-port: the new port")
     parser.add_argument("--entrance", help="reset-entrance: this value instead of a random one")
@@ -1506,7 +1710,8 @@ def main(argv: list[str] | None = None) -> int:
     opts = Options(root=root, port=args.port, access=args.access or "", service=args.service, user=args.user,
                    wheels=args.wheels, reuse_venv=args.reuse_venv, public_url=args.public_url,
                    open_firewall=args.open_firewall, autostart=not args.no_autostart, reset_admin=args.reset_admin,
-                   health_timeout=args.health_timeout, json_output=args.json, log=out)
+                   health_timeout=args.health_timeout, json_output=args.json, log=out, update_feed=args.update_feed,
+                   update_repo=args.update_repo)
     try:
         if args.command == "install":
             if not opts.access:
@@ -1548,6 +1753,8 @@ def main(argv: list[str] | None = None) -> int:
                         out("  " + note)
                 out(f"  新地址：sudo {root / 'violet'} info 查看")
                 return 0
+        elif args.command == "auto-update":
+            result = auto_update(opts)
         elif args.command == "rollback":
             result = rollback(opts)
         elif args.command == "status":

@@ -49,21 +49,25 @@ class Setting:
     key: str
     label: str
     group: str
-    kind: str                       # url | secret | model | float | int | bool | hhmm | prompt_version
+    kind: str                       # url | secret | model | float | int | bool | hhmm | prompt_version | choice | text
+    #                                 | timezone
     effect: str                     # now | restart
     help: str = ""
     default: Any = None
     min: float | None = None
     max: float | None = None
-    optional: bool = False          # empty value allowed (model fallback)
+    optional: bool = False          # empty value allowed (model fallback; text: "" = say nothing)
     target: str = "env"             # env | proactive (proactive_config.json) | prompt
     path: tuple = field(default_factory=tuple)
+    choices: tuple = ()             # choice: ((value, label), ...)
 
     def public(self) -> dict[str, Any]:
         out = {k: getattr(self, k) for k in ("key", "label", "group", "kind", "effect", "help", "default", "min", "max",
                                               "optional")}
         if self.kind == "prompt_version":
             out["choices"] = prompt_versions(self.key.split(".")[1])
+        elif self.kind == "choice":
+            out["choices"] = [{"value": v, "label": label} for v, label in self.choices]
         return out
 
 
@@ -129,12 +133,93 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_SCHEDULE_CONTEXT", "聊天时考虑课表", "features", "bool", "now", "聊天时知道你现在是不是在上课", False),
     Setting("VIOLET_SCHEDULE_PROACTIVE", "主动联系避开上课", "features", "bool", "now",
             "上课、考试时不主动找你（按课表计算）", False),
-    Setting("VIOLET_UPDATE_CHECK", "检查新版本", "features", "bool", "now",
-            "打开“开始”页时向 GitHub 查询有没有新发布的版本（最多每 6 小时一次，只查询不下载）", True),
+    # Violet stage 3: everything a user may want to change without editing .env. Left out on purpose: what the
+    # installer owns (paths, port, HTTPS, data directory, admin token), stdio MCP commands, test switches.
+    Setting("VIOLET_WEB_SEARCH_PROVIDER", "搜索服务", "features", "choice", "now",
+            "SearXNG 是自建的开源搜索；博查 / Brave 是付费搜索 API（Key 在“工具”页的联网工具里替换）", "searxng",
+            choices=(("searxng", "SearXNG（自建）"), ("bocha", "博查（付费 API）"), ("brave", "Brave Search（付费 API）"),
+                     ("none", "不搜索"))),
+    Setting("VIOLET_WEB_SEARCH_ENDPOINT", "搜索 API 地址", "features", "url", "now",
+            "只对博查 / Brave：换成别的接口地址；留空 = 官方地址", optional=True),
+    Setting("VIOLET_WEB_SEARCH_LANGUAGE", "搜索语言", "features", "choice", "now", "SearXNG 搜索结果的语言", "zh-CN",
+            choices=(("zh-CN", "简体中文"), ("zh-TW", "繁體中文"), ("en", "English"), ("ja", "日本語"), ("all", "不限"))),
+    Setting("VIOLET_WEB_EXPLORER", "允许自主探索", "features", "bool", "now",
+            "允许 Violet 在空闲时自己上网看看感兴趣的东西（会用模型、计入联网次数）；打开后还要在“联网与探索”页开启", False),
+    Setting("VIOLET_WEB_EXPLORER_LLM_MODEL", "自主探索用的模型", "features", "model", "now", "留空 = 不探索", optional=True),
+    Setting("VIOLET_IMAGE_ENABLED", "图片功能", "images", "bool", "now",
+            "关闭时收到的图片只用下面的识图模型看一眼，聊天里没有生成 / 编辑图片的工具", False),
+    Setting("VISION_LLM_MODEL", "识图模型", "images", "model", "now", "看懂你发来的图片用的模型", "vision"),
+    Setting("VISION_TIMEOUT_SECONDS", "识图超时（秒）", "images", "float", "now", "", 60.0, 5, 300),
+    Setting("VIOLET_IMAGE_LEGACY_VISION", "没有图片功能时也识图", "images", "bool", "now",
+            "图片功能关闭或没有可用的识图服务时，用上面的识图模型", True),
+    Setting("VIOLET_IMAGE_LEGACY_VISION_MAX_PER_DAY", "每天最多识图几次", "images", "int", "now", "", 50, 0, 1000),
+    Setting("VIOLET_MEDIA_INBOUND_RETENTION_DAYS", "收到的图片保留（天）", "images", "float", "now",
+            "到期后删除图片文件（对图片的文字描述另算）", 7.0, 1, 3650),
+    Setting("VIOLET_MEDIA_GENERATED_RETENTION_DAYS", "生成的图片保留（天）", "images", "float", "now", "", 30.0, 1, 3650),
+    Setting("VIOLET_IMAGE_TEXT_RETENTION_DAYS", "图片描述保留（天）", "images", "float", "now",
+            "识图结果、生成图片的提示词保留多久", 30.0, 1, 3650),
+    Setting("VIOLET_DAILY_LIFE", "日常作息", "life", "bool", "now",
+            "Violet 有自己普通的一天（按日期固定，不用模型），聊天时会自然提到", True),
+    Setting("VIOLET_LIFE_GENERATION_MODE", "生活事件的写法", "life", "choice", "now",
+            "模型写法：只让模型润色进展的措辞，程序检查后才保存（会用模型）", "template",
+            choices=(("template", "模板（不用模型）"), ("llm", "模型润色"))),
+    Setting("VIOLET_LIFE_LLM_MODEL", "润色生活事件用的模型", "life", "model", "restart", "留空 = 用模板", optional=True),
+    Setting("VIOLET_ASYNC_MEMORY", "回复后再整理记忆", "memory", "bool", "restart",
+            "关闭后先整理记忆再回复（回复会慢一些）", True),
+    Setting("VIOLET_MEMORY_WORD_RECALL", "按关键词带出旧记忆", "memory", "bool", "now",
+            "你这句话和某条记忆有相同的关键词时，直接让 Chat 看到这条记忆", True),
+    Setting("VIOLET_EVENT_VALID_DAYS", "事件记忆有效期（天）", "memory", "float", "now",
+            "过期只标记为过期，不删除", 14.0, 1, 3650),
+    Setting("VIOLET_PROFILE_STORE_SENSITIVE", "自动记住敏感信息", "memory", "bool", "now",
+            "健康、财务、证件号、联系方式、精确住址等默认不自动保存", False),
+    Setting("VIOLET_REMINDER_BEFORE_REPLY", "先设提醒再回复", "memory", "bool", "now",
+            "“提醒我……”在回复前就保存，回复里如实说有没有设成", True),
+    Setting("VIOLET_COMMITMENT_DEFAULT_TIME", "提醒的默认时刻", "memory", "hhmm", "now", "只说了日期没说时间时用", "09:00"),
+    Setting("VIOLET_ONBOARDING", "慢慢认识你", "behavior", "bool", "now",
+            "聊天中偶尔自然地问一个关于你的问题（每次最多一个，被拒绝的不再问）", True),
+    Setting("VIOLET_FOLLOW_UP_CHECK", "少追问", "behavior", "bool", "now",
+            "你说过不喜欢被追问时，回复仍以提问结尾就重写一次（多一次模型调用）", True),
+    Setting("VIOLET_PERSONA_CONTEXT", "人设和生活进入对话", "behavior", "bool", "now", "", True),
+    Setting("VIOLET_PROACTIVE_TOPIC_GUARD", "主动消息避开不该提的话题", "behavior", "bool", "now",
+            "主动消息谈到已结束的事、冷却中的话题时不发送", True),
+    Setting("VIOLET_PERSONA_REPLY_GUARD", "回复一致性检查", "guard", "choice", "now",
+            "检查回复有没有和人设、生活记录矛盾", "enforce",
+            choices=(("enforce", "发现矛盾就改写"), ("flag", "只记录"), ("off", "关闭"))),
+    Setting("VIOLET_SEMANTIC_GUARD", "模型复核", "guard", "choice", "now",
+            "规则判断不了的“自己经历”句子，再请模型复核一次（会用模型）", "off",
+            choices=(("off", "关闭"), ("on", "开启"))),
+    Setting("VIOLET_SEMANTIC_GUARD_MODEL", "复核用的模型", "guard", "model", "restart", "留空 = 不复核", optional=True),
+    Setting("VIOLET_SEMANTIC_GUARD_MAX_CALLS_PER_DAY", "复核每天最多几次", "guard", "int", "restart", "", 60, 0, 10000),
+    Setting("VIOLET_SEMANTIC_GUARD_MAX_TOKENS_PER_DAY", "复核每天最多用多少 token", "guard", "int", "restart", "",
+            60000, 0, 10_000_000),
+    Setting("MCP_CONNECT_TIMEOUT_SECONDS", "连接超时（秒）", "mcp", "float", "now", "连接 MCP 服务器（例如手机）", 8.0, 1, 120),
+    Setting("MCP_CALL_TIMEOUT_SECONDS", "工具调用超时（秒）", "mcp", "float", "now", "", 30.0, 1, 600),
+    Setting("MCP_CALL_RETRIES", "断线重试次数", "mcp", "int", "now", "只对连接中途断开重试；超时、设备离线不重试", 1, 0, 5),
+    Setting("MCP_RESULT_MAX_CHARS", "工具结果最长（字）", "mcp", "int", "now", "更长的结果会截断后再给模型", 6000, 500, 100000),
+    Setting("VIOLET_SEND_MAX_ATTEMPTS", "发送失败重试次数", "messages", "int", "restart",
+            "只对“消息没送到聊天平台”的连接错误重试", 2, 1, 10),
+    Setting("VIOLET_SEND_RETRY_DELAY_SECONDS", "发送重试间隔（秒）", "messages", "float", "restart", "", 2.0, 0, 60),
+    Setting("VIOLET_FALLBACK_REPLY", "出错时的兜底回复", "messages", "text", "now",
+            "模型整轮失败时发给你的一句话；留空 = 不发（错误仍会记录）",
+            "我这边刚刚卡了一下，没接上你的话，你再说一次好不好", optional=True),
+    Setting("VIOLET_STARTUP_MESSAGE", "启动通知", "system", "text", "restart",
+            "Violet 启动后发给你的一句话；留空 = 不发", "", optional=True),
+    Setting("VIOLET_TIMEZONE", "时区", "system", "timezone", "restart",
+            "提醒、静默时段、课表和每天 03:00 的记忆整理都按这个时区（IANA 名称，例如 Asia/Shanghai）", "Asia/Shanghai"),
+    Setting("VIOLET_LOG_LEVEL", "日志详细程度", "system", "choice", "restart", "日志里从不记录 API Key 和密码", "INFO",
+            choices=(("WARNING", "只记问题"), ("INFO", "标准"), ("DEBUG", "详细（排查问题时用）"))),
+    Setting("VIOLET_DASHBOARD_IDLE_MINUTES", "后台无操作多久要重新登录（分钟）", "system", "int", "restart", "", 120, 5, 1440),
+    Setting("VIOLET_DASHBOARD_SESSION_HOURS", "后台登录最长保持（小时）", "system", "int", "restart", "", 12, 1, 720),
+    Setting("VIOLET_UPDATE_MODE", "更新方式", "updates", "choice", "now",
+            "自动更新：发现新版本就在服务器上自动升级（先备份，失败自动退回）；只提醒：自动检查，升级要你点“立即更新”"
+            "或执行命令；手动：只在你点“检查更新”时才查", "auto",
+            choices=(("auto", "自动更新"), ("notify", "自动检查，只提醒"), ("manual", "手动检查"))),
 ]
 BY_KEY = {s.key: s for s in SETTINGS}
 GROUPS = {"api": "接口", "models": "模型与 Agent", "prompts": "提示词版本", "messages": "消息发送", "proactive": "主动联系",
-          "life": "生活引擎", "behavior": "聊天行为", "features": "功能开关"}
+          "life": "生活引擎", "behavior": "聊天行为", "memory": "记忆与提醒", "guard": "回复检查", "features": "功能开关",
+          "images": "图片", "mcp": "MCP 工具调用", "system": "系统", "updates": "版本更新"}
+TEXT_MAX = 200
 
 
 def prompt_versions(kind: str) -> list[str]:
@@ -164,8 +249,30 @@ def validate(key: str, value: Any) -> Any:
     s = BY_KEY.get(key)
     if s is None:
         raise ValueError("不允许修改这个设置")
-    if value is None or (isinstance(value, str) and value.strip() == "" and s.kind not in ("model",)):
+    if value is None or (isinstance(value, str) and value.strip() == "" and s.kind not in ("model", "text")):
         return None
+    if s.kind == "text":
+        value = str(value).strip()
+        if not value and not s.optional:
+            raise ValueError("不能为空")
+        if len(value) > TEXT_MAX or any(ord(c) < 32 for c in value):
+            raise ValueError(f"最多 {TEXT_MAX} 个字，只能写一行")
+        return value
+    if s.kind == "choice":
+        value = str(value).strip()
+        if value not in {v for v, _label in s.choices}:
+            raise ValueError("没有这个选项")
+        return value
+    if s.kind == "timezone":
+        value = str(value).strip()
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_+\-]*(/[A-Za-z0-9_+\-]+){0,2}", value) or len(value) > 64:
+            raise ValueError("请填写 IANA 时区名称，例如 Asia/Shanghai")
+        try:
+            from zoneinfo import ZoneInfo
+            ZoneInfo(value)
+        except Exception:
+            raise ValueError("没有这个时区（例如 Asia/Shanghai、Europe/London、America/New_York）")
+        return value
     if s.kind == "secret":
         value = str(value).strip()
         if len(value) < 8 or len(value) > 512 or any(c.isspace() for c in value):
@@ -495,6 +602,8 @@ class ControlStore:
                     value = env_int(s.key, s.default)
                 elif s.kind == "bool":
                     value = env_bool(s.key, s.default)
+                elif s.kind == "text":
+                    value = os.environ[s.key].strip() if s.key in os.environ else s.default   # "" is a real value
                 else:
                     value = (os.environ.get(s.key) or "").strip() or s.default
                 row.update(value=value, source="dashboard" if s.key in values else

@@ -265,7 +265,7 @@ function renderWeb(web) {
         if (!value) return;
         try { await api("POST", "/api/control/tools/web/secret", { value, confirm: true }); toast("凭据已替换"); loaders.tools(); } catch (e) { toast("替换失败：" + e.message, false); }
       } })),
-    h("p", { class: "note", text: "搜索服务、接口地址和网络限制只能在 .env 里改；停用单个联网工具在下面 violet-web 的工具列表里。" }),
+    h("p", { class: "note", text: "搜索服务、SearXNG 地址和搜索语言在“设置 → 功能开关”里改；停用单个联网工具在下面 violet-web 的工具列表里。" }),
     ...(failures.length ? [h("div", { class: "note", text: "今天的失败：" }), ...failures] : [])));
 }
 loaders.tools = async () => {
@@ -293,6 +293,9 @@ function settingInput(s) {
   } else if (s.kind === "prompt_version") {
     input = h("select", {}, h("option", { value: "", text: "用 .env 里的提示词" }), ...(s.choices || []).map((c) => h("option", { value: c, text: c })));
     input.value = s.value || ""; input.addEventListener("change", () => mark(input.value));
+  } else if (s.kind === "choice") {
+    input = h("select", {}, ...(s.choices || []).map((c) => h("option", { value: c.value, text: c.label })));
+    input.value = s.value ?? s.default ?? ""; input.addEventListener("change", () => mark(input.value));
   } else if (s.kind === "secret") {
     input = h("input", { type: "password", autocomplete: "new-password", placeholder: s.is_set ? `已设置（${s.fingerprint}），输入新值以替换` : "未设置" });
     input.addEventListener("input", () => input.value ? mark(input.value) : (delete pending[s.key]));
@@ -328,15 +331,35 @@ loaders.settings = async () => {
     }
     const life = await api("GET", "/api/life/engine").catch(() => null);
     $("#life-mode").textContent = "当前：" + fmt(life && (life.mode || (life.data && life.data.mode)));
+    const rs = await api("GET", "/api/control/restart").catch(() => null);
+    $("#set-restart").disabled = !(rs && rs.available);
+    $("#set-restart-note").textContent = rs && !rs.available ? rs.reason : "";
   } catch (e) { toast("设置读取失败：" + e.message, false); }
 };
+async function restartViolet() {
+  if (!(await confirmBox("重启 Violet？正在处理的消息会在重启后继续，大约需要十几秒。"))) return;
+  try { await api("POST", "/api/control/restart", { confirm: true }); }
+  catch (e) { toast("重启失败：" + e.message, false); return; }
+  toast("正在重启…");
+  // wait until the old process is gone, then until the new one answers
+  const started = Date.now(); let down = false;
+  while (Date.now() - started < 120000) {
+    await new Promise((r) => setTimeout(r, 1500));
+    let up = false;
+    try { up = (await fetch("/healthz", { cache: "no-store" })).ok; } catch (_) { up = false; }
+    if (!up) down = true;
+    else if (down || Date.now() - started > 15000) { toast("Violet 已重新启动"); location.reload(); return; }
+  }
+  toast("两分钟内没有等到 Violet 重新启动，请到服务器上查看", false);
+}
+$("#set-restart").addEventListener("click", restartViolet);
 $("#set-save").addEventListener("click", async () => {
   document.querySelectorAll("[data-err]").forEach((e) => (e.textContent = ""));
   try {
     const r = await api("PUT", "/api/control/settings", { changes: pending, reason: $("#set-reason").value });
     const parts = [];
     if (r.applied_now.length) parts.push(`${r.applied_now.length} 项已生效`);
-    if (r.needs_restart.length) parts.push(`${r.needs_restart.length} 项需要重启 Violet 后生效`);
+    if (r.needs_restart.length) parts.push(`${r.needs_restart.length} 项需要重启 Violet 后生效（可以点“重启 Violet”）`);
     toast("已保存（第 " + r.revision + " 次修改）：" + parts.join("，"));
     $("#set-reason").value = ""; loaders.settings();
   } catch (e) {

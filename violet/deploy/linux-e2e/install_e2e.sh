@@ -34,7 +34,8 @@ sleep 1
 pass "release built and served"
 
 # 2. the one command
-OUT="$(curl -fsSL "http://127.0.0.1:$PORT_HTTP/install.sh" | bash -s -- --root "$ROOT" --service "$SERVICE" --json)" || {
+OUT="$(curl -fsSL "http://127.0.0.1:$PORT_HTTP/install.sh" | bash -s -- --root "$ROOT" --service "$SERVICE" \
+       --update-feed "http://127.0.0.1:$PORT_HTTP/release.json" --json)" || {
   printf '%s\n' "$OUT"; tail -n 40 "$ROOT/logs/main.log" 2>/dev/null || true; fail "install command"; }
 echo "$OUT" | json 'd["core_ok"]' | grep -q True || fail "core service not healthy"
 PORT="$(echo "$OUT" | json 'd["port"]')"
@@ -91,6 +92,46 @@ OLD_PORT="$PORT"; PORT=$((PORT + 37))
 curl -fsS "http://127.0.0.1:$PORT/healthz" | grep -q violet || fail "not answering on the new port"
 ! curl -fsS "http://127.0.0.1:$OLD_PORT/healthz" >/dev/null 2>&1 || fail "still answering on the old port"
 pass "info, reset-entrance, reset-password and set-port ($OLD_PORT -> $PORT)"
+
+# 4c. automatic updates (root + systemd): "update now" in the Control Center -> the root update service installs a
+#     newer release (built here with a higher version and served from the same feed)
+if [ "$MODE" = "systemd" ]; then
+  systemctl is-active --quiet violet-update.timer || fail "update timer not active"
+  systemctl is-active --quiet violet-update.path || fail "update path unit not active"
+  OLD_VERSION="$(python3 -c "import json;print(json.load(open('$ROOT/install.json'))['version'])")"
+  NEXT="$(python3 -c "v='$OLD_VERSION'.split('-')[0].split('.'); print('.'.join(v[:2]+[str(int(v[2])+1)]))")"
+  cp -r "$PROJECT" "$WORK/next"
+  echo "$NEXT" > "$WORK/next/VERSION"
+  python3 "$WORK/next/tools/make_release.py" --base "http://127.0.0.1:$PORT_HTTP" --out "$WORK/dist" --worktree >/dev/null
+  NEWPW="e2e-Password-$(date +%s)"
+  CODE="$(code -b "$JAR" -c "$JAR" -H "Origin: http://127.0.0.1:$PORT" -H 'Content-Type: application/json' \
+          --data "{\"current\":\"$PASSWORD\",\"new\":\"$NEWPW\",\"confirm\":\"$NEWPW\"}" "http://127.0.0.1:$PORT/auth/password")"
+  [ "$CODE" = "200" ] || fail "password change ($CODE)"
+  # "notify": the check below must not start the update by itself; "update now" does
+  CODE="$(code -X PUT -b "$JAR" -H "Origin: http://127.0.0.1:$PORT" -H 'Content-Type: application/json' \
+          --data '{"changes":{"VIOLET_UPDATE_MODE":"notify"}}' "http://127.0.0.1:$PORT/api/control/settings")"
+  [ "$CODE" = "200" ] || fail "update mode setting ($CODE)"
+  UPD="$(curl -s -b "$JAR" -H 'Accept: application/json' "http://127.0.0.1:$PORT/api/control/update?refresh=1")"
+  echo "$UPD" | json 'd["data"]["latest"]' | grep -qx "$NEXT" || { echo "$UPD"; fail "the page does not see $NEXT"; }
+  echo "$UPD" | json 'd["data"]["auto"]["available"]' | grep -q True || fail "automatic updates not available"
+  sleep 5
+  [ "$(python3 -c "import json;print(json.load(open('$ROOT/install.json'))['version'])")" = "$OLD_VERSION" ] ||
+    fail "notify mode updated by itself"
+  CODE="$(code -b "$JAR" -H "Origin: http://127.0.0.1:$PORT" -H 'Content-Type: application/json' \
+          --data '{"confirm":true}' "http://127.0.0.1:$PORT/api/control/update/apply")"
+  [ "$CODE" = "200" ] || fail "update now ($CODE)"
+  for _ in $(seq 1 120); do
+    python3 -c "import json,sys;d=json.load(open('$ROOT/install.json'));sys.exit(0 if d.get('version')=='$NEXT' and (d.get('auto_update') or {}).get('last_result')=='updated' else 1)" 2>/dev/null && break
+    sleep 3
+  done
+  python3 -c "import json,sys;d=json.load(open('$ROOT/install.json'));print(d.get('version'), d.get('auto_update'))"
+  [ "$(python3 -c "import json;print(json.load(open('$ROOT/install.json'))['version'])")" = "$NEXT" ] || {
+    journalctl -u violet-update -n 60 --no-pager || true; fail "automatic update to $NEXT"; }
+  for _ in $(seq 1 30); do curl -fsS "http://127.0.0.1:$PORT/healthz" 2>/dev/null | grep -q violet && break; sleep 1; done
+  curl -fsS "http://127.0.0.1:$PORT/healthz" | grep -q violet || fail "not answering after the automatic update"
+  [ ! -e "$ROOT/data/control/update-request" ] || fail "update request left behind"
+  pass "automatic update from the Control Center: $OLD_VERSION -> $NEXT (root update service, healthy)"
+fi
 
 # 5. repair keeps port and password; backup; status
 OUT2="$(curl -fsSL "http://127.0.0.1:$PORT_HTTP/install.sh" | bash -s -- --root "$ROOT" --json)" || fail "repair"

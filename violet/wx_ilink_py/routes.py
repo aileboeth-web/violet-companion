@@ -246,6 +246,8 @@ def create_app(
                                 all_agents=all_agents, runtime=runtime, reload_all=reload_all)
         from .schedule_routes import register_schedule_routes      # phase 9.4.3: Control Center timetable page
         register_schedule_routes(app, violetdb)
+        from .restart import register_restart_routes               # Violet stage 3: restart from the page
+        register_restart_routes(app)
     if runtime is not None:
         from .channel_routes import register_channel_routes        # phase 10: chat channels
         register_channel_routes(app, runtime)

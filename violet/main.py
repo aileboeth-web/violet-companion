@@ -285,6 +285,18 @@ if __name__ == "__main__":
         logger.info("[main] SIGTERM received, shutting down server...")
         Thread(target=server.shutdown, daemon=True).start()
 
+    # Violet stage 3: "restart" from the Control Center -- exit with RESTART_EXIT_CODE; systemd (Restart=on-failure)
+    # and tools/violet_service.py start Violet again. Only offered when such a service manager runs this process.
+    _restart = {"requested": False}
+
+    def _request_restart() -> None:
+        logger.warning("[main] restart requested from the Control Center")
+        _restart["requested"] = True
+        Thread(target=server.shutdown, daemon=True).start()
+
+    from wx_ilink_py.restart import RESTART_EXIT_CODE, supervised
+    app.extensions["violet_restart"] = {"restart": _request_restart, "supervised": supervised()}
+
     signal.signal(signal.SIGTERM, _handle_sigterm)
     if hasattr(signal, "SIGBREAK"):              # Windows: tools/violet_service.py stops Violet with CTRL_BREAK
         signal.signal(signal.SIGBREAK, _handle_sigterm)
@@ -297,4 +309,4 @@ if __name__ == "__main__":
     life_scheduler.stop()
     channel_manager.stop_all()
     runtime.stop()
-    sys.exit(0)
+    sys.exit(RESTART_EXIT_CODE if _restart["requested"] else 0)

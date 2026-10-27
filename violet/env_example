@@ -1,3 +1,5 @@
+# 用安装器安装时不需要这个文件：常用设置都在后台“设置”页改（保存在 data/control/，覆盖这里的值）。
+# 这里列出全部选项，供不用安装器、手动部署时参考。
 # 完成你的配置并重命名该文件为.env
 # LLM API Configuration
 LLM_API_KEY=
@@ -39,10 +41,13 @@ VIOLET_DATA_DIR=./data
 VIOLET_FALLBACK_REPLY=我这边刚刚卡了一下，没接上你的话，你再说一次好不好
 # 启动通知；留空则不发送。
 VIOLET_STARTUP_MESSAGE=Violet Online.
-# 后台“开始”页是否向 GitHub 查询新版本（1 / 0，也可以在后台“设置 → 功能开关”里改）；只查询不下载。
-VIOLET_UPDATE_CHECK=1
-# 发布仓库（GitHub owner/repo）；改用自己的分支时设置。`violet update` 从这里下载新版本。
-# VIOLET_UPDATE_REPO=aileboeth-web/violet-companion
+# 更新方式（后台“设置 → 版本更新”里改）：auto（默认：发现新版本自动升级，需要 root + systemd 安装）
+# | notify（自动检查，只提醒）| manual（只在点“检查更新”时查询）。旧的 VIOLET_UPDATE_CHECK=0 等同 manual。
+VIOLET_UPDATE_MODE=auto
+# 0.2.0 的旧开关，仍然认：0 = manual（没有设置 VIOLET_UPDATE_MODE 时才看它）
+# VIOLET_UPDATE_CHECK=1
+# 用自己的分支发布时：安装时加 --update-repo owner/repo（记在 root 才能改的 install.json 里；
+# 检查更新、violet update 和自动更新都用它）。不在这个文件里设置：服务账号能改这个文件，不能让它决定 root 安装什么。
 # 进程崩溃后，重启时只补回复这么多秒以内收到、尚未处理的消息；更早的只入库不回复。
 VIOLET_RECOVERY_MAX_AGE_SECONDS=600
 # 发送失败的重试次数（仅对“请求未到达服务器”的连接错误重试）。

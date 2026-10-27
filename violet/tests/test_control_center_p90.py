@@ -290,8 +290,14 @@ def test_settings_list_only_whitelisted_keys_and_never_the_api_key(admin):
         assert hidden not in rows
     assert rows["CHAT_LLM_MODEL"]["value"] == "fake-chat"
     # 9.0.1: every whitelisted setting now takes effect at once (main's reload hook starts / stops the life thread
-    # and re-reads VIOLET_SIMULATE_TYPING); 9.0 labelled those two "restart"
-    assert all(r["effect"] == "now" for r in rows.values())
+    # and re-reads VIOLET_SIMULATE_TYPING); 9.0 labelled those two "restart". Violet stage 3 added settings that are
+    # read once at start (timezone, sessions, logging, send retries, ...): exactly those say "restart"
+    restart = {k for k, r in rows.items() if r["effect"] == "restart"}
+    assert restart == {"VIOLET_LIFE_LLM_MODEL", "VIOLET_ASYNC_MEMORY", "VIOLET_SEMANTIC_GUARD_MODEL",
+                       "VIOLET_SEMANTIC_GUARD_MAX_CALLS_PER_DAY", "VIOLET_SEMANTIC_GUARD_MAX_TOKENS_PER_DAY",
+                       "VIOLET_SEND_MAX_ATTEMPTS", "VIOLET_SEND_RETRY_DELAY_SECONDS", "VIOLET_STARTUP_MESSAGE",
+                       "VIOLET_TIMEZONE", "VIOLET_LOG_LEVEL", "VIOLET_DASHBOARD_IDLE_MINUTES",
+                       "VIOLET_DASHBOARD_SESSION_HOURS"}
 
 
 def test_no_setting_caps_the_number_of_messages_in_a_reply():

@@ -187,9 +187,11 @@ def test_check_can_be_switched_off_and_explains_failures(updates, monkeypatch, t
         raise inst.InstallError("查询最新版本失败（网络不通或被拦截）：URLError")
     failed = updates.check(fetch=broken, refresh=True)
     assert failed["error"].startswith("查询最新版本失败") and failed["newer"] is False
+    # 0.2.0's switch maps to "manual" (stage 3): nothing is fetched until the admin presses "check for updates"
     monkeypatch.setenv("VIOLET_UPDATE_CHECK", "0")
-    off = updates.check(fetch=lambda: (_ for _ in ()).throw(AssertionError("no request when off")), refresh=True)
-    assert off["enabled"] is False and off["latest"] is None
+    updates.reset_for_tests()
+    off = updates.check(fetch=lambda: (_ for _ in ()).throw(AssertionError("no request in manual mode")))
+    assert off["mode"] == "manual" and off["enabled"] is False and off["latest"] is None
 
 
 def test_a_link_that_is_not_github_is_dropped(updates):

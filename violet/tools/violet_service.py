@@ -47,7 +47,9 @@ def run(root: Path, python: str, max_restarts: int | None = None) -> int:
     stop_flag = root / "violet.stop"
     stop_flag.unlink(missing_ok=True)
     (root / "violet.pid").write_text(str(os.getpid()), encoding="utf-8")
-    env = {**os.environ, "VIOLET_ENV_FILE": str(root / "config" / "violet.env"), "PYTHONUNBUFFERED": "1"}
+    # VIOLET_SUPERVISED: the Control Center may offer "restart" (main.py exits, this loop starts it again)
+    env = {**os.environ, "VIOLET_ENV_FILE": str(root / "config" / "violet.env"), "PYTHONUNBUFFERED": "1",
+           "VIOLET_SUPERVISED": "1"}
     backoff, restarts = 2.0, 0
     try:
         while True:

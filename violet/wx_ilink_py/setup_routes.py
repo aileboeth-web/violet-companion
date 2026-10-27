@@ -1,7 +1,9 @@
 """Control Center: first-run setup (phase 10.3).
 
   GET  /api/control/setup               the checklist (what is configured, what is missing, where to fix it)
-  GET  /api/control/update              installed version vs. the newest GitHub release (?refresh=1)
+  GET  /api/control/update              installed version vs. the newest GitHub release (?refresh=1), update mode,
+                                        automatic-update state
+  POST /api/control/update/apply        {confirm: true}: ask the root update service to update now
   POST /api/control/setup/test-model    one short real request with the settings Violet uses now {model?}
   POST /api/control/setup/models        the model names the API offers (GET /models of the configured service)
   GET  /api/control/diagnostics         phase 10.6: findings by area (channels, model, MCP, tools, network, core)
@@ -43,6 +45,20 @@ def register_setup_routes(app: Flask, all_agents=None, runtime=None) -> None:
         """The installed version and the newest GitHub release (cached 6 h; ?refresh=1 asks GitHub again)."""
         from ai.updates import check
         return ok(check(refresh=request.args.get("refresh") == "1"))
+
+    @app.post("/api/control/update/apply")
+    def control_update_apply():
+        """Violet stage 3: "update now" -- asks the root update service to install the newest official release.
+        Nothing from the request body is passed on (only the confirmation is checked)."""
+        from ai.updates import request_update
+        if (request.get_json(silent=True) or {}).get("confirm") is not True:
+            return bad("更新需要确认（confirm: true）")
+        try:
+            return ok(request_update("manual"))
+        except PermissionError as exc:
+            return bad(str(exc), 409)
+        except OSError as exc:
+            return bad(f"无法提交更新请求（{exc.__class__.__name__}）", 500)
 
     @app.post("/api/control/setup/test-model")
     def control_setup_test_model():
