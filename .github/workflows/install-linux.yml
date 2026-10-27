@@ -1,6 +1,7 @@
 # Linux acceptance of the one-command install (phase 10.7). On GitHub's Ubuntu VMs systemd is real, so this covers
 # what a container cannot: the systemd unit, enable-at-boot, restart after kill -9, unit removal on uninstall.
-# On failure the last lines of the output are also written as an error annotation (readable without signing in).
+# On failure the last lines of the output are also written as an error annotation, on success the PASS lines as a
+# notice (both readable without signing in, through the check-run annotations API).
 name: install-linux
 on:
   workflow_dispatch:
@@ -25,6 +26,10 @@ jobs:
         if: failure()
         run: |
           tail -n 60 e2e.log | python3 -c "import sys; t=sys.stdin.read(); print('::error title=install_e2e (${{ matrix.os }})::' + t.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A'))"
+      - name: report what passed
+        if: success()
+        run: |
+          grep -E '^(PASS|ALL PASSED)' e2e.log | python3 -c "import sys; t=sys.stdin.read(); print('::notice title=install_e2e (${{ matrix.os }})::' + t.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A'))"
   containers:
     runs-on: ubuntu-24.04
     steps:
