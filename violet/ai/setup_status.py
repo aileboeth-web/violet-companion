@@ -135,8 +135,11 @@ def list_models(chat_agent) -> dict[str, Any]:
 
 # ------------------------------------------------------------------------------------------------ checklist
 
-def _item(item_id: str, title: str, state: str, detail: str, tab: str, required: bool) -> dict[str, Any]:
-    return {"id": item_id, "title": title, "state": state, "detail": detail, "tab": tab, "required": required}
+def _item(item_id: str, title: str, state: str, detail: str, tab: str, required: bool,
+          anchor: str | None = None) -> dict[str, Any]:
+    """tab + anchor: where clicking the item on the start page goes (the page, then the element with that id)."""
+    return {"id": item_id, "title": title, "state": state, "detail": detail, "tab": tab, "anchor": anchor,
+            "required": required}
 
 
 def checklist(*, admin_store=None, agents=None, runtime=None, data_dir=None, violetdb=None) -> dict[str, Any]:
@@ -145,25 +148,25 @@ def checklist(*, admin_store=None, agents=None, runtime=None, data_dir=None, vio
     if admin_store is not None:
         data = admin_store.load()
         if not data.get("password_hash"):
-            items.append(_item("admin", "管理员密码", "todo", "还没有设置密码（现在用的是管理令牌）", "account", True))
+            items.append(_item("admin", "管理员密码", "todo", "还没有设置密码（现在用的是管理令牌）", "account", True, "acct-pw"))
         elif data.get("must_change"):
             # Violet stage 3: the installer's random password is fine to keep
-            items.append(_item("admin", "管理员密码", "ok", "安装时随机生成的密码（可以一直用）", "account", True))
+            items.append(_item("admin", "管理员密码", "ok", "安装时随机生成的密码（可以一直用）", "account", True, "acct-pw"))
         else:
-            items.append(_item("admin", "管理员密码", "ok", "已设置", "account", True))
+            items.append(_item("admin", "管理员密码", "ok", "已设置", "account", True, "acct-pw"))
     # 2. model service
     from ai.chat import llm_configured
     state = load_state(data_dir)
     test = state.get("model_test") or {}
     if not llm_configured():
-        items.append(_item("model_service", "模型服务", "todo", "填写 API 地址和 API Key", "setup", True))
+        items.append(_item("model_service", "模型服务", "todo", "填写 API 地址和 API Key", "model", True, "model-api"))
     elif not test or test.get("settings") != _settings_fingerprint():
-        items.append(_item("model_service", "模型服务", "warn", "已填写，还没有用当前设置测试过", "setup", True))
+        items.append(_item("model_service", "模型服务", "warn", "已填写，还没有用当前设置测试过", "model", True, "model-api"))
     elif test.get("ok"):
         items.append(_item("model_service", "模型服务", "ok",
-                           f"测试通过（{test.get('model')}，{test.get('latency_ms')} 毫秒）", "setup", True))
+                           f"测试通过（{test.get('model')}，{test.get('latency_ms')} 毫秒）", "model", True, "model-api"))
     else:
-        items.append(_item("model_service", "模型服务", "warn", f"上次测试失败：{test.get('message')}", "setup", True))
+        items.append(_item("model_service", "模型服务", "warn", f"上次测试失败：{test.get('message')}", "model", True, "model-api"))
     # 3. agent models
     defaults, names = [], []
     for agent in agents or []:
@@ -175,9 +178,9 @@ def checklist(*, admin_store=None, agents=None, runtime=None, data_dir=None, vio
             defaults.append(agent.__class__.__name__.replace("Agent", ""))
     if defaults:
         items.append(_item("agent_models", "各 Agent 的模型", "warn",
-                           "这些 Agent 还在用代码默认模型（这个服务上可能没有）：" + "、".join(defaults), "setup", True))
+                           "这些 Agent 还在用代码默认模型（这个服务上可能没有）：" + "、".join(defaults), "model", True, "model-agents"))
     else:
-        items.append(_item("agent_models", "各 Agent 的模型", "ok", "；".join(names) or "—", "setup", True))
+        items.append(_item("agent_models", "各 Agent 的模型", "ok", "；".join(names) or "—", "model", True, "model-agents"))
     # 4. chat channels
     manager = getattr(runtime, "channels", None) if runtime is not None else None
     if manager is not None:
@@ -185,14 +188,14 @@ def checklist(*, admin_store=None, agents=None, runtime=None, data_dir=None, vio
         live = [c for c in rows if c["status"].get("state") == "connected"]
         bound = sum(c["peers"]["bound"] for c in rows) + sum(1 for c in live if c["type"] == "wechat_ilink")
         if live and bound:
-            items.append(_item("channels", "聊天渠道", "ok", "已连接：" + "、".join(c["label"] for c in live), "channels", True))
+            items.append(_item("channels", "聊天渠道", "ok", "已连接：" + "、".join(c["label"] for c in live), "channels", True, "ch-list"))
         elif live:
             items.append(_item("channels", "聊天渠道", "todo", "渠道已连接，但还没有绑定你的账号（生成绑定码）",
-                               "channels", True))
+                               "channels", True, "ch-pair-box"))
         else:
             needs = [c["label"] for c in rows if c["status"].get("state") == "needs_login"]
             detail = ("扫码登录：" + "、".join(needs)) if needs else "还没有可用的聊天渠道（扫码登录微信，或添加 Telegram / QQ）"
-            items.append(_item("channels", "聊天渠道", "todo", detail, "channels", True))
+            items.append(_item("channels", "聊天渠道", "todo", detail, "channels", True, "ch-list" if needs else "ch-add-box"))
     # 5. persona and profile (the shipped persona works as is)
     items.append(_item("persona", "人设与用户档案", "optional",
                        "已使用默认人设；可以在“人设与生活”页查看，用户档案会在聊天中逐步建立", "persona", False))
@@ -203,12 +206,12 @@ def checklist(*, admin_store=None, agents=None, runtime=None, data_dir=None, vio
     except Exception:
         servers = []
     items.append(_item("tools", "工具（MCP）", "optional",
-                       f"已配置 {len(servers)} 个工具服务器" if servers else "没有配置外部工具；不影响聊天", "tools", False))
+                       f"已配置 {len(servers)} 个工具服务器" if servers else "没有配置外部工具；不影响聊天", "tools", False, "phone-mcp"))
     # 7. proactive / life
     from ai.settings import env_bool
     items.append(_item("features", "主动消息与虚拟生活", "optional",
                        ("生活引擎开" if env_bool("VIOLET_LIFE_ENGINE", False) else "生活引擎关") + "；主动消息在“设置”里调整",
-                       "settings", False))
+                       "settings", False, "set-g-proactive"))
     required = [i for i in items if i["required"]]
     complete = all(i["state"] == "ok" for i in required)
     return {"complete": complete, "items": items, "model_test": test or None,

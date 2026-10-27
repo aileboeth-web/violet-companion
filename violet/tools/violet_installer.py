@@ -908,6 +908,9 @@ def systemd_unit(layout: Layout, user: str | None, user_mode: bool = False) -> s
         "After=network-online.target nftables.service firewalld.service ufw.service docker.service 1panel.service "
         "1panel-core.service bt.service",
         "Wants=network-online.target",
+        # [Unit] keys since systemd 230 -- in [Service] they were ignored ("Unknown key" in the journal)
+        "StartLimitIntervalSec=300",
+        "StartLimitBurst=10",
         "",
         "[Service]",
         "Type=simple",
@@ -915,12 +918,12 @@ def systemd_unit(layout: Layout, user: str | None, user_mode: bool = False) -> s
         f"Environment=VIOLET_ENV_FILE={layout.env_file}",
         "Environment=PYTHONUNBUFFERED=1",
         f"ExecStart={venv_python(layout)} -u main.py",
-        # as root ("+"), failures ignored ("-"): the iptables / nftables port rules a reboot or a panel removed
-        *([f"ExecStartPre=-+{layout.root / 'violet'} firewall-apply --json"] if user and not user_mode else []),
+        # as root ("+"), failures ignored ("-"): the iptables / nftables port rules a reboot or a panel removed, and
+        # the phone relay's pairing values for the Control Center (tools/violet_relay.py; nothing when not installed)
+        *([f"ExecStartPre=-+{layout.root / 'violet'} firewall-apply --json",
+           f"ExecStartPre=-+{layout.root / 'violet'} mcp-relay export --json"] if user and not user_mode else []),
         "Restart=on-failure",
         "RestartSec=5",
-        "StartLimitIntervalSec=300",
-        "StartLimitBurst=10",
         "TimeoutStopSec=20",
     ]
     if user and not user_mode:
@@ -1375,6 +1378,8 @@ def install(opts: Options) -> dict[str, Any]:
     if service_mode == "systemd":
         service.user = service.user or SERVICE_USER
         ensure_service_user(layout, service.user)
+    # before the first start: the unit's ExecStartPre runs <root>/violet (it was "missing" on a fresh install)
+    write_cli(layout)
     if service_mode != "none":
         service_note = service.register(autostart=opts.autostart)
         log(f"  {service_note}")
@@ -1572,6 +1577,7 @@ def upgrade(opts: Options) -> dict[str, Any]:
             Service(layout, "systemd", state["user"]).register()  # the unit of the new version
         if state.get("service") == "systemd" and _is_root() and Service(layout, "systemd").register_updater():
             state["auto_update_agent"] = "systemd"             # installs from before automatic updates get them now
+        write_cli(layout)                                      # the unit's ExecStartPre runs it
         if state.get("service") != "none":
             service.start()
             if not wait_healthy(state["port"], "127.0.0.1", opts.health_timeout, _scheme(layout)):
@@ -1885,6 +1891,10 @@ def purge_system(layout: Layout, state: dict, run: Callable[..., Any] = subproce
     removed: list[str] = []
     if not (linux_root if linux_root is not None else (os.name != "nt" and _is_root())):
         return removed
+    try:                                    # the phone relay, when `violet mcp-relay install` set it up (and its rule)
+        removed += _relay_module().uninstall(layout, state, run=run, remove_rule=lambda r: remove_rule(r, run))
+    except Exception:                       # noqa: BLE001 -- never let it stop the rest of the purge
+        pass
     for rule in state.get("firewall_rules") or []:
         if rule.get("tool") not in ("ufw", "firewalld", "iptables", "ip6tables", "nftables"):
             continue
@@ -1900,6 +1910,64 @@ def purge_system(layout: Layout, state: dict, run: Callable[..., Any] = subproce
             if run(["userdel", user], capture_output=True).returncode == 0:
                 removed.append(f"系统账号 {user}")
     return removed
+
+
+def _relay_module():
+    try:
+        import violet_relay                 # run as a script: <app>/tools is on sys.path
+    except ImportError:
+        from tools import violet_relay
+    return violet_relay
+
+
+RELAY_ACTIONS = ("install", "export", "status", "uninstall")
+
+
+def mcp_relay(opts: Options, action: str, run: Callable[..., Any] = subprocess.run) -> dict[str, Any]:
+    """`violet mcp-relay install | export | status | uninstall` (tools/violet_relay.py)."""
+    relay = _relay_module()
+    if action not in RELAY_ACTIONS:
+        raise InstallError("用法：violet mcp-relay install | export | status | uninstall")
+    layout = Layout(opts.root)
+    state = load_state(layout)
+    if not state:
+        raise InstallError(f"{layout.root} 没有安装 Violet")
+    if action != "status" and (os.name == "nt" or not _is_root()):
+        raise InstallError("中继要以 root 在 Linux 上安装（/opt/violet/violet 会自动切换到 root）")
+    try:
+        if action == "install":
+            result = relay.install(layout, state, run=run, port_free=port_free,
+                                   open_port=lambda p: open_port_everywhere(p, run), public_ip=public_ip)
+            save_state(layout, state)
+        elif action == "export":            # violet.service runs this before every start: no network lookups
+            result = relay.export(layout, state, run=run)
+        elif action == "status":
+            result = relay.status(state)
+        else:
+            result = {"ok": True, "removed": relay.uninstall(layout, state, run=run,
+                                                            remove_rule=lambda r: remove_rule(r, run))}
+            save_state(layout, state)
+    except relay.RelayError as exc:
+        raise InstallError(str(exc)) from None
+    return {"ok": True, **result}
+
+
+def render_relay(result: dict[str, Any], action: str) -> str:
+    if action == "uninstall":
+        return "已删除：" + ("、".join(result.get("removed") or []) or "没有由 Violet 安装的中继")
+    if not result.get("installed"):
+        return "这台服务器上还没有中继。安装：/opt/violet/violet mcp-relay install"
+    lines = ["", "Violet MCP 中继", "-" * 40]
+    if action == "install":
+        lines.append("状态：" + ("运行正常" if result.get("healthy") else "没有通过健康检查"))
+    elif "healthy" in result:
+        lines.append("状态：" + ("运行正常" if result["healthy"] else "没有响应") +
+                     ("，手机已连接" if result.get("device_connected") else "，手机未连接"))
+    if result.get("device_url"):
+        lines.append(f"手机入口：{result['device_url']}")
+    lines.append("设备密钥和证书指纹：在后台“工具”页的“手机 MCP”里查看和一键复制")
+    lines += [f"  {n}" for n in result.get("notes") or []]
+    return "\n".join(lines + [""])
 
 
 def _remove_cmd_later(path: Path) -> None:
@@ -2015,11 +2083,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", choices=["install", "upgrade", "update", "rollback", "status", "backup", "restore",
                                             "uninstall", "doctor", "start", "stop", "restart", "info",
                                             "reset-password", "reset-entrance", "set-port", "auto-update",
-                                            "firewall-apply"])
+                                            "firewall-apply", "mcp-relay"])
     parser.add_argument("--update-feed", help=argparse.SUPPRESS)  # install: a release.json instead of GitHub
     parser.add_argument("--update-repo", help="install: GitHub owner/repo to update from (a fork)")
     parser.add_argument("--check", action="store_true", help="update: only report whether a newer release exists")
-    parser.add_argument("archive", nargs="?", help="restore: the backup file; set-port: the new port")
+    parser.add_argument("archive", nargs="?", help="restore: the backup file; set-port: the new port; "
+                                                   "mcp-relay: install | export | status | uninstall")
     parser.add_argument("--entrance", help="reset-entrance: this value instead of a random one")
     parser.add_argument("--no-entrance", action="store_true", help="reset-entrance: remove the security entrance")
     parser.add_argument("--root", type=Path, default=None)
@@ -2092,6 +2161,12 @@ def main(argv: list[str] | None = None) -> int:
             result = auto_update(opts)
         elif args.command == "firewall-apply":
             result = firewall_apply(Layout(root))
+        elif args.command == "mcp-relay":
+            action = args.archive or "status"
+            result = mcp_relay(opts, action)
+            if not args.json:
+                print(render_relay(result, action))
+                return 0
         elif args.command == "rollback":
             result = rollback(opts)
         elif args.command == "status":

@@ -30,11 +30,14 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 
 ## 安装完以后
 
-1. 打开输出里的后台地址（带安全入口），用用户名和初始密码登录，先改成自己的密码（改之前其他页面都打不开）。用户名和安全入口可以在“账号安全”页修改。
-2. “开始”页：填写模型服务的 API 地址和 Key，点“保存并测试”；给各个 Agent 选模型。
-3. “渠道”页：扫码登录微信，或者添加 QQ 官方机器人（AppID + AppSecret，不需要 NapCat）/ Telegram / QQ（OneBot v11，可选），用绑定码绑定你自己的账号。
-4. “工具”页（可选）：添加 MCP 服务器，给工具分类（只读 / 写入 / 高风险 / 拒绝）、授权给 Agent、点“测试”。
-5. “诊断”页：哪里不正常、为什么、怎么处理；能安全自动修复的有按钮。
+1. 打开输出里的后台地址（带安全入口），用用户名和密码登录。密码是随机生成的 20 位，可以一直用，也可以在“账号安全”页改；用户名和安全入口也在那里改。
+2. “开始”页列出还没完成的事，点哪一项就直接跳到要填的地方。
+3. “模型服务”页：填 API 地址和 Key，点“保存并测试”；点“从上游获取模型”，给每个 Agent 从列表里选模型。
+4. “聊天渠道”页：扫码登录微信，或者添加 QQ 官方机器人（AppID + AppSecret，不需要 NapCat）/ Telegram / QQ（OneBot v11，可选），用绑定码绑定你自己的账号。
+5. “工具与手机”页（可选）：
+   - 手机 MCP：在服务器上运行 `/opt/violet/violet mcp-relay install` 装好中继，页面上会列出手机 App 要填的中继地址、设备密钥和证书指纹（都有复制按钮）；再把手机“安全”页的访问令牌粘贴回来就连上了。云服务器要在安全组放行中继端口（默认 TCP 8443）。
+   - 其他 MCP 服务器：添加后给工具分类（只读 / 写入 / 高风险 / 拒绝）、授权给 Agent、点“测试”。
+6. “诊断”页：哪里不正常、为什么、怎么处理；能安全自动修复的有按钮。
 
 其余（人设、记忆、主动消息、虚拟生活、联网搜索、图片、回复检查、时区、日志、更新方式……）都可以以后在后台“设置”页调整，不需要编辑任何文件。标着“重启后生效”的设置，保存后点“重启 Violet”即可。只有安装器管理的项目（目录、端口、HTTPS 证书）用服务器上的命令改。
 
@@ -71,10 +74,10 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 | 方式 | 效果 |
 |---|---|
 | 自动更新（默认） | 每 6 小时检查一次 GitHub Releases，有新版本就在服务器上自动升级：先备份，新版本起不来自动退回旧版本。同一个版本升级失败后 24 小时内不再自动重试 |
-
-升级（以及重新运行安装做修复）前做的备份：成功并通过健康检查后**自动删除**，不占硬盘；失败时保留在 `backups/`，用来恢复。自己用 `violet backup` 做的备份不会被自动删除。想在升级后还能退回旧数据，升级前先执行一次 `/opt/violet/violet backup`。
 | 自动检查，只提醒 | “开始”页的“版本与更新”显示有新版本，点“立即更新”才升级 |
 | 手动检查 | 只在你点“检查更新”时才查询 |
+
+升级（以及重新运行安装做修复）前做的备份：成功并通过健康检查后**自动删除**，不占硬盘；失败时保留在 `backups/`，用来恢复。自己用 `violet backup` 做的备份不会被自动删除。想在升级后还能退回旧数据，升级前先执行一次 `/opt/violet/violet backup`。
 
 自动更新靠安装时注册的 root 定时任务（`violet-update.timer`），只有 root + systemd 的安装才有（一行命令安装就是这种）。Violet 自己以普通用户 `violet` 运行，它只能“请求更新到官方最新版”，不能指定下载地址。其他安装方式在页面上给出命令：`/opt/violet/violet update`。
 
@@ -99,10 +102,15 @@ bash install.sh upgrade       # 或者：在新版本的程序目录里执行
 # 或者不依赖已安装的文件（例如装坏了）：
 # curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
 /opt/violet/violet info             # 后台地址（带安全入口）和用户名；密码不能查看
-/opt/violet/violet reset-password   # 生成新的初始密码（只显示一次），所有登录失效
+/opt/violet/violet reset-password   # 生成新密码（只显示一次），所有登录失效
 /opt/violet/violet reset-entrance   # 换一个随机的安全入口（--entrance 自己指定；--no-entrance 取消）
-/opt/violet/violet set-port 8443    # 换后台端口：检查端口空闲、重启、健康检查，失败自动改回（加 --open-firewall 放行防火墙）
+/opt/violet/violet set-port 7300    # 换后台端口：检查端口空闲、重启、健康检查，失败自动改回（加 --open-firewall 放行防火墙）
+/opt/violet/violet mcp-relay install    # 手机 MCP 的中继：从 Violet MCP 的 GitHub 发布下载并校验，注册服务，放行手机端口
+/opt/violet/violet mcp-relay status     # 中继是否运行、手机是否连着
+/opt/violet/violet mcp-relay uninstall  # 删除由 Violet 安装的中继（手工部署的不动）
 ```
+
+手机 MCP 的中继：已经按 Violet MCP 的 `DEPLOY_RELAY.md` 手工装过 `violet-mcp-relay` 服务的，`mcp-relay install` 直接使用它，不重新安装；端口 8443 / 8787 被占用时自动换下一个空闲端口，后台页面显示的就是实际端口。设备密钥只保存在中继自己的目录和 Violet 的 `data/control/mcp-relay.json`（只有 violet 账号能读），后台“工具与手机”页可以查看和复制。
 
 重新运行 `install.sh` 就是修复：配置、数据、密钥、端口、用户名、安全入口和密码都保留。忘记地址或用户名：`/opt/violet/violet info`；忘记密码：`/opt/violet/violet reset-password`。
 

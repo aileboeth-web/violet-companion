@@ -50,6 +50,33 @@ document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("cli
   window.scrollTo({ top: 0 });
   (loaders[b.dataset.tab] || (() => {}))();
 }));
+// Violet stage 3: go to a page and then to one place on it (the start page's checklist, the jump bars). Page
+// loaders fill their lists asynchronously, so the target is looked for a few times before giving up.
+function goTo(tab, anchor) {
+  const btn = document.querySelector(`#tabs button[data-tab="${CSS.escape(tab)}"]`);
+  if (btn && !btn.classList.contains("active")) btn.click();
+  if (anchor) scrollToAnchor(anchor);
+}
+function scrollToAnchor(id, tries = 25) {
+  const el = document.getElementById(id);
+  if (!el || !el.offsetParent) { if (tries > 0) setTimeout(() => scrollToAnchor(id, tries - 1), 120); return; }
+  if (el.tagName === "DETAILS") el.open = true;
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+  el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+}
+// a row of buttons at the top of a long page: one per section, scrolls there
+function jumpNav(nav, items) {
+  nav.replaceChildren(...items.filter(Boolean).map(([label, id]) =>
+    h("button", { type: "button", text: label, onclick: () => scrollToAnchor(id) })));
+}
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); toast("已复制"); return; } catch (_) { /* not a secure context */ }
+  const area = h("textarea", { readonly: true, style: "position:fixed;top:-1000px;opacity:0" }); area.value = text;
+  document.body.append(area); area.select();
+  let done = false; try { done = document.execCommand("copy"); } catch (_) { done = false; }
+  area.remove();
+  toast(done ? "已复制" : "复制失败：请手动选中复制", done);
+}
 // narrow screens: the sidebar is a top bar with a menu button
 function setMenu(open) {
   $("#side").classList.toggle("open", open);
@@ -225,7 +252,11 @@ const TOOL_STATUS = { connected: "已连接", unavailable: "连不上", disabled
 const PERMISSION = { read: "只读", write: "写入（需另外授权）", high_risk: "高风险（需另外授权）", unknown: "不在白名单（隐藏）" };
 function renderTools(servers) {
   $("#tools-updated").textContent = "更新于 " + new Date().toLocaleTimeString();
-  $("#tools-list").replaceChildren(...(servers.length ? servers.map(toolServerCard) : [h("p", { class: "note", text: "没有配置任何 MCP 服务器" })]));
+  $("#tools-list").replaceChildren(...(servers.length ? servers.map((s) => {
+    const el = toolServerCard(s); el.id = "tool-srv-" + s.name; return el;
+  }) : [h("p", { class: "note", text: "没有配置任何 MCP 服务器" })]));
+  jumpNav($("#tools-jump"), [["手机 MCP", "phone-mcp"], ["联网工具", "tools-web"],
+    ...servers.filter((s) => s.name !== "violet-web").map((s) => [s.name, "tool-srv-" + s.name]), ["添加服务器", "mcp-add-box"]]);
 }
 function toolServerCard(s) {
   const facts = [`状态 ${TOOL_STATUS[s.status] || s.status}`, `传输 ${s.transport}`, s.url ? `地址 ${s.url}` : null, s.command,
@@ -299,8 +330,11 @@ $("#mem-next").addEventListener("click", () => { memOffset += MEM_PAGE; loadMemo
 
 // ---------------------------------------------------------------- settings
 const pending = {}; const SOURCE = { dashboard: "后台设置", env: ".env", default: "代码默认", file: "配置文件", unset: "未设置" };
-function settingInput(s) {
-  const mark = (value) => { pending[s.key] = value; row.classList.add("changed"); $("#set-save").disabled = false; };
+const SETTINGS_PAGE = { pending, changed: () => { $("#set-save").disabled = false; } };
+// ctx: where the change is collected (the settings page, or another page with its own save button)
+function settingInput(s, ctx = SETTINGS_PAGE) {
+  const pending = ctx.pending;
+  const mark = (value) => { pending[s.key] = value; row.classList.add("changed"); ctx.changed(); };
   let input;
   if (s.kind === "bool") {
     input = h("select", {}, h("option", { value: "1", text: "开" }), h("option", { value: "0", text: "关" }));
@@ -335,16 +369,26 @@ function settingInput(s) {
       running ? h("div", { class: "help", "data-running": s.key, text: running }) : null, reset, err));
   return row;
 }
+const SETTINGS_ELSEWHERE = ["api", "models"];          // the model page
+const SETTINGS_ORDER = ["behavior", "messages", "proactive", "life", "memory", "features", "images", "guard", "prompts",
+  "mcp", "system", "updates"];
 loaders.settings = async () => {
   try {
     const d = await api("GET", "/api/control/settings");
     for (const k of Object.keys(pending)) delete pending[k];
     $("#set-save").disabled = true;
     const box = $("#set-groups"); box.replaceChildren();
-    for (const [g, label] of Object.entries(d.groups)) {
+    // Violet stage 3: API and models are on the model page; the rest in a useful order, with a jump bar on top
+    const order = SETTINGS_ORDER.filter((g) => g in d.groups).concat(Object.keys(d.groups).filter((g) => !SETTINGS_ORDER.includes(g)));
+    const shown = [];
+    for (const g of order) {
+      if (SETTINGS_ELSEWHERE.includes(g)) continue;
       const rows = d.settings.filter((s) => s.group === g);
-      if (rows.length) box.append(h("div", { class: "set-group" }, h("h3", { text: label }), ...rows.map(settingInput)));
+      if (!rows.length) continue;
+      box.append(h("div", { class: "set-group", id: "set-g-" + g }, h("h3", { text: d.groups[g] }), ...rows.map((s) => settingInput(s))));
+      shown.push([d.groups[g], "set-g-" + g]);
     }
+    jumpNav($("#set-jump"), shown);
     const life = await api("GET", "/api/life/engine").catch(() => null);
     $("#life-mode").textContent = "当前：" + fmt(life && (life.mode || (life.data && life.data.mode)));
     const rs = await api("GET", "/api/control/restart").catch(() => null);

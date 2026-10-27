@@ -102,8 +102,8 @@ login() {   # $1 entrance, $2 password -> the cookie jar $JAR, logged in (prints
 }
 [ "$(login "$ENTRANCE" "$PASSWORD")" = "302" ] || fail "login with username and the initial password"
 CODE="$(code -b "$JAR" -H 'Accept: application/json' "$SCHEME://127.0.0.1:$PORT/api/control/setup")"
-[ "$CODE" = "403" ] || fail "setup reachable before the password change ($CODE)"
-pass "security entrance (404 without it); username + password login; everything locked until the password is changed"
+[ "$CODE" = "200" ] || fail "the generated password should work as it is ($CODE)"   # stage 3: no forced change
+pass "security entrance (404 without it); username + password login; the generated password works as it is"
 
 # 4b. violet info / reset-entrance / reset-password / set-port (as root: the service must still read admin.json)
 "$ROOT/violet" info --json | json 'd["entrance"]' | grep -qx "$ENTRANCE" || fail "info"
@@ -164,6 +164,33 @@ if [ "$MODE" = "systemd" ]; then
   pass "automatic update from the Control Center: $OLD_VERSION -> $NEXT (root update service, healthy)"
 fi
 
+# 4d. the phone relay (root + systemd): `violet mcp-relay install` downloads the newest relay of the violet-mcp GitHub
+#     release (checked against its SHA256SUMS.txt), starts it, opens the device port, exports the pairing values for
+#     the Control Center (owned by the service account, 0600) and Violet re-exports them on every start
+if [ "$MODE" = "systemd" ]; then
+  RELAY="$("$ROOT/violet" mcp-relay install --json)" || { echo "$RELAY"; journalctl -u violet-mcp-relay -n 30 --no-pager || true; fail "mcp-relay install"; }
+  systemctl is-active --quiet violet-mcp-relay || fail "relay service not active"
+  DEV_PORT="$(echo "$RELAY" | json 'd["device_port"]')"
+  EXP="$ROOT/data/control/mcp-relay.json"
+  [ "$(stat -c %U:%a "$EXP")" = "violet:600" ] || fail "pairing values file: $(stat -c %U:%a "$EXP")"
+  CLIENT="$(python3 -c "import json;print(json.load(open('$EXP'))['client_url'].rsplit('/',1)[0])")"
+  curl -fs "$CLIENT/health" | grep -q '"ok":true' || fail "relay health ($CLIENT)"
+  python3 -c "import json;d=json.load(open('$EXP'));assert d['device_secret']==open('/var/lib/violet-mcp-relay/device.secret').read().strip();assert d['pin'].startswith('sha256/') or len(d['pin'])>20, d['pin']" \
+    || fail "pairing values (secret / pin)"
+  PH="$(curl -sk -b "$JAR" -H 'Accept: application/json' "$SCHEME://127.0.0.1:$PORT/api/control/phone-mcp")"
+  echo "$PH" | json 'd["data"]["installed"] and bool(d["data"]["relay"]["device_secret"]) and d["data"]["health"]["reachable"]' \
+    | grep -q True || { echo "$PH" | head -c 300; fail "phone card in the Control Center"; }
+  if [ "$STRICT" = "1" ]; then
+    [ "$(curl -sk --max-time 5 -o /dev/null -w '%{http_code}' "https://$LANIP:$DEV_PORT/device")" != "000" ] \
+      || fail "device port $DEV_PORT not opened"
+  fi
+  rm -f "$EXP"
+  systemctl restart violet
+  for _ in $(seq 1 30); do curl -fsSk "$SCHEME://127.0.0.1:$PORT/healthz" 2>/dev/null | grep -q violet && break; sleep 1; done
+  [ -f "$EXP" ] || fail "pairing values not exported again when Violet started"
+  pass "phone relay: $(echo "$RELAY" | json 'd.get("asset") or "existing relay"') installed (sha256 checked), device port $DEV_PORT open, pairing values in the Control Center"
+fi
+
 # 5. repair keeps port and password; backup; status
 OUT2="$(curl -fsSL "http://127.0.0.1:$PORT_HTTP/install.sh" | bash -s -- --root "$ROOT" --json)" || fail "repair"
 [ "$(echo "$OUT2" | json 'd["port"]')" = "$PORT" ] || fail "repair changed the port"
@@ -198,9 +225,10 @@ if [ "$STRICT" = "1" ]; then
 fi
 if [ "$MODE" = "systemd" ]; then
   ! id violet >/dev/null 2>&1 || fail "system account violet left behind"
-  for unit in violet.service violet-update.service violet-update.timer violet-update.path; do
+  for unit in violet.service violet-update.service violet-update.timer violet-update.path violet-mcp-relay.service; do
     [ ! -e "/etc/systemd/system/$unit" ] || fail "$unit left behind"
   done
+  [ ! -e /var/lib/private/violet-mcp-relay ] && [ ! -e /var/lib/violet-mcp-relay ] || fail "relay data left behind"
 fi
-pass "uninstall --purge removed everything (folder, services, update timer, system account)"
+pass "uninstall --purge removed everything (folder, services, update timer, phone relay, system account)"
 echo "ALL PASSED"

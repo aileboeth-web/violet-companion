@@ -86,7 +86,7 @@
           try { await api("POST", `/api/control/channels/${encodeURIComponent(ch.id)}/delete`, { confirm: true }); toast("已删除"); loaders.channels(); } catch (e) { toast(e.message, false); } } }) : null),
       ch.id !== "wechat" ? h("details", { ontoggle: (ev) => { if (ev.target.open) loadPeers(ch, peers); } },
         h("summary", { text: `联系人（已绑定 ${ch.peers.bound} · 待批准 ${ch.peers.pending} · 已屏蔽 ${ch.peers.blocked}）` }), peers) : null);
-    return h("div", { class: "card" }, body);
+    return h("div", { class: "card", id: "ch-card-" + ch.id }, body);
   }
 
   // ---------------------------------------------------------------- WeChat QR login (Violet stage 3; was the old page)
@@ -154,6 +154,8 @@
   loaders.channels = async () => {
     try { data = await api("GET", "/api/control/channels"); } catch (e) { toast(e.message, false); return; }
     $("#ch-list").replaceChildren(...data.channels.map(channelCard));
+    jumpNav($("#ch-jump"), [...data.channels.map((c) => [c.label, "ch-card-" + c.id]),
+      ["添加渠道", "ch-add-box"], ["绑定账号", "ch-pair-box"], ["修改记录", "ch-history-box"]]);
     const sel = $("#ch-proactive");
     sel.replaceChildren(h("option", { value: "auto", text: "自动（你最近聊天的渠道）" }),
       ...data.channels.map((c) => h("option", { value: c.id, text: c.label })));

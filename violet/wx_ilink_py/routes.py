@@ -261,6 +261,8 @@ def create_app(
             agent.reload()
     from .mcp_routes import register_mcp_routes                    # phase 10.5: MCP servers and tool permissions
     register_mcp_routes(app, reload_agents=_reload_agents)
+    from .phone_mcp_routes import register_phone_mcp_routes        # Violet stage 3: phone relay pairing values
+    register_phone_mcp_routes(app, reload_agents=_reload_agents)
 
     @app.get("/api/health")
     def api_health() -> Response:

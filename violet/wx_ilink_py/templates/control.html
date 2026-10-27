@@ -13,14 +13,18 @@
   <nav class="tabs" id="tabs">
     <button data-tab="setup">开始</button>
     <button data-tab="overview" class="active">概览</button>
-    <button data-tab="diagnostics">诊断</button>
+    <div class="nav-label">配置</div>
+    <button data-tab="model">模型服务</button>
+    <button data-tab="channels">聊天渠道</button>
+    <button data-tab="tools">工具与手机</button>
+    <button data-tab="persona">人设与生活</button>
+    <button data-tab="schedule">课表</button>
+    <button data-tab="settings">设置</button>
+    <div class="nav-label">数据</div>
     <button data-tab="chat">聊天记录</button>
     <button data-tab="memories">记忆</button>
-    <button data-tab="settings">设置</button>
-    <button data-tab="channels">渠道</button>
-    <button data-tab="persona">人设与生活</button>
-    <button data-tab="tools">工具</button>
-    <button data-tab="schedule">课表</button>
+    <div class="nav-label">维护</div>
+    <button data-tab="diagnostics">诊断</button>
     <button data-tab="logs">日志</button>
     <button data-tab="history">修改记录</button>
     <button data-tab="account">账号安全</button>
@@ -31,7 +35,7 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <section id="tab-setup" class="tab">
-    <h2>初始化向导</h2>
+    <h2>开始</h2>
     <p class="note" id="setup-summary"></p>
     <div id="setup-list" class="cards list"></div>
     <div class="card" id="setup-update">
@@ -44,25 +48,35 @@
         <button class="ghost" id="update-copy" type="button">复制命令</button></div>
       <p class="note">升级前会先备份配置和数据；新版本起不来会自动退回旧版本。</p>
     </div>
-    <h3>1. 模型服务</h3>
-    <p class="note">填写 OpenAI 兼容接口的地址和 API Key。保存后会用当前的 Chat 模型真实调用一次（很短的请求），只记录成功与否、耗时和错误类型。</p>
-    <form id="setup-api" class="stack" autocomplete="off">
-      <label>API 地址 <input id="setup-url" maxlength="300" placeholder="https://api.example.com/v1" autocomplete="off"></label>
-      <label>API Key <input id="setup-key" type="password" maxlength="512" autocomplete="new-password"></label>
-      <p class="err" id="setup-api-error"></p>
-      <div class="row"><button type="submit">保存并测试</button><span id="setup-test"></span></div>
-    </form>
-    <h3>2. 各 Agent 的模型</h3>
-    <p class="note">每个 Agent 可以用不同的模型；不清楚的话先全部用同一个。温度、备用模型等在“设置”页调整。</p>
-    <div class="row"><input id="setup-all" list="setup-model-names" maxlength="120" placeholder="模型名，例如 gpt-4o-mini">
-      <button class="ghost" id="setup-same" type="button">全部用这个</button>
-      <button class="ghost" id="setup-list-models" type="button">从服务获取模型列表</button></div>
-    <datalist id="setup-model-names"></datalist>
-    <div id="setup-models" class="stack"></div>
-    <p class="err" id="setup-models-error"></p>
-    <div class="row"><button id="setup-models-save" type="button">保存并测试</button></div>
-    <h3>3. 聊天渠道、4. 管理员密码、其他</h3>
-    <p class="note">在上面的清单里点“去设置”。人设、用户档案、工具、主动消息和虚拟生活都可以以后再调。</p>
+  </section>
+
+  <section id="tab-model" class="tab">
+    <h2>模型服务</h2>
+    <p class="note">Violet 用的大模型接口（OpenAI 兼容）。先填地址和 API Key，再从服务上取回模型列表，给每个 Agent 选一个模型。</p>
+    <div class="card" id="model-api">
+      <h3>1. 接口地址和 API Key</h3>
+      <form id="model-api-form" class="stack" autocomplete="off">
+        <label>API 地址 <input id="model-url" maxlength="300" placeholder="https://api.example.com/v1" autocomplete="off"></label>
+        <label>API Key <input id="model-key" type="password" maxlength="512" autocomplete="new-password"></label>
+        <p class="err" id="model-api-error"></p>
+        <div class="row"><button type="submit">保存并测试</button><span id="model-test"></span></div>
+      </form>
+      <p class="note">测试会用 Chat 的模型真实调用一次（很短的请求），只记录成功与否、耗时和错误类型。</p>
+    </div>
+    <div class="card" id="model-agents">
+      <div class="row"><h3>2. 每个 Agent 用哪个模型</h3>
+        <button class="ghost" id="model-fetch" type="button">从上游获取模型</button></div>
+      <p class="note" id="model-fetch-note">点“从上游获取模型”，从你的接口取回可用的模型，然后直接在下面选。</p>
+      <div class="row" id="model-all-row"><span>全部 Agent 用</span><span id="model-all-slot"></span>
+        <button class="ghost" id="model-all-apply" type="button">应用到全部</button></div>
+      <div id="model-rows" class="model-rows"></div>
+      <p class="err" id="model-error"></p>
+      <div class="row"><button id="model-save" type="button">保存并测试</button><span id="model-save-test"></span></div>
+    </div>
+    <details class="card" id="model-advanced"><summary>超时与重试</summary>
+      <div id="model-adv-rows"></div>
+      <div class="row"><button id="model-adv-save" type="button" disabled>保存</button></div>
+    </details>
   </section>
 
   <section id="tab-diagnostics" class="tab">
@@ -113,7 +127,9 @@
   </section>
 
   <section id="tab-settings" class="tab">
-    <p class="note">只列出代码里真正会读取的设置。“立即生效”保存后马上用于新的请求；“重启后生效”需要重启 Violet。保存前会整体检查，有任何一项不合格就一项也不改。</p>
+    <h2>设置</h2>
+    <nav class="jump" id="set-jump" aria-label="设置分类"></nav>
+    <p class="note">模型和 API 在“模型服务”页。只列出代码里真正会读取的设置。“立即生效”保存后马上用于新的请求；“重启后生效”需要重启 Violet。保存前会整体检查，有任何一项不合格就一项也不改。</p>
     <div id="set-groups"></div>
     <div class="savebar"><input id="set-reason" maxlength="200" placeholder="修改原因（可选，会记在修改记录里）">
       <button id="set-save" disabled>保存修改</button>
@@ -125,12 +141,14 @@
   </section>
 
   <section id="tab-channels" class="tab">
+    <h2>聊天渠道</h2>
+    <nav class="jump" id="ch-jump" aria-label="渠道"></nav>
     <p class="note">Violet 在哪些聊天平台上和你聊天。所有渠道共用同一个 Violet（同一份记忆、档案和人设）；只有绑定到你的账号发来的消息才会被处理，陌生人的消息不回复、不保存内容。
       修改立即生效，不需要重启。凭据只能替换，不能查看。</p>
     <div class="row"><label>主动消息发到 <select id="ch-proactive"></select></label>
       <button class="ghost" id="ch-refresh">刷新状态</button></div>
     <div id="ch-list" class="cards list"></div>
-    <h3>添加渠道</h3>
+    <div id="ch-add-box"><h3>添加渠道</h3>
     <form id="ch-add" class="stack" autocomplete="off">
       <div class="filters">
         <label>类型 <select id="ch-add-type"></select></label>
@@ -141,22 +159,25 @@
       <div id="ch-add-fields" class="stack"></div>
       <p class="err" id="ch-add-error"></p>
       <div class="row"><button type="submit">添加并启动</button></div>
-    </form>
-    <h3>绑定新账号</h3>
+    </form></div>
+    <div id="ch-pair-box"><h3>绑定新账号</h3>
     <p class="note">生成一次性绑定码（10 分钟有效），然后用你自己的账号给 Violet 发送“/bind 绑定码”。也可以在上面的联系人列表里直接批准。</p>
     <div class="row"><select id="ch-pair-channel"></select><button class="ghost" id="ch-pair">生成绑定码</button>
-      <span class="pill" id="ch-pair-code"></span></div>
-    <h3>修改记录</h3>
-    <div id="ch-history" class="cards list"></div>
+      <span class="pill" id="ch-pair-code"></span></div></div>
+    <div id="ch-history-box"><h3>修改记录</h3>
+    <div id="ch-history" class="cards list"></div></div>
   </section>
 
   <section id="tab-tools" class="tab">
+    <h2>工具与手机</h2>
+    <nav class="jump" id="tools-jump" aria-label="工具"></nav>
+    <div class="card" id="phone-mcp"></div>
     <p class="note">Violet 能用的外部工具（MCP）。只有连接成功、已启用、已分类并授权给 Agent 的工具才会告诉 Violet；修改立即生效，重启后仍然有效。
       每个服务器下面写明了现在的问题和处理办法。凭据只能替换，不能查看。运行本地命令的（stdio）服务器只能在 .env 里配置。</p>
     <div class="row"><button id="tools-refresh">检查全部连接</button><span class="note" id="tools-updated"></span></div>
     <div id="tools-web" class="cards list"></div>
     <div id="tools-list" class="cards list"></div>
-    <h3>添加 MCP 服务器</h3>
+    <div id="mcp-add-box"><h3>添加 MCP 服务器</h3>
     <form id="mcp-add" class="stack" autocomplete="off">
       <div class="filters">
         <label>名字 <input id="mcp-name" maxlength="31" placeholder="例如 phone" required></label>
@@ -174,7 +195,7 @@
       <p class="note">添加后会立即连接并列出工具。新工具默认都是“未分类（拒绝）”：请逐个选择只读 / 写入 / 高风险 / 拒绝；如果服务器的工具和已有模板一致，会提示一键套用。写入和高风险工具还要单独授权。</p>
       <p class="err" id="mcp-add-error"></p>
       <div class="row"><button type="submit">添加并检查</button></div>
-    </form>
+    </form></div>
   </section>
 
   <section id="tab-schedule" class="tab">
@@ -272,7 +293,7 @@
 
   <section id="tab-account" class="tab">
     <div class="cards"><div class="card" id="acct-status"></div></div>
-    <h3>修改管理员密码</h3>
+    <h3 id="acct-pw">修改管理员密码</h3>
     <form id="pw-form" class="stack" autocomplete="off">
       <input type="password" id="pw-current" placeholder="当前密码（或管理令牌）" autocomplete="current-password" required>
       <input type="password" id="pw-new" placeholder="新密码（至少 12 个字符）" autocomplete="new-password" minlength="12" required>
@@ -353,5 +374,7 @@
 <script src="/static/control_diag.js"></script>
 <script src="/static/control_persona.js"></script>
 <script src="/static/control_logs.js"></script>
+<script src="/static/control_model.js"></script>
+<script src="/static/control_phone.js"></script>
 </body>
 </html>
