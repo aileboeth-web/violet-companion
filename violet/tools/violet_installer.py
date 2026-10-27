@@ -1972,10 +1972,10 @@ def render_result(result: dict[str, Any]) -> str:
     lines.append("")
     lines.append(f"用户名：{admin.get('user') or 'admin'}")
     if admin.get("password"):
-        lines += [f"初始密码：{admin['password']}", "  这个密码只显示这一次；第一次登录后必须修改。"]
+        lines += [f"密码：{admin['password']}", "  随机生成的 20 位密码，只显示这一次，请保存好；可以一直用，也可以在后台“账号安全”里改。"]
     else:
         lines.append("密码：沿用已有的密码")
-    lines.append(f"  忘记了：{Path(result.get('root', '.')) / 'violet'} info（地址和用户名）| reset-password（新的初始密码）")
+    lines.append(f"  忘记了：{Path(result.get('root', '.')) / 'violet'} info（地址和用户名）| reset-password（生成新密码）")
     lines += ["", "网络检查："]
     marks = {"ok": "通过", "fail": "失败", "not_checked": "未验证", "not_applicable": "不适用"}
     for layer in result.get("network") or []:
@@ -1998,9 +1998,9 @@ def render_account(result: dict[str, Any], command: str) -> str:
                  else "安全入口：未设置（任何人都能打开登录页；建议执行 reset-entrance 设置一个）")
     lines.append(f"用户名：{result.get('user')}" + ("" if result.get("username_set") else "（未设置：登录时用户名可以随便填）"))
     if result.get("password"):
-        lines += [f"新的初始密码：{result['password']}", "  只显示这一次；所有登录已失效，登录后必须先修改。"]
+        lines += [f"新密码：{result['password']}", "  随机生成，只显示这一次，请保存好；所有登录已失效。"]
     elif command == "info":
-        lines.append("密码：" + ("安装时的初始密码，还没有修改" if result.get("must_change") else "已设置（不能查看；"
+        lines.append("密码：" + ("随机生成的密码（不能查看；忘记了用 reset-password）" if result.get("must_change") else "已设置（不能查看；"
                                                                                "忘记了用 reset-password）"))
     if command == "reset-entrance":
         lines.append("安全入口已更换：其他浏览器要用上面的新地址重新进入。")

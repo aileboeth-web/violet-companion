@@ -21,7 +21,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
   https://203.0.113.10:7100/k3x9q2m7wz8a
   安全入口：/k3x9q2m7wz8a（地址里必须带上它，否则所有页面都显示 404）
 用户名：violet_q7m2kx
-初始密码：Xb7…（只显示这一次；第一次登录后必须修改）
+密码：Xb7…（随机生成的 20 位密码，只显示这一次；可以一直用，也可以在后台“账号安全”里改）
 ```
 
 已经有程序目录时也可以在目录里运行：`bash install.sh`。不想用 root：加 `--user-install`，装到 `~/.local/share/violet`，用 systemd 用户服务（没有 systemd 时用 Violet 自带的守护进程；这种方式没有自动更新）。Windows / macOS：`python tools/violet_installer.py install`。

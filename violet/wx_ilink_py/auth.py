@@ -70,7 +70,6 @@ PUBLIC_PATHS = {"/auth/login", "/healthz"}
 # phase 10: chat platforms post events here; the channel checks its own HMAC signature (and source address) first
 PUBLIC_PREFIXES = ("/channels/hook/",)
 # phase 10.3: all a session may reach while the initial password still has to be changed
-PASSWORD_CHANGE_PATHS = {"/control", "/auth/password", "/auth/status", "/auth/logout", "/auth/logout-all"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 _SESSION_KEY = "violet_admin"
 _ENTRANCE_KEY = "violet_entrance"          # session mark: this browser came in through the security entrance
@@ -133,9 +132,9 @@ _LOGIN_PAGE = """<!doctype html>
   <input type="password" name="password" placeholder="密码" autocomplete="current-password" required>
   <input type="hidden" name="next" value="{{ next_url }}">
   <button type="submit">登录</button>
-  <div class="hint">第一次登录请用安装完成时显示的用户名和初始密码，登录后需要先改成自己的密码。忘记了：在服务器上执行<br>
+  <div class="hint">第一次登录请用安装完成时显示的用户名和密码（随机生成，可以一直用，也可以在“账号安全”里改）。忘记了：在服务器上执行<br>
   <code>/opt/violet/violet info</code> 查看用户名和地址<br>
-  <code>/opt/violet/violet reset-password</code> 生成新的初始密码</div>
+  <code>/opt/violet/violet reset-password</code> 生成新密码</div>
 </form></body></html>"""
 
 _NOT_FOUND = "404 Not Found\n"
@@ -211,8 +210,8 @@ class AdminStore:
         return bool(stored and password) and check_password_hash(stored, password)
 
     def set_password(self, password: str, must_change: bool = False) -> None:
-        """must_change (phase 10.3): an initial password made by the installer -- a browser session that logged in
-        with it can do nothing but change it."""
+        """must_change (phase 10.3): an initial password made by the installer. Since Violet stage 3 this is only
+        shown (account page, setup checklist); nothing is blocked because of it."""
         problem = password_problem(password)
         if problem:
             raise ValueError(problem)
@@ -549,12 +548,8 @@ def install_auth(app: Flask, token: str, data_dir: str | os.PathLike[str] | None
                 logger.warning("blocked cross-origin %s %s", request.method, request.path)
                 return jsonify({"error": "cross-origin request rejected"}), 403
             request.environ["violet.auth"] = "session"
-            if store.must_change() and request.path not in PASSWORD_CHANGE_PATHS:
-                # phase 10.3: logged in with the installer's initial password -- change it first
-                if request.method == "GET" and _wants_html():
-                    return redirect("/control#account")
-                return jsonify({"error": "password_change_required",
-                                "message": "请先修改安装时生成的初始密码"}), 403
+            # Violet stage 3: the installer's random 20-character password is no longer forced to be changed (the
+            # user's choice -- it is stronger than most chosen ones); `must_change` only says it is still in use
             return None
         if request.method == "GET" and _wants_html():
             return redirect(f"/auth/login?next={request.full_path.rstrip('?')}")
@@ -656,8 +651,6 @@ def install_auth(app: Flask, token: str, data_dir: str | os.PathLike[str] | None
             return jsonify({"error": "当前密码或令牌不正确"}), 403
         if new != str(body.get("confirm") or ""):
             return jsonify({"error": "两次输入的新密码不一致"}), 400
-        if store.must_change() and store.verify_password(new):
-            return jsonify({"error": "新密码不能和安装时生成的初始密码一样"}), 400
         try:
             store.set_password(new)                      # also ends every other session
         except ValueError as exc:

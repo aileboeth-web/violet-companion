@@ -277,7 +277,13 @@ if __name__ == "__main__":
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
         ssl_context.load_cert_chain(*tls)
-    server = make_server(host, port, _served_app(), threaded=True, ssl_context=ssl_context)
+    if ssl_context is not None:
+        # Violet stage 3: TLS handshakes in each connection's own thread (wx_ilink_py/tls_server.py) -- with
+        # werkzeug's own HTTPS one stalled client blocked everyone and the Control Center lost its stylesheet
+        from wx_ilink_py.tls_server import make_tls_server
+        server = make_tls_server(host, port, _served_app(), ssl_context)
+    else:
+        server = make_server(host, port, _served_app(), threaded=True)
     server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     logger.info("Dashboard listening on %s://%s:%s", "https" if tls else "http", host, port)
 

@@ -147,7 +147,8 @@ def checklist(*, admin_store=None, agents=None, runtime=None, data_dir=None, vio
         if not data.get("password_hash"):
             items.append(_item("admin", "管理员密码", "todo", "还没有设置密码（现在用的是管理令牌）", "account", True))
         elif data.get("must_change"):
-            items.append(_item("admin", "管理员密码", "todo", "正在使用安装时生成的初始密码，请改成自己的密码", "account", True))
+            # Violet stage 3: the installer's random password is fine to keep
+            items.append(_item("admin", "管理员密码", "ok", "安装时随机生成的密码（可以一直用）", "account", True))
         else:
             items.append(_item("admin", "管理员密码", "ok", "已设置", "account", True))
     # 2. model service

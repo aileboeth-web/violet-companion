@@ -24,13 +24,6 @@ async function api(method, url, body) {
   const resp = await fetch(url, opts);
   if (resp.status === 401) { location.href = "/auth/login?next=/control"; throw new Error("unauthorized"); }
   let data = null; try { data = await resp.json(); } catch (_) { /* not json */ }
-  if (resp.status === 403 && data && data.error === "password_change_required") {
-    // phase 10.3: the installer's initial password must be changed before anything else
-    const acct = document.querySelector('#tabs button[data-tab="account"]');
-    if (acct && !acct.classList.contains("active")) acct.click();
-    toast(data.message || "请先修改初始密码", false);
-    throw new Error(data.message || "请先修改初始密码");
-  }
   if (!resp.ok || (data && data.ok === false)) {
     const err = new Error((data && (data.error)) || ("请求失败 " + resp.status)); err.data = data; throw err;
   }
@@ -425,7 +418,7 @@ loaders.account = async () => {
   try {
     const s = await api("GET", "/auth/status");
     $("#acct-status").replaceChildren(
-      h("div", { class: "k", text: "管理员密码" }), h("div", { class: "v " + (s.must_change ? "bad" : ""), text: s.must_change ? "正在使用安装时生成的初始密码：请在下面改成自己的密码" : (s.password_set ? "已设置" : "未设置（目前用管理令牌登录）") }),
+      h("div", { class: "k", text: "管理员密码" }), h("div", { class: "v", text: s.must_change ? "安装时随机生成的密码（可以一直用，想换也可以在下面改）" :(s.password_set ? "已设置" : "未设置（目前用管理令牌登录）") }),
       h("div", { class: "note", text: `登录方式：${s.via}；无操作 ${s.idle_minutes} 分钟后需要重新登录，最长 ${s.session_hours} 小时；Cookie 仅限 HTTPS：${s.cookie_secure ? "是" : "否"}；这次连接是 HTTPS：${s.https ? "是" : "否"}` }),
       h("div", { class: "note", text: "管理令牌：" + ({ default: "使用 VIOLET_ADMIN_TOKEN / admin_token 文件", rotated: "已更换（只保存哈希）", disabled: "已禁用" }[s.token_mode] || s.token_mode) +
         "。禁用或更换令牌请在本机运行 python -m tools.violet_admin token-disable / token-rotate" }));
@@ -475,12 +468,9 @@ $("#logout-all").addEventListener("click", async () => {
 document.addEventListener("DOMContentLoaded", async () => {
   let first = location.hash ? location.hash.slice(1) : "";
   if (!first) {
-    // phase 10.3: the account page while the initial password must be changed, then the setup page while something
-    // required is missing, else the overview
+    // the setup page while something required is missing, else the overview
     try {
-      const st = await api("GET", "/auth/status");
-      if (st.must_change) first = "account";
-      else first = (await api("GET", "/api/control/setup")).complete ? "overview" : "setup";
+      first = (await api("GET", "/api/control/setup")).complete ? "overview" : "setup";
     } catch (_) { first = "overview"; }
   }
   const btn = document.querySelector(`#tabs button[data-tab="${CSS.escape(first)}"]`) || document.querySelector("#tabs button");

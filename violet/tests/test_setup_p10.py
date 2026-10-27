@@ -114,21 +114,19 @@ def test_model_name_check_and_listing_degrade_safely(made, monkeypatch):
 
 # ------------------------------------------------------------------------------------------------ initial password
 
-def test_the_initial_password_allows_nothing_but_changing_it(made, env_guard):
+def test_the_generated_password_is_not_forced_to_change(made, env_guard):
+    """Violet stage 3 (the user's choice): the installer's random password can be kept; it is only reported."""
     app, _llm, _agents = made
     from wx_ilink_py.auth import AdminStore
     AdminStore(env_guard).set_password("Initial1Password2x", must_change=True)
     c = _login(app, "Initial1Password2x", field="password")
-    assert c.get("/api/control/setup", headers=JSON).status_code == 403
-    assert c.get("/api/control/overview", headers=JSON).get_json()["error"] == "password_change_required"
-    page = c.get("/memories", headers={"Accept": "text/html"})
-    assert page.status_code == 302 and page.headers["Location"].endswith("/control#account")
-    assert c.get("/control", headers={"Accept": "text/html"}).status_code == 200
+    setup = c.get("/api/control/setup", headers=JSON)
+    assert setup.status_code == 200
+    assert next(i for i in setup.get_json()["data"]["items"] if i["id"] == "admin")["state"] == "ok"
+    assert c.get("/api/control/overview", headers=JSON).status_code == 200
+    assert c.get("/memories", headers={"Accept": "text/html"}).status_code == 200
     assert c.get("/auth/status", headers=JSON).get_json()["must_change"] is True
-    same = c.post("/auth/password", json={"current": "Initial1Password2x", "new": "Initial1Password2x",
-                                          "confirm": "Initial1Password2x"}, headers=SAME)
-    assert same.status_code == 400
-    ok = c.post("/auth/password", json={"current": "Initial1Password2x", "new": "my own long passphrase 7",
+    ok =c.post("/auth/password", json={"current": "Initial1Password2x", "new": "my own long passphrase 7",
                                         "confirm": "my own long passphrase 7"}, headers=SAME)
     assert ok.status_code == 200
     assert c.get("/api/control/setup", headers=JSON).status_code == 200

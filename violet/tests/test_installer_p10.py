@@ -270,12 +270,12 @@ def test_real_install_status_upgrade_rollback_and_uninstall_on_this_machine(tmp_
         # the password needs the username
         bad = urllib.parse.urlencode({"username": "admin", "password": password}).encode()
         assert _http(port, "/auth/login", bad, cookie=marked)[0] == 401
-        # the dashboard: login with the initial password, then everything but the password change is refused
+        # the dashboard: the generated password works as is (stage 3: no forced change)
         status, headers, _ = _http(port, "/auth/login", login, cookie=marked)
         assert status in (302, 303)
         cookie = headers["Set-Cookie"].split(";")[0]
         status, _, body = _http(port, "/api/control/setup", cookie=cookie)
-        assert status == 403 and "password_change_required" in body
+        assert status == 200 and "password_change_required" not in body
         # violet info / reset-entrance / reset-password / set-port
         code_i, info = _run(["info"], root)
         assert code_i == 0 and info["user"] == user and info["entrance"] == entrance and "password" not in info
