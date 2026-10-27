@@ -172,6 +172,14 @@ def test_violet_unit_exports_relay_values_and_limits_restarts_in_the_unit_sectio
     assert "mcp-relay" not in inst.systemd_unit(inst.Layout(tmp_path), None)
 
 
+def test_an_explicit_start_clears_the_start_limit_first(tmp_path):
+    """With StartLimitBurst now effective ([Unit]), a crash-looping broken upgrade used it up and systemd refused to
+    start the old version again during the rollback (install-linux, ubuntu-24.04)."""
+    runs = Runs()
+    inst.Service(inst.Layout(tmp_path), "systemd", "violet", run=runs).start()
+    assert runs.calls == [["systemctl", "reset-failed", "violet.service"], ["systemctl", "restart", "violet.service"]]
+
+
 def test_cli_mcp_relay_needs_an_installation(tmp_path, capsys):
     assert inst.main(["mcp-relay", "status", "--root", str(tmp_path / "none"), "--json"]) == 2
     assert "没有安装 Violet" in capsys.readouterr().out

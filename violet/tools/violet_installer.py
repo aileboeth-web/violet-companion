@@ -1001,6 +1001,9 @@ class Service:
 
     def start(self) -> None:
         if self.mode.startswith("systemd"):
+            # an explicit start (install, upgrade, the rollback after a failed upgrade) must not be refused because
+            # crash restarts used up the unit's start limit (StartLimitBurst in [Unit]; a broken upgrade crash-loops)
+            self._ctl("reset-failed", f"{SERVICE_NAME}.service")
             done = self._ctl("restart", f"{SERVICE_NAME}.service")
             if done.returncode != 0:
                 raise InstallError("启动服务失败：" + (done.stderr or "")[-500:] +
