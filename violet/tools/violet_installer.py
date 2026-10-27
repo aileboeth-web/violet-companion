@@ -329,11 +329,15 @@ def preflight(layout: Layout, python: str = sys.executable, platform_info: dict 
 # ------------------------------------------------------------------------------------------------ ports
 
 def port_free(port: int, host: str = "127.0.0.1") -> bool:
-    """True when nothing listens on host:port (a bind succeeds)."""
+    """True when nothing listens on host:port (a bind succeeds). On Linux with SO_REUSEADDR, as Violet's own server
+    binds: connections of a just-stopped Violet left in TIME_WAIT do not count as "in use" (only a listener does);
+    without it a reinstall right after stopping the service moved to another port."""
     family = socket.AF_INET6 if ":" in host else socket.AF_INET
     with socket.socket(family, socket.SOCK_STREAM) as sock:
         if os.name == "nt":
             sock.setsockopt(socket.SOL_SOCKET, getattr(socket, "SO_EXCLUSIVEADDRUSE", socket.SO_REUSEADDR), 1)
+        else:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind((host, port))
             return True
