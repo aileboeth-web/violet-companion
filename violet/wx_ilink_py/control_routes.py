@@ -39,6 +39,28 @@ def _error_type(text: str | None) -> str | None:
     return head[:60] if re.match(r"^[A-Za-z_][\w.]*$", head) else "error"
 
 
+STYLESHEET_LINK = '<link rel="stylesheet" href="/static/control.css">'
+
+
+def _inline_stylesheet(html: str, static_folder: str | None) -> str:
+    """Violet stage 3: the stylesheet goes into the page itself, like the login page's.
+
+    On the user's computer every script loaded but the one /static/control.css request failed in the browser
+    (no status, "provisional headers"; served fine from the server itself) -- the page was plain text. With the
+    styles in the page there is no separate request left to lose. The link stays when the file cannot be read.
+    """
+    if not static_folder or STYLESHEET_LINK not in html:
+        return html
+    try:
+        with open(f"{static_folder}/control.css", encoding="utf-8") as fh:
+            css = fh.read()
+    except OSError:
+        return html
+    if "</style" in css.lower():
+        return html
+    return html.replace(STYLESHEET_LINK, "<style>\n" + css + "\n</style>", 1)
+
+
 def register_control_routes(app: Flask, violetdb, client=None, proactive_scheduler=None, all_agents=None, runtime=None,
                             reload_all: Callable[[], None] | None = None) -> None:
     from ai.control_config import GROUPS, StoreError, ValidationError, store
@@ -59,7 +81,7 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
     # ------------------------------------------------------------------ page
     @app.get("/control")
     def control_page() -> str:
-        return render_template("control.html")
+        return _inline_stylesheet(render_template("control.html"), app.static_folder)
 
     # ------------------------------------------------------------------ overview
     @app.get("/api/control/overview")

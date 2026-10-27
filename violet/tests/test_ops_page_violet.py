@@ -194,6 +194,16 @@ def test_persona_is_a_control_center_page_and_login_lands_there(made):
     assert app.test_client().post("/auth/login", data={"token": TOKEN}, headers=SAME).headers["Location"] == "/control"
 
 
+def test_the_control_page_carries_its_stylesheet_inline(made):
+    """On the user's browser the separate /static/control.css request failed while every script loaded: plain text."""
+    app, _client = made
+    page = _admin(app).get("/control").get_data(as_text=True)
+    css = (ROOT / "wx_ilink_py" / "static" / "control.css").read_text(encoding="utf-8")
+    assert '<link rel="stylesheet" href="/static/control.css">' not in page
+    assert "<style>\n" + css + "\n</style>" in page
+    assert page.index("<style>") < page.index("</head>")
+
+
 def test_the_page_has_the_new_tabs_and_scripts_build_no_html():
     html = (ROOT / "wx_ilink_py" / "templates" / "control.html").read_text(encoding="utf-8")
     for tab in ("persona", "logs"):
