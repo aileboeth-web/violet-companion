@@ -7,7 +7,7 @@ persona/persona_core.json by hand (and bumping its version).
 
 from __future__ import annotations
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, request
 
 from ai.consistency import ConsistencyGuard
 from ai.life_store import LifeStore, TransitionError
@@ -31,7 +31,8 @@ def register_persona_routes(app: Flask, violetdb) -> None:
 
     @app.get("/persona")
     def persona_page():
-        return render_template("persona.html")
+        # Violet stage 3: the page is part of the Control Center now (same look, same navigation)
+        return redirect("/control#persona")
 
     # -- persona -----------------------------------------------------------------------
     @app.get("/api/persona")

@@ -67,6 +67,9 @@ a{color:var(--accent)}
 .tabs [data-tab=history]{--icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12a9 9 0 1 0 3-6.7L3 8'/%3E%3Cpath d='M3 3v5h5M12 7v5l4 2'/%3E%3C/svg%3E")}
 .tabs [data-tab=account]{--icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='11' width='18' height='11' rx='2'/%3E%3Cpath d='M7 11V7a5 5 0 0 1 10 0v4'/%3E%3C/svg%3E")}
 
+.tabs [data-tab=persona]{--icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='8' r='4'/%3E%3Cpath d='M4 21c0-4 3.6-7 8-7s8 3 8 7'/%3E%3C/svg%3E")}
+.tabs [data-tab=logs]{--icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/%3E%3Cpath d='M14 2v6h6M8 13h8M8 17h5'/%3E%3C/svg%3E")}
+
 /* ------------------------------------------------------------------ page */
 main{margin-left:var(--side);max-width:calc(1120px + var(--side));padding:28px 32px 48px}
 .tab{display:none}
@@ -75,7 +78,10 @@ h2{font-size:22px;font-weight:700;margin:0 0 4px;letter-spacing:.2px}
 h3{font-size:15px;font-weight:650;margin:28px 0 10px;display:flex;align-items:center;gap:8px}
 h3::before{content:"";width:4px;height:15px;border-radius:2px;background:var(--grad)}
 p{margin:6px 0}
-.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:flex-start}
+/* a page or card title pushes what follows to the right (e.g. "运行状态 ... 刷新"); rows of buttons stay together */
+.row > :is(h2,h3):first-child{margin-right:auto}
+.card > .row:first-child > button:last-child{margin-left:auto}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-top:14px}
 .cards.list{grid-template-columns:1fr}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;min-width:0;
@@ -213,6 +219,35 @@ label.check{flex-direction:row;align-items:center;gap:8px}label.check input{widt
 .muted{opacity:.65}
 .slot-row{border-top:1px solid var(--line);padding-top:4px;margin-top:4px;font-size:13px}
 pre.note{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%}   /* phase 10.5: tool test results */
+
+/* WeChat QR login inside the channels page */
+.wx-login{padding:12px 14px;border-radius:14px;background:var(--panel-hover);border:1px dashed var(--line-strong)}
+.wx-qr-wrap{display:flex;flex-wrap:wrap;gap:18px;align-items:center}
+.wx-qr-wrap .stack{align-items:flex-start;flex:1;min-width:220px}
+.wx-qr{width:180px;height:180px;border-radius:14px;background:#fff;padding:8px;box-shadow:var(--shadow);animation:pop .3s both}
+.wx-qr-wait{background:linear-gradient(90deg,var(--panel) 25%,var(--panel-hover) 50%,var(--panel) 75%);background-size:200% 100%;
+  animation:shimmer 1.2s linear infinite}
+@keyframes shimmer{to{background-position:-200% 0}}
+
+/* persona and life */
+.pl-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:4px 18px;margin:8px 0}
+.pl-list ul{margin:4px 0 8px;padding-left:18px;line-height:1.75}
+.pl-list .k{color:var(--muted);font-size:12.5px;font-weight:600}
+#pl-engine{margin-left:6px}
+
+/* run log */
+.log-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.log-entry{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--line-strong);border-radius:12px;
+  padding:9px 14px;animation:rise .25s both}
+.log-entry.lv-warning{border-left-color:var(--warn)}.log-entry.lv-error,.log-entry.lv-critical{border-left-color:var(--bad)}
+.log-entry.lv-debug{opacity:.8}
+.log-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px;color:var(--muted)}
+.log-time{font-variant-numeric:tabular-nums}.log-logger{font-family:ui-monospace,Consolas,monospace}
+.log-msg{margin-top:4px;font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:12.5px;white-space:pre-wrap;
+  overflow-wrap:anywhere}
+.log-detail{margin:6px 0 0;padding:10px;border-radius:10px;background:var(--panel-solid);border:1px solid var(--line);
+  font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto}
+details summary{cursor:pointer;color:var(--muted);font-size:12.5px;margin-top:6px}
 
 /* ------------------------------------------------------------------ motion */
 @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}

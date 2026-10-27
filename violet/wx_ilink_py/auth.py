@@ -422,7 +422,7 @@ def _fingerprint(token: str) -> str:
 def _safe_next(value: str | None) -> str:
     if value and value.startswith("/") and not value.startswith("//") and "\\" not in value:
         return value
-    return "/"
+    return "/control"                    # Violet stage 3: the Control Center, not the old dashboard
 
 
 def _same_origin() -> bool:

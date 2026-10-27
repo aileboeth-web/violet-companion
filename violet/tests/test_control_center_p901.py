@@ -447,4 +447,6 @@ def test_inline_handlers_only_take_numbers_or_json_strings():
                 for expr in re.findall(r"\$\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}", handler):
                     seen += 1
                     assert expr.startswith(ALLOWED) or expr in CONSTANT, f"{path.name}: ${{{expr}}}"
-    assert seen > 20
+    # the check still sees the legacy pages' handlers (13 since stage 3 moved persona.html, with ~12 of them, into
+    # the Control Center, which builds DOM nodes and has no inline handlers at all)
+    assert seen >= 10

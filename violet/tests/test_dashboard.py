@@ -106,7 +106,7 @@ def test_browser_login_and_csrf_protection(make_app):
 def test_open_redirect_is_blocked(make_app):
     app, _, _ = make_app()
     resp = app.test_client().post("/auth/login", data={"token": TOKEN, "next": "//evil.example/x"})
-    assert resp.headers["Location"] == "/"
+    assert resp.headers["Location"] == "/control"          # stage 3: the default page is the Control Center
 
 
 def test_public_endpoints_leak_nothing(make_app):

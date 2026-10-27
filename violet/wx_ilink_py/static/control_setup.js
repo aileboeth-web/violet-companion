@@ -7,7 +7,6 @@
 
   function goTab(tab) {
     const btn = document.querySelector(`#tabs button[data-tab="${CSS.escape(tab)}"]`);
-    if (tab === "persona") { location.href = "/persona"; return; }
     if (btn) btn.click();
   }
 

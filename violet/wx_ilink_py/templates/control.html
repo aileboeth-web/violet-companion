@@ -18,12 +18,14 @@
     <button data-tab="memories">记忆</button>
     <button data-tab="settings">设置</button>
     <button data-tab="channels">渠道</button>
+    <button data-tab="persona">人设与生活</button>
     <button data-tab="tools">工具</button>
     <button data-tab="schedule">课表</button>
+    <button data-tab="logs">日志</button>
     <button data-tab="history">修改记录</button>
     <button data-tab="account">账号安全</button>
   </nav>
-  <div class="links"><a href="/persona">人设与生活</a><a href="/">旧版面板</a></div>
+  <div class="links"><a href="/">旧版面板</a></div>
 </aside>
 <main>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -290,6 +292,38 @@
     <div class="row"><button class="danger" id="logout-all">退出所有登录</button>
       <form method="post" action="/auth/logout"><button class="ghost" type="submit">退出</button></form></div>
   </section>
+
+  <section id="tab-persona" class="tab">
+    <div class="row"><h2>人设与生活</h2><button class="ghost" id="pl-refresh" type="button">刷新</button></div>
+    <p class="note">Violet 的核心人设、会慢慢变化的部分，以及她的虚拟生活。这里的生活经历都是虚构的；改动会记下原因，可以看历史。</p>
+    <div class="card" id="pl-core"></div>
+    <h3>人设动态 <span class="note">（缓慢变化，需要你批准）</span></h3>
+    <div id="pl-dynamics" class="cards list"></div>
+    <h3>生活引擎 <span id="pl-engine" class="pill"></span></h3>
+    <div class="row"><button class="ghost" id="pl-pause" type="button">暂停</button><button class="ghost" id="pl-resume" type="button">恢复</button></div>
+    <p class="note">暂停只停止虚拟生活往前推进，不影响聊天和主动消息；彻底关闭在“设置 → 生活引擎”。</p>
+    <h3>生活线</h3><div id="pl-threads" class="cards list"></div>
+    <h3>计划</h3><div id="pl-plans" class="cards list"></div>
+    <h3>生活事件</h3><div id="pl-events" class="cards list"></div>
+    <h3>一致性标记 <span class="note">（回复里和人设、生活记录对不上的地方）</span></h3>
+    <div id="pl-flags" class="cards list"></div>
+  </section>
+
+  <section id="tab-logs" class="tab">
+    <div class="row"><h2>运行日志</h2>
+      <label class="check"><input type="checkbox" id="log-auto"> 每 5 秒刷新</label>
+      <button class="ghost" id="log-download" type="button">下载（已脱敏）</button></div>
+    <p class="note">最新的在最上面。密钥、令牌和密码在离开服务器之前都会被替换成 &lt;redacted&gt;。</p>
+    <div class="filters">
+      <label>级别<select id="log-level"><option value="DEBUG">全部</option><option value="INFO" selected>信息及以上</option>
+        <option value="WARNING">警告及以上</option><option value="ERROR">只看错误</option></select></label>
+      <label class="grow">搜索<input id="log-q" maxlength="200" placeholder="关键字、模块名（例如 channels、mcp）"></label>
+      <label>对话编号<input id="log-turn" maxlength="64" placeholder="t-…"></label>
+      <button id="log-search" type="button">查询</button>
+    </div>
+    <div class="row" id="log-summary"></div>
+    <div id="log-list" class="log-list"></div>
+  </section>
 </main>
 
 <dialog id="confirm"><form method="dialog" class="stack">
@@ -317,5 +351,7 @@
 <script src="/static/control_setup.js"></script>
 <script src="/static/control_mcp.js"></script>
 <script src="/static/control_diag.js"></script>
+<script src="/static/control_persona.js"></script>
+<script src="/static/control_logs.js"></script>
 </body>
 </html>

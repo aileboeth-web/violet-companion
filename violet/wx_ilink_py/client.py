@@ -721,14 +721,17 @@ class ILinkClient:
 
     @staticmethod
     def _make_qr_data_url(content: str) -> str:
+        # SVG, drawn by qrcode itself: the PNG default needs Pillow, which is not a requirement -- on a fresh install the
+        # QR login failed while drawing the code (found in Violet stage 3). An <img> never runs scripts inside an SVG.
+        from qrcode.image.svg import SvgPathImage
         qr = qrcode.QRCode(box_size=8, border=2)
         qr.add_data(content)
         qr.make(fit=True)
-        image = qr.make_image(fill_color="black", back_color="white")
+        image = qr.make_image(image_factory=SvgPathImage)
         buf = io.BytesIO()
-        image.save(buf, format="PNG")
+        image.save(buf)
         encoded = base64.b64encode(buf.getvalue()).decode("utf-8")
-        return f"data:image/png;base64,{encoded}"
+        return f"data:image/svg+xml;base64,{encoded}"
 
     def _fetch_qrcode(self) -> dict[str, Any]:
         url = f"{self.base_url}/ilink/bot/get_bot_qrcode?bot_type={BOT_TYPE}"

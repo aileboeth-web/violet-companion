@@ -67,7 +67,7 @@
       h("p", { class: "note", text: fmt(ch.status.detail) + (ch.status.last_error ? `（最近错误：${ch.status.last_error}）` : "") +
         ` · 收到 ${ch.status.received || 0} · 发出 ${ch.status.sent || 0} · 发送失败 ${ch.status.send_failures || 0}` }),
       ch.webhook_path ? h("p", { class: "note", text: `上报地址（填到 OneBot 实现里）：${location.origin}${ch.webhook_path}` }) : null,
-      ch.type === "wechat_ilink" ? h("p", { class: "note" }, "微信登录请在 ", h("a", { href: "/", text: "微信登录页" }), " 扫码。") : null,
+      ch.type === "wechat_ilink" ? wechatBox() : null,
       fields, err,
       h("div", { class: "row" },
         h("button", { class: "ghost", text: ch.enabled ? "关闭" : "开启", onclick: async () => {
@@ -87,6 +87,56 @@
       ch.id !== "wechat" ? h("details", { ontoggle: (ev) => { if (ev.target.open) loadPeers(ch, peers); } },
         h("summary", { text: `联系人（已绑定 ${ch.peers.bound} · 待批准 ${ch.peers.pending} · 已屏蔽 ${ch.peers.blocked}）` }), peers) : null);
     return h("div", { class: "card" }, body);
+  }
+
+  // ---------------------------------------------------------------- WeChat QR login (Violet stage 3; was the old page)
+  let wxTimer = null;
+  function wechatBox() {
+    const box = h("div", { class: "wx-login", id: "wx-login" });
+    loadWechat(box);
+    return box;
+  }
+  function scheduleWechat(box, ms) {
+    clearTimeout(wxTimer);
+    wxTimer = setTimeout(() => {
+      if (box.isConnected && $("#tab-channels").classList.contains("active") && !document.hidden) loadWechat(box);
+      else if (box.isConnected) scheduleWechat(box, 3000);
+    }, ms);
+  }
+  async function loadWechat(box) {
+    let w;
+    try { w = await api("GET", "/api/control/wechat"); } catch (e) { box.replaceChildren(h("p", { class: "err", text: e.message })); return; }
+    if (w.logged_in) {
+      const wasLoggingIn = box.dataset.loggingIn === "1";
+      box.dataset.loggingIn = "";
+      box.replaceChildren(h("div", { class: "row" }, pill("微信已登录", "ok"), h("span", { class: "note", text: `账号 ${w.account}` }),
+        h("button", { class: "ghost", text: "退出微信登录", onclick: async () => {
+          if (!(await confirmBox("退出微信登录？Violet 会停止收发微信消息，之后要重新扫码。"))) return;
+          try { await api("POST", "/api/control/wechat/logout", { confirm: true }); toast("已退出微信登录"); loaders.channels(); }
+          catch (e) { toast(e.message, false); }
+        } })));
+      if (wasLoggingIn) { toast("微信登录成功"); loaders.channels(); }
+      return;
+    }
+    if (w.logging_in && w.qr) {
+      box.dataset.loggingIn = "1";
+      const img = w.qr.image ? h("img", { class: "wx-qr", src: w.qr.image, alt: "微信登录二维码" }) : h("div", { class: "wx-qr wx-qr-wait" });
+      box.replaceChildren(h("div", { class: "wx-qr-wrap" }, img,
+        h("div", { class: "stack" }, h("strong", { text: "用微信扫一扫登录" }),
+          pill(w.qr.status_text, w.qr.status === "scaned" ? "ok" : "warn"),
+          h("p", { class: "note", text: "用要给 Violet 使用的微信扫码，并在手机上确认。二维码过期会自动换新" +
+            (w.qr.refreshes ? `（已换 ${w.qr.refreshes} 次）` : "") + "。" }),
+          w.qr.url ? h("a", { href: w.qr.url, target: "_blank", rel: "noopener", text: "二维码显示不出来？打开登录链接" }) : null)));
+      scheduleWechat(box, 2000);
+      return;
+    }
+    box.dataset.loggingIn = "";
+    box.replaceChildren(h("div", { class: "row" }, pill("微信未登录", "warn"),
+      w.error ? h("span", { class: "note", text: `上次失败：${w.error}` }) : h("span", { class: "note", text: "扫码后 Violet 就能收发微信消息。" }),
+      h("button", { text: "扫码登录", onclick: async () => {
+        try { await api("POST", "/api/control/wechat/login", {}); box.dataset.loggingIn = "1"; scheduleWechat(box, 800); toast("正在获取二维码…"); }
+        catch (e) { toast(e.message, false); }
+      } })));
   }
 
   function renderAddForm() {

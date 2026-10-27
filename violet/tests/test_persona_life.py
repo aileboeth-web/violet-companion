@@ -648,7 +648,8 @@ def test_dashboard_views_and_controls(api, store, violetdb):
     data = api.get("/api/life", headers=AUTH).get_json()
     assert [t["id"] for t in data["threads"]] == [thread_id] and data["events"][0]["is_virtual"] == 1
     assert api.get("/api/persona", headers=AUTH).get_json()["core"]["data"]["identity"]["name"] == "Violet"
-    assert api.get("/persona", headers=AUTH).status_code == 200
+    page = api.get("/persona", headers=AUTH)                 # stage 3: a page of the Control Center now
+    assert page.status_code == 302 and page.headers["Location"].endswith("/control#persona")
 
     assert api.post(f"/api/life/threads/{thread_id}/pause", headers=AUTH, json={}).get_json()["status"] == "paused"
     assert api.post(f"/api/life/threads/{thread_id}/pause", headers=AUTH, json={}).status_code == 400
