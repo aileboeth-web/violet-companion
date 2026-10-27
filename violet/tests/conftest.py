@@ -29,6 +29,7 @@ os.environ.update({
     "LLM_API_URL": "http://127.0.0.1:9/v1",           # discard port; never contacted
     "MCP_SERVERS": "",
     "DEBUG_MODE": "0",
+    "VIOLET_UPDATE_CHECK": "0",                    # never ask GitHub; update tests pass a fake fetcher
     "INTENT_LLM_MODEL": "fake-intent",
     "CHAT_LLM_MODEL": "fake-chat",
     "MEMORY_LLM_MODEL": "fake-memory",

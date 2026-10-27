@@ -16,22 +16,25 @@ Violet 是一个自己部署的 AI 陪伴：一个有稳定性格、会慢慢熟
 
 ## 安装
 
-在一台 Linux 服务器上（root）：
+在一台 Linux 服务器上，一行命令：
 
 ```bash
-sudo bash violet/install.sh
+curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | sudo bash
 ```
 
 安装程序会自动装好 Python 和依赖、注册 systemd 服务、选端口、生成管理员初始密码，最后显示后台地址。之后打开后台，按"开始"页填写模型服务的地址和 Key、在"渠道"页登录微信或添加机器人就可以聊天了。详细说明见 [violet/INSTALL.md](violet/INSTALL.md)。
 
-> 从 GitHub 一行命令安装（`curl … | sudo bash`）和 1Panel 式的"地址 + 安全入口 + 账号密码"登录正在开发中。
+升级到最新版本：`sudo /opt/violet/violet update`（后台"开始"页也会提示有没有新版本）。
 
-需要：Python 3.11 或更新版本、一个 OpenAI 兼容的模型接口。
+> 1Panel 式的"地址 + 安全入口 + 账号密码"登录正在开发中。
+
+需要：一个 OpenAI 兼容的模型接口。已在 Ubuntu 22.04 / 24.04、Debian 12、Rocky Linux 9 上自动测试过安装（GitHub Actions）。
 
 ## 当前状态（请如实了解）
 
 - 所有功能都有离线自动化测试（约 2500 项，用模拟的模型和聊天平台运行）。
-- **以下内容还没有在真实环境里验证过**：在真实 Linux 服务器上安装和运行 systemd 服务；Telegram、QQ 与真实平台联调；手机端 MCP 在真机上的表现。
+- 一行命令安装、systemd 服务、崩溃自动重启、修复、备份、升级失败自动退回、卸载：每次修改安装器都会在 GitHub Actions 的真实 Linux 上自动测试。
+- **以下内容还没有在真实环境里验证过**：Telegram、QQ 与真实平台联调；手机端 MCP 在真机上的表现。
 - 这是一个陪伴类项目，Violet 清楚自己是虚构角色，不会冒充真人；AI 画的图不会说成照片。
 
 ## 目录

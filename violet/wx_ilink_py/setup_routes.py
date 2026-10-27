@@ -1,6 +1,7 @@
 """Control Center: first-run setup (phase 10.3).
 
   GET  /api/control/setup               the checklist (what is configured, what is missing, where to fix it)
+  GET  /api/control/update              installed version vs. the newest GitHub release (?refresh=1)
   POST /api/control/setup/test-model    one short real request with the settings Violet uses now {model?}
   POST /api/control/setup/models        the model names the API offers (GET /models of the configured service)
   GET  /api/control/diagnostics         phase 10.6: findings by area (channels, model, MCP, tools, network, core)
@@ -36,6 +37,12 @@ def register_setup_routes(app: Flask, all_agents=None, runtime=None) -> None:
         from ai.setup_status import checklist
         return ok(checklist(admin_store=current_app.extensions.get("violet_admin_store"), agents=all_agents,
                             runtime=runtime, data_dir=data_dir()))
+
+    @app.get("/api/control/update")
+    def control_update():
+        """The installed version and the newest GitHub release (cached 6 h; ?refresh=1 asks GitHub again)."""
+        from ai.updates import check
+        return ok(check(refresh=request.args.get("refresh") == "1"))
 
     @app.post("/api/control/setup/test-model")
     def control_setup_test_model():

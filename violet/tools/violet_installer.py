@@ -43,6 +43,7 @@ import sqlite3
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -58,6 +59,8 @@ MIN_PYTHON = (3, 11)          # the tested version; 3.10 lacks builtins Violet u
 MIN_DISK_MB = 1024
 MIN_MEMORY_MB = 512
 HEALTH_TIMEOUT = 90.0
+# where releases are published (GitHub Releases of this repository); VIOLET_UPDATE_REPO overrides it (forks)
+UPDATE_REPO = "aileboeth-web/violet-companion"
 # copied into <root>/app; user data and machine-local files never are
 COPY_IGNORE = ("__pycache__", "*.pyc", ".env", ".env.*", "*.db", "*.db-wal", "*.db-shm", "data", "logs", "output",
                ".venv", ".venv-*", "*.bak", "main.pid", ".pytest_cache", "tests", "credentials.json", "*.log")
@@ -133,6 +136,52 @@ def source_version(source: Path = SOURCE_ROOT) -> str:
         return (source / "VERSION").read_text(encoding="utf-8").strip() or "unknown"
     except OSError:
         return "unknown"
+
+
+# ------------------------------------------------------------------------------------------------ releases / updates
+
+def update_repo() -> str:
+    return (os.environ.get("VIOLET_UPDATE_REPO") or "").strip() or UPDATE_REPO
+
+
+def version_key(version: str | None) -> tuple[int, int, int] | None:
+    """(major, minor, patch) of "0.1.0" / "v0.1.0" / "0.1.0-rc1"; None when it is not such a version."""
+    text = (version or "").strip().lstrip("vV")
+    head = text.split("-", 1)[0].split("+", 1)[0]
+    parts = head.split(".")
+    if not 1 <= len(parts) <= 3 or not all(p.isdigit() for p in parts):
+        return None
+    numbers = [int(p) for p in parts] + [0] * (3 - len(parts))
+    return numbers[0], numbers[1], numbers[2]
+
+
+def is_newer(latest: str | None, current: str | None) -> bool:
+    """True only when both are versions and latest is greater (an unknown current version is never "older")."""
+    a, b = version_key(latest), version_key(current)
+    return a is not None and b is not None and a > b
+
+
+def latest_release(repo: str | None = None, opener: Callable[..., Any] | None = None, timeout: float = 10.0) -> dict:
+    """The newest published release of the repository: {tag, version, url, published_at, notes, install_url}.
+    Unauthenticated GitHub API (60 requests an hour per address -- callers cache it); system proxies apply."""
+    repo = repo or update_repo()
+    request = urllib.request.Request(f"https://api.github.com/repos/{repo}/releases/latest",
+                                     headers={"Accept": "application/vnd.github+json", "User-Agent": "violet-updater"})
+    try:
+        with (opener or urllib.request.urlopen)(request, timeout=timeout) as response:
+            data = json.loads(response.read(1_000_000).decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            raise InstallError(f"{repo} 还没有发布任何版本") from None
+        raise InstallError(f"查询最新版本失败：GitHub 返回 {exc.code}") from None
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise InstallError(f"查询最新版本失败（网络不通或被拦截）：{exc.__class__.__name__}") from None
+    tag = str(data.get("tag_name") or "")
+    if not version_key(tag):
+        raise InstallError(f"最新发布的标签 {tag!r} 不是版本号")
+    return {"tag": tag, "version": tag.lstrip("vV"), "url": str(data.get("html_url") or ""),
+            "published_at": data.get("published_at"), "notes": str(data.get("body") or "")[:4000],
+            "install_url": f"https://github.com/{repo}/releases/download/{tag}/install.sh"}
 
 
 # ------------------------------------------------------------------------------------------------ system checks
@@ -1148,6 +1197,57 @@ def rollback(opts: Options) -> dict[str, Any]:
             "note": "数据没有回滚；需要时用 restore 恢复升级前的备份", "backup": state.get("last_backup")}
 
 
+def _download(url: str, target: Path, limit: int = 1_000_000) -> None:
+    request = urllib.request.Request(url, headers={"User-Agent": "violet-updater"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            body = response.read(limit + 1)
+    except (urllib.error.URLError, OSError) as exc:
+        raise InstallError(f"下载 {url} 失败：{exc.__class__.__name__}") from None
+    if len(body) > limit or not body.startswith(b"#!"):
+        raise InstallError(f"{url} 不是安装脚本")
+    target.write_bytes(body)
+
+
+def update(opts: Options, check_only: bool = False, release: dict | None = None,
+           download: Callable[[str, Path], None] = _download, run: Callable[..., Any] = subprocess.run,
+           windows: bool | None = None) -> dict[str, Any]:
+    """`violet update`: the newest GitHub release over this installation. The release's own install.sh downloads its
+    archive, checks the SHA-256 and runs `upgrade` (backup first; a failed upgrade puts the old version back)."""
+    layout = Layout(opts.root)
+    state = load_state(layout)
+    if not state:
+        raise InstallError(f"{layout.root} 没有安装 Violet")
+    current = state.get("version") or source_version(layout.app)
+    rel = release or latest_release()
+    newer = is_newer(rel["version"], current)
+    result = {"ok": True, "current": current, "latest": rel["version"], "newer": newer, "release_url": rel["url"],
+              "published_at": rel.get("published_at")}
+    if check_only or not newer:
+        return {**result, "updated": False}
+    if (os.name == "nt") if windows is None else windows:
+        raise InstallError(f"Windows 上请下载 {rel['tag']} 的程序，在其目录里运行 python tools/violet_installer.py upgrade")
+    if state.get("service") == "systemd" and not _is_root():
+        raise InstallError(f"需要 root 权限：sudo {layout.root / 'violet'} update")
+    work = Path(tempfile.mkdtemp(prefix="violet-update-"))
+    try:
+        script = work / "install.sh"
+        download(rel["install_url"], script)
+        opts.log(f"  升级 {current} → {rel['version']}…")
+        done = run(["bash", str(script), "upgrade", "--root", str(layout.root), "--json"], capture_output=True,
+                   text=True, encoding="utf-8")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    lines = (done.stdout or "").strip().splitlines()
+    try:
+        outcome = json.loads(lines[-1]) if lines else {}
+    except ValueError:
+        outcome = {}
+    if done.returncode != 0 or not outcome.get("ok"):
+        raise InstallError(outcome.get("error") or ("升级失败：" + (done.stderr or done.stdout or "")[-1500:]))
+    return {**result, "updated": True, "to": outcome.get("to"), "backup": outcome.get("backup")}
+
+
 def status(opts: Options) -> dict[str, Any]:
     layout = Layout(opts.root)
     state = load_state(layout)
@@ -1257,14 +1357,15 @@ def render_result(result: dict[str, Any]) -> str:
               "公网访问：" + ("已验证可以访问" if result.get("public_ready") else "未配置或未验证（见上面的网络检查）"),
               "", "下一步：登录后台，按“开始”页填写模型服务（API 地址和 Key）、扫码登录微信或添加其他聊天渠道。",
               f"日常管理：{Path(result.get('root', '.')) / ('violet.cmd' if os.name == 'nt' else 'violet')} status | stop | "
-              "start | backup | upgrade | uninstall", ""]
+              "start | backup | update（升级到 GitHub 上的最新版本）| uninstall", ""]
     return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="violet-installer", description="Violet installer")
-    parser.add_argument("command", choices=["install", "upgrade", "rollback", "status", "backup", "restore",
+    parser.add_argument("command", choices=["install", "upgrade", "update", "rollback", "status", "backup", "restore",
                                             "uninstall", "doctor", "start", "stop", "restart"])
+    parser.add_argument("--check", action="store_true", help="update: only report whether a newer release exists")
     parser.add_argument("archive", nargs="?", help="restore: the backup file")
     parser.add_argument("--root", type=Path, default=None)
     parser.add_argument("--port", type=int)
@@ -1301,6 +1402,15 @@ def main(argv: list[str] | None = None) -> int:
             result = {"checks": checks, "status": status(opts)}
         elif args.command == "upgrade":
             result = upgrade(opts)
+        elif args.command == "update":
+            result = update(opts, check_only=args.check)
+            if not args.json:
+                if not result["newer"]:
+                    out(f"已经是最新版本：{result['current']}（最新发布 {result['latest']}）")
+                elif not result["updated"]:
+                    out(f"有新版本：{result['latest']}（当前 {result['current']}）。升级：{root / 'violet'} update")
+                else:
+                    out(f"已升级到 {result['to']}；升级前的备份：{result['backup']}")
         elif args.command == "rollback":
             result = rollback(opts)
         elif args.command == "status":

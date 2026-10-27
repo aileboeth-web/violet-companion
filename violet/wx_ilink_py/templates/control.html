@@ -31,6 +31,14 @@
     <h2>初始化向导</h2>
     <p class="note" id="setup-summary"></p>
     <div id="setup-list" class="cards list"></div>
+    <div class="card" id="setup-update">
+      <div class="row"><strong>版本与更新</strong><span id="update-pill"></span>
+        <button class="ghost" id="update-refresh" type="button">检查更新</button></div>
+      <p class="note" id="update-text"></p>
+      <div class="row" id="update-command-row" hidden><code id="update-command"></code>
+        <button class="ghost" id="update-copy" type="button">复制命令</button></div>
+      <p class="note">升级会替换程序并重启服务，需要在服务器上执行上面的命令（会先备份；新版本起不来会自动退回旧版本）。</p>
+    </div>
     <h3>1. 模型服务</h3>
     <p class="note">填写 OpenAI 兼容接口的地址和 API Key。保存后会用当前的 Chat 模型真实调用一次（很短的请求），只记录成功与否、耗时和错误类型。</p>
     <form id="setup-api" class="stack" autocomplete="off">

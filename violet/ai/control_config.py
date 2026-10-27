@@ -129,6 +129,8 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_SCHEDULE_CONTEXT", "聊天时考虑课表", "features", "bool", "now", "聊天时知道你现在是不是在上课", False),
     Setting("VIOLET_SCHEDULE_PROACTIVE", "主动联系避开上课", "features", "bool", "now",
             "上课、考试时不主动找你（按课表计算）", False),
+    Setting("VIOLET_UPDATE_CHECK", "检查新版本", "features", "bool", "now",
+            "打开“开始”页时向 GitHub 查询有没有新发布的版本（最多每 6 小时一次，只查询不下载）", True),
 ]
 BY_KEY = {s.key: s for s in SETTINGS}
 GROUPS = {"api": "接口", "models": "模型与 Agent", "prompts": "提示词版本", "messages": "消息发送", "proactive": "主动联系",

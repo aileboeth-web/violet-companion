@@ -58,7 +58,34 @@
       renderModels();
       if (data.model_test) showTest(data.model_test);
     } catch (e) { toast(e.message, false); }
+    loadUpdate(false);
   };
+
+  // version & updates: the server asks GitHub (cached 6 h); upgrading itself runs on the server (shown command)
+  function renderUpdate(u) {
+    const when = u.published_at ? `，发布于 ${fmt(u.published_at.slice(0, 10))}` : "";
+    let pillArgs, text;
+    if (!u.enabled) { pillArgs = ["未检查", ""]; text = `当前版本 ${u.current}。检查新版本已关闭（设置 → 功能开关）。`; }
+    else if (u.error) { pillArgs = ["无法检查", "warn"]; text = `当前版本 ${u.current}。${u.error}`; }
+    else if (u.newer) { pillArgs = ["有新版本", "ok"]; text = `当前版本 ${u.current}，最新版本 ${u.latest}${when}。`; }
+    else { pillArgs = ["已是最新", ""]; text = `当前版本 ${u.current}，最新发布 ${u.latest || "无"}${when}。`; }
+    $("#update-pill").replaceChildren(pill(...pillArgs));
+    $("#update-text").replaceChildren(h("span", { text }),
+      u.newer && u.url ? h("a", { href: u.url, target: "_blank", rel: "noopener", text: " 查看更新说明" }) : null);
+    $("#update-command").textContent = u.command;
+    $("#update-command-row").hidden = !u.newer;
+  }
+
+  async function loadUpdate(refresh) {
+    try { renderUpdate(await api("GET", "/api/control/update" + (refresh ? "?refresh=1" : ""))); }
+    catch (e) { $("#update-text").textContent = e.message; }
+  }
+
+  $("#update-refresh").addEventListener("click", () => loadUpdate(true));
+  $("#update-copy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText($("#update-command").textContent); toast("已复制"); }
+    catch (e) { toast("复制失败，请手动选中命令", false); }
+  });
 
   $("#setup-api").addEventListener("submit", async (ev) => {
     ev.preventDefault(); $("#setup-api-error").textContent = "";

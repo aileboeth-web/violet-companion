@@ -1,0 +1,33 @@
+# Publish a release: push a tag "v<VERSION>" (for example v0.1.0, matching violet/VERSION).
+#   git tag v0.1.0 && git push origin v0.1.0
+# The job builds the release files with violet/tools/make_release.py from the tagged commit and attaches them to a
+# GitHub Release. Then
+#   curl -fsSL https://github.com/<owner>/<repo>/releases/latest/download/install.sh | sudo bash   installs it,
+#   sudo /opt/violet/violet update                                                                upgrades to it,
+# and the Control Center's "开始" page shows that a newer version exists.
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: the tag must be the program's version
+        run: |
+          want="v$(tr -d ' \r\n' < violet/VERSION)"
+          [ "$GITHUB_REF_NAME" = "$want" ] || { echo "::error::tag $GITHUB_REF_NAME does not match violet/VERSION ($want)"; exit 1; }
+      - name: build the release files
+        run: |
+          python3 violet/tools/make_release.py \
+            --base "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}" --out dist
+          (cd dist && sha256sum -c SHA256SUMS)
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/install.sh dist/violet.tar.gz dist/violet.tar.gz.sha256 \
+            dist/SHA256SUMS dist/release.json --title "Violet ${GITHUB_REF_NAME#v}" --generate-notes

@@ -280,7 +280,8 @@ def test_real_install_status_upgrade_rollback_and_uninstall_on_this_machine(tmp_
         code4, failed = _run_upgrade(broken, root)
         assert code4 != 0 and "已恢复" in failed["error"]
         assert inst.probe_eve(port) is not None                    # the old version answers again
-        assert (root / "app" / "VERSION").read_text(encoding="utf-8").strip() == "2.0.0-p10"
+        assert (root / "app" / "VERSION").read_text(encoding="utf-8").strip() == \
+            (PROJECT / "VERSION").read_text(encoding="utf-8").strip()           # the version installed before
         # status
         code5, st = _run(["status"], root)
         assert code5 == 0 and st["installed"] and st["service_state"] == "active"

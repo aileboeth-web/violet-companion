@@ -5,10 +5,10 @@
 在一台全新的 Linux 服务器上（不需要先下载源码、装 git 或配置 Python）：
 
 ```bash
-curl -fsSL <发布地址>/install.sh | sudo bash
+curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | sudo bash
 ```
 
-`<发布地址>` 是发布文件所在的网址（由 `tools/make_release.py --base <发布地址>` 生成，`release.json` 里的 `install_command` 就是完整命令）。选项放在 `-s --` 后面，例如 `| sudo bash -s -- --access public`。
+装的是 GitHub Releases 上最新发布的版本。选项放在 `-s --` 后面，例如 `| sudo bash -s -- --access public`。自己发布到别的地址时：`tools/make_release.py --base <发布地址>` 生成发布文件，`release.json` 里的 `install_command` 就是对应的命令。
 
 安装程序会依次：找到或自动安装 Python 3.11+（root 时用系统包管理器；系统自带的版本太旧时，例如 Ubuntu 22.04，再装 python3.11）→ 下载程序并核对 SHA-256 → 检查系统（venv、磁盘、内存、目录权限）→ 复制程序到 `/opt/violet/app` → 创建虚拟环境并安装依赖 → 生成配置 `config/violet.env` 和数据目录 → 选择端口（默认 7100，被占用就自动选下一个空闲的）→ 生成一次性的管理员初始密码 → 创建系统用户 `violet`、注册 systemd 服务（崩溃自动重启、开机自启）→ 启动并做健康检查 → 输出后台地址、初始密码和网络检查结果。
 
@@ -36,6 +36,12 @@ curl -fsSL <发布地址>/install.sh | sudo bash
 
 安装程序分别检查：端口在监听、本机能访问、局域网能访问、公网能访问。**公网是否可达从服务器内部无法确认**（云厂商安全组、NAT、运营商封端口都要从外面测），所以默认显示“未验证”；用手机流量打开地址确认，或者安装时加 `--public-url https://你的域名` 让安装程序试一次。本机防火墙开着时只给出放行命令，加 `--open-firewall` 才会自动放行。
 
+## 更新
+
+后台“开始”页的“版本与更新”会显示当前版本和 GitHub 上的最新版本（最多每 6 小时查一次，只查询不下载；可在“设置 → 功能开关”关闭）。有新版本时，在服务器上执行页面给出的命令：`sudo /opt/violet/violet update`。
+
+发布新版本（维护者）：改 `violet/VERSION`，提交后推送标签 `v<版本>`（例如 `git tag v0.1.1 && git push origin v0.1.1`），GitHub Actions 会自动打包并发布到 Releases。
+
 ## 日常维护
 
 安装目录里的 `violet`（Windows 是 `violet.cmd`）：
@@ -45,7 +51,8 @@ curl -fsSL <发布地址>/install.sh | sudo bash
 /opt/violet/violet stop | start | restart
 /opt/violet/violet backup        # 配置 + 数据（数据库在线一致备份）到 backups/
 /opt/violet/violet restore backups/violet-backup-....tar.gz   # 恢复前会先备份当前状态
-sudo bash install.sh upgrade       # 在新版本的目录里执行：先备份，失败自动退回旧版本
+sudo /opt/violet/violet update   # 升级到 GitHub 上的最新版本：先备份，失败自动退回旧版本（加 --check 只查询）
+sudo bash install.sh upgrade       # 或者：在新版本的程序目录里执行
 /opt/violet/violet rollback      # 退回上一个版本的程序（数据不动）
 /opt/violet/violet uninstall     # 删除服务和程序，保留配置、数据和备份
 /opt/violet/violet uninstall --purge --yes   # 连数据一起删除（不可恢复）
