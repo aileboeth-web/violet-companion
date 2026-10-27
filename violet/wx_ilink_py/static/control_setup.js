@@ -75,8 +75,9 @@
     else { pillArgs = ["已是最新", ""]; text = `当前版本 ${u.current}，最新发布 ${u.latest || "无"}${when}。`; }
     if (auto.requested) text += " 已提交更新，服务器正在升级，完成后 Violet 会自动重启。";
     $("#update-pill").replaceChildren(pill(...pillArgs));
-    $("#update-text").replaceChildren(h("span", { text }),
-      u.newer && u.url ? h("a", { href: u.url, target: "_blank", rel: "noopener", text: " 查看更新说明" }) : null);
+    // replaceChildren(null) would insert the text "null": only real nodes
+    $("#update-text").replaceChildren(...[h("span", { text }),
+      u.newer && u.url ? h("a", { href: u.url, target: "_blank", rel: "noopener", text: " 查看更新说明" }) : null].filter(Boolean));
     const mode = `更新方式：${MODES[u.mode] || u.mode}（设置 → 版本更新）。`;
     const last = auto.last_result ? ` 上次自动更新：${when_(auto.last_run_at)} ${RESULTS[auto.last_result] || auto.last_result}` +
       (auto.last_message ? `（${auto.last_message}）` : "") + "。" : "";

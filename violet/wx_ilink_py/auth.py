@@ -88,25 +88,54 @@ GLOBAL_FAILURE_LIMIT = 50
 _LOGIN_PAGE = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Violet Control Center 登录</title>
+<title>登录 · Violet</title>
 <style>
- body{font-family:system-ui,-apple-system,"Microsoft YaHei",sans-serif;background:#0f172a;color:#e2e8f0;
-      display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:16px}
- form{background:#1e293b;padding:28px;border-radius:12px;width:100%;max-width:360px;box-sizing:border-box}
- h1{font-size:18px;margin:0 0 16px} input{width:100%;box-sizing:border-box;padding:10px;border-radius:8px;
- border:1px solid #334155;background:#0f172a;color:#e2e8f0;margin-bottom:12px}
- button{width:100%;padding:10px;border:0;border-radius:8px;background:#6366f1;color:#fff;font-size:15px}
- .err{color:#f87171;font-size:13px;margin-bottom:12px} .hint{color:#94a3b8;font-size:12px;margin-top:12px}
+ :root{--bg:#0c0a1a;--panel:rgba(23,20,44,.78);--line:rgba(255,255,255,.12);--text:#ece9f7;--muted:#a19cba;--accent:#8b5cf6;
+       --accent2:#d946ef;--field:#120f26;--bad:#f87171;color-scheme:dark}
+ @media (prefers-color-scheme:light){:root{--bg:#f6f4fc;--panel:rgba(255,255,255,.86);--line:#e2dcf2;--text:#1f1a33;
+       --muted:#6c6787;--field:#fff;--bad:#dc2626;color-scheme:light}}
+ *{box-sizing:border-box}
+ body{font:14px/1.6 "Inter","Segoe UI",system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--text);
+      background:var(--bg);display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:16px;overflow:hidden}
+ body::before,body::after{content:"";position:fixed;width:520px;height:520px;border-radius:50%;filter:blur(90px);opacity:.45;
+      z-index:-1;animation:drift 14s ease-in-out infinite alternate}
+ body::before{background:var(--accent);top:-180px;left:-160px}
+ body::after{background:var(--accent2);bottom:-200px;right:-160px;animation-delay:-7s}
+ form{background:var(--panel);backdrop-filter:blur(18px);border:1px solid var(--line);padding:34px 30px 26px;border-radius:22px;
+      width:100%;max-width:380px;box-shadow:0 30px 80px -30px rgba(40,20,90,.6);animation:rise .5s cubic-bezier(.2,.7,.2,1) both}
+ .logo{width:46px;height:46px;border-radius:14px;background:linear-gradient(135deg,var(--accent),var(--accent2));position:relative;
+      margin-bottom:16px;box-shadow:0 10px 26px -8px var(--accent)}
+ .logo::after{content:"";position:absolute;inset:12px;border-radius:50%;border:3px solid rgba(255,255,255,.92);
+      border-top-color:transparent;transform:rotate(-30deg)}
+ h1{font-size:22px;margin:0} .sub{color:var(--muted);font-size:13px;margin:2px 0 22px}
+ input{width:100%;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:var(--field);color:var(--text);
+      font:inherit;margin-bottom:12px;transition:border-color .18s,box-shadow .18s}
+ input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 4px rgba(139,92,246,.18)}
+ button{width:100%;padding:12px;border:0;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));
+      color:#fff;font:inherit;font-size:15px;font-weight:600;cursor:pointer;margin-top:4px;box-shadow:0 10px 24px -10px var(--accent);
+      transition:transform .15s,filter .2s}
+ button:hover{filter:brightness(1.08)} button:active{transform:scale(.98)}
+ .err{color:var(--bad);font-size:13px;margin-bottom:12px;animation:shake .35s}
+ .hint{color:var(--muted);font-size:12px;margin-top:16px}
+ .hint code{display:inline-block;white-space:nowrap;font-size:11.5px;padding:1px 6px;border-radius:6px;border:1px solid var(--line);
+      margin-top:4px}
+ @keyframes rise{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}
+ @keyframes drift{to{transform:translate(60px,40px) scale(1.12)}}
+ @keyframes shake{0%,100%{transform:none}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+ @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 </style></head><body>
 <form method="post" action="/auth/login">
-  <h1>Violet Control Center</h1>
+  <div class="logo" aria-hidden="true"></div>
+  <h1>Violet</h1>
+  <div class="sub">Control Center 管理后台</div>
   {% if error %}<div class="err">{{ error }}</div>{% endif %}
   <input type="text" name="username" placeholder="用户名" autocomplete="username" maxlength="32" autofocus>
   <input type="password" name="password" placeholder="密码" autocomplete="current-password" required>
   <input type="hidden" name="next" value="{{ next_url }}">
   <button type="submit">登录</button>
-  <div class="hint">第一次登录请用安装完成时显示的用户名和初始密码，登录后需要先改成自己的密码。忘记了：在服务器上执行
-  /opt/violet/violet info（查看用户名和地址）或 /opt/violet/violet reset-password（生成新的初始密码）。</div>
+  <div class="hint">第一次登录请用安装完成时显示的用户名和初始密码，登录后需要先改成自己的密码。忘记了：在服务器上执行<br>
+  <code>/opt/violet/violet info</code> 查看用户名和地址<br>
+  <code>/opt/violet/violet reset-password</code> 生成新的初始密码</div>
 </form></body></html>"""
 
 _NOT_FOUND = "404 Not Found\n"

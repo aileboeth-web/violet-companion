@@ -52,27 +52,50 @@ document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("cli
   document.querySelectorAll("#tabs button").forEach((x) => x.classList.toggle("active", x === b));
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.id === "tab-" + b.dataset.tab));
   history.replaceState(null, "", "#" + b.dataset.tab);
+  document.title = b.textContent.trim() + " · Violet";
+  setMenu(false);                                   // narrow screens: the menu closes after choosing a page
+  window.scrollTo({ top: 0 });
   (loaders[b.dataset.tab] || (() => {}))();
 }));
+// narrow screens: the sidebar is a top bar with a menu button
+function setMenu(open) {
+  $("#side").classList.toggle("open", open);
+  $("#menu-toggle").setAttribute("aria-expanded", String(open));
+}
+$("#menu-toggle").addEventListener("click", () => setMenu(!$("#side").classList.contains("open")));
 
 // ---------------------------------------------------------------- overview
 function card(k, v, cls) { return h("div", { class: "card" }, h("div", { class: "k", text: k }), h("div", { class: "v " + (cls || ""), text: fmt(v) })); }
+// a status tile: a coloured dot (ok / bad / warn / none) before the label
+function stat(k, v, state) { const c = card(k, v); c.classList.add("stat"); if (state) c.classList.add(state); return c; }
 function pill(text, kind) { return h("span", { class: "pill " + (kind || ""), text }); }
+function messageCount(m) {
+  if (!m || typeof m !== "object") return fmt(m);
+  if (m.total !== undefined) return String(m.total);
+  const got = m.received_count ?? m.received, sent = m.sent_count ?? m.sent;
+  return got !== undefined || sent !== undefined ? `收 ${fmt(got)} · 发 ${fmt(sent)}` : "—";
+}
+function lifeText(life) {
+  if (!life.mode) return "—";
+  const mode = { on: "运行中", off: "已关闭", paused: "已暂停" }[life.mode] || life.mode;
+  return life.last_run_key ? `${mode}（上次 ${life.last_run_key}：${fmt(life.last_outcome)}）` : mode;
+}
 loaders.overview = async () => {
   try {
     const d = await api("GET", "/api/control/overview");
     const s = d.service || {}, p = d.proactive || {}, life = d.life || {}, w = d.wechat || {};
+    const alive = (x) => (x ? "ok" : "bad");
     const cards = $("#ov-cards"); cards.replaceChildren(
-      card("微信", w.logged_in ? "已登录" : "未登录"),
-      card("收消息线程", s.poll_thread_alive ? "运行中" : "未运行"),
-      card("回复线程", s.worker_thread_alive ? "运行中" : "未运行"),
-      card("记忆线程", s.memory_worker_alive ? "运行中" : "未运行"),
-      card("排队中的对话", s.queued_turns),
-      card("主动联系", p.enabled === false ? "已关闭" : (p.due_reason || "—")),
-      card("今天主动", p.daily_sent_count === undefined ? "—" : `${p.daily_sent_count} / ${fmt(p.daily_message_limit)}`),
-      card("生活引擎", life.mode ? `${life.mode}（上次 ${fmt(life.last_run_key)}：${fmt(life.last_outcome)}）` : "—"),
-      card("消息总数", d.messages ? d.messages.total ?? d.messages.messages ?? JSON.stringify(d.messages) : "—"),
-      card("设置修改次数", d.settings_revision));
+      stat("微信", w.logged_in ? "已登录" : "未登录", w.logged_in ? "ok" : "warn"),
+      stat("收消息线程", s.poll_thread_alive ? "运行中" : "未运行", alive(s.poll_thread_alive)),
+      stat("回复线程", s.worker_thread_alive ? "运行中" : "未运行", alive(s.worker_thread_alive)),
+      stat("记忆线程", s.memory_worker_alive ? "运行中" : "未运行", alive(s.memory_worker_alive)),
+      stat("排队中的对话", s.queued_turns ?? 0),
+      stat("主动联系", p.enabled === false ? "已关闭" : (p.due_reason || "—")),
+      stat("今天主动", p.daily_sent_count === undefined ? "—" : `${p.daily_sent_count} / ${fmt(p.daily_message_limit)}`),
+      stat("生活引擎", lifeText(life), life.mode === "on" ? "ok" : (life.mode ? "warn" : "")),
+      stat("消息总数", messageCount(d.messages)),
+      stat("设置修改次数", d.settings_revision ?? 0));
     const agents = $("#ov-agents");
     agents.replaceChildren(h("tr", {}, h("th", { text: "Agent" }), h("th", { text: "模型" }), h("th", { text: "备用模型" }), h("th", { text: "温度" })),
       ...(d.agents || []).map((a) => h("tr", {}, h("td", { text: a.agent }), h("td", { text: fmt(a.model) }), h("td", { text: fmt(a.fallback_model) }), h("td", { text: fmt(a.temperature) }))));
