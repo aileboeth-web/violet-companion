@@ -39,14 +39,21 @@ def test_a_requested_port_is_used_only_when_it_is_really_free():
         inst.choose_port(80, None, is_free=free)
 
 
-def test_automatic_port_keeps_the_previous_one_then_takes_the_next_free():
+def test_automatic_port_keeps_the_previous_one_else_a_random_free_one():
     assert inst.choose_port(None, 7150, is_free=lambda p, h: True, is_eve=lambda p, h: False) == (7150, "沿用上次安装的端口")
-    busy = {7100, 7101}
-    port, reason = inst.choose_port(None, None, is_free=lambda p, h: p not in busy, is_eve=lambda p, h: False)
-    assert port == 7102 and "被占用" in reason
+
+    class Rng:
+        picks = iter([12345, 23456])
+
+        def randrange(self, a, b):
+            assert (a, b) == (10000, 30000)
+            return next(self.picks)
+    busy = {7100, 12345}
+    port, reason = inst.choose_port(None, None, is_free=lambda p, h: p not in busy, is_eve=lambda p, h: False, rng=Rng())
+    assert port == 23456 and "随机" in reason
     # previous port now taken by another program: pick another one, never the foreign one
     port, _ = inst.choose_port(None, 7100, is_free=lambda p, h: p not in busy, is_eve=lambda p, h: False)
-    assert port == 7102
+    assert 10000 <= port < 30000 and port not in busy
 
 
 def test_port_free_sees_a_real_listener():

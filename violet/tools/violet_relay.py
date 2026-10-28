@@ -7,9 +7,13 @@ mcp/docs/DEPLOY_RELAY.md recommends the relay on the Violet machine -- this modu
 
   install    download the newest relay of the violet-mcp GitHub release (file name from its SHA256SUMS.txt, checked
              against it), /opt/violet/mcp-relay/violet-mcp-relay, systemd unit violet-mcp-relay (the upstream unit:
-             DynamicUser, state in /var/lib/violet-mcp-relay), free ports (8443 / 8787 or the next free ones), open the
-             device port in the host firewall (recorded like Violet's own port: put back on every start, removed by
-             uninstall --purge). A relay unit that already exists (deployed by hand) is used as it is, never replaced.
+             DynamicUser, state in /var/lib/violet-mcp-relay), a random free device port in 20000-29999 (0.6.1: 8443
+             and the like are blocked by many providers and networks; --port chooses one) and 8787 (or the next free
+             one) on loopback for Violet, open the device port in the host firewall (recorded like Violet's own port:
+             put back on every start, removed by uninstall --purge). A relay unit that already exists (deployed by
+             hand) is used as it is, never replaced.
+  set-port   move the device port of a relay this module installed (random, or the one given); the device secret and
+             the certificate stay, so the phone only needs the new address.
   export     what the phone needs (relay address, device secret, certificate pin) and what Violet needs (the MCP URL)
              into <data>/control/mcp-relay.json, readable only by Violet's service account -- violet.service runs it
              as root before every start, so the Control Center can show the values with copy buttons. The relay's own
@@ -23,6 +27,7 @@ import hashlib
 import json
 import os
 import platform
+import random
 import re
 import shlex
 import shutil
@@ -37,7 +42,7 @@ UNIT_NAME = "violet-mcp-relay"
 UNIT_PATH = Path("/etc/systemd/system") / f"{UNIT_NAME}.service"
 DATA_DIR = Path("/var/lib/violet-mcp-relay")
 PRIVATE_DATA_DIR = Path("/var/lib/private/violet-mcp-relay")      # where DynamicUser keeps it
-DEVICE_PORTS = range(8443, 8500)
+DEVICE_PORTS = range(20000, 30000)     # picked at random (below Linux's ephemeral range 32768+)
 CLIENT_PORTS = range(8787, 8800)
 MARK = "# managed by Violet (tools/violet_relay.py)"
 MAX_BINARY = 64 * 1024 * 1024
@@ -113,7 +118,7 @@ def parse_unit(text: str) -> dict[str, Any]:
     return out
 
 
-def unit_text(binary: Path, device_port: int, client_port: int) -> str:
+def unit_text(binary: Path | str, device_port: int, client_port: int) -> str:
     """The upstream unit (mcp/relay/deploy/violet-mcp-relay.service) with Violet's paths and ports."""
     return "\n".join([
         "[Unit]", "Description=Violet MCP relay (phone <-> Violet, TLS)", MARK,
@@ -158,14 +163,46 @@ def _first_free(ports: range, host: str, port_free: Callable[[int, str], bool], 
     raise RelayError(f"端口 {ports.start}–{ports.stop - 1} 都被占用了")
 
 
+def _random_free(ports: range, host: str, port_free: Callable[[int, str], bool], taken: set[int] = frozenset(),
+                 rng: random.Random | None = None) -> int:
+    rng = rng or random.SystemRandom()
+    for _ in range(100):
+        port = rng.randrange(ports.start, ports.stop)
+        if port not in taken and port_free(port, host):
+            return port
+    return _first_free(ports, host, port_free, taken)
+
+
+def _device_port(requested: int | None, host: str, port_free: Callable[[int, str], bool], taken: set[int],
+                 rng: random.Random | None) -> int:
+    if requested is None:
+        return _random_free(DEVICE_PORTS, host, port_free, taken, rng)
+    if not 1024 <= requested <= 65535:
+        raise RelayError(f"端口 {requested} 不在 1024–65535 之间")
+    if requested in taken or not port_free(requested, host):
+        raise RelayError(f"端口 {requested} 已被占用（ss -ltnp | grep :{requested} 查看是谁）")
+    return requested
+
+
+def _wait_healthy(client_port: int, wait: float) -> bool:
+    deadline = time.monotonic() + wait
+    ok = health(client_port) is not None
+    while not ok and time.monotonic() < deadline:
+        time.sleep(1)
+        ok = health(client_port) is not None
+    return ok
+
+
 # ------------------------------------------------------------------------------------------------ commands
 
 def install(layout: Any, state: dict[str, Any], *, run: Callable[..., Any] = subprocess.run,
             fetch: Callable[[str, int], bytes] = _fetch, port_free: Callable[[int, str], bool],
             open_port: Callable[[int], tuple[list[dict], str | None]] | None = None,
             unit_path: Path = UNIT_PATH, machine: str | None = None, wait: float = HEALTH_WAIT,
-            public_ip: Callable[[], str | None] | None = None) -> dict[str, Any]:
-    """Returns the result; updates `state` (install.json) -- the caller saves it."""
+            public_ip: Callable[[], str | None] | None = None, port: int | None = None,
+            rng: random.Random | None = None) -> dict[str, Any]:
+    """Returns the result; updates `state` (install.json) -- the caller saves it. `port`: the device port (else a
+    random free one)."""
     if not shutil.which("systemctl") and run is subprocess.run:
         raise RelayError("这台服务器没有 systemd，中继需要手动部署（见 Violet MCP 的 DEPLOY_RELAY.md）")
     notes: list[str] = []
@@ -179,6 +216,8 @@ def install(layout: Any, state: dict[str, Any], *, run: Callable[..., Any] = sub
         arch = relay_arch(machine)
         if not arch:
             raise RelayError(f"不支持这种 CPU：{machine or platform.machine()}（只有 amd64 / arm64 的中继）")
+        device_port = _device_port(port, "0.0.0.0", free, set(), rng)       # before downloading: a bad --port stops here
+        client_port = _first_free(CLIENT_PORTS, "127.0.0.1", free, {device_port})
         sums = parse_sums(fetch(release_url("SHA256SUMS.txt"), 65536).decode("utf-8", "replace"))
         name, digest = pick_asset(sums, arch)
         data = fetch(release_url(name), MAX_BINARY)
@@ -191,10 +230,7 @@ def install(layout: Any, state: dict[str, Any], *, run: Callable[..., Any] = sub
         tmp.write_bytes(data)
         os.chmod(tmp, 0o755)
         os.replace(tmp, binary)
-        device_port = _first_free(DEVICE_PORTS, "0.0.0.0", free)
-        client_port = _first_free(CLIENT_PORTS, "127.0.0.1", free, {device_port})
-        if device_port != DEVICE_PORTS.start:
-            notes.append(f"端口 {DEVICE_PORTS.start} 被占用，手机入口改用 {device_port}")
+        notes.append(f"手机入口端口：{device_port}（" + ("按 --port 指定" if port else "随机选的空闲端口") + "）")
         unit_path.write_text(unit_text(binary, device_port, client_port), encoding="utf-8")
         run(["systemctl", "daemon-reload"], capture_output=True)
         done = run(["systemctl", "enable", "--now", f"{UNIT_NAME}.service"], capture_output=True, text=True)
@@ -205,11 +241,7 @@ def install(layout: Any, state: dict[str, Any], *, run: Callable[..., Any] = sub
                               "installed_at": int(time.time())}
         notes.append(f"已安装 {name}")
         info = parse_unit(unit_path.read_text(encoding="utf-8"))
-    deadline = time.monotonic() + wait
-    ok = health(info["client_port"]) is not None
-    while not ok and time.monotonic() < deadline:
-        time.sleep(1)
-        ok = health(info["client_port"]) is not None
+    ok = _wait_healthy(info["client_port"], wait)
     if not ok:
         notes.append(f"中继 {wait:.0f} 秒内没有响应健康检查：journalctl -u {UNIT_NAME} -n 30")
     if open_port is not None and (state.get("mcp_relay") or {}).get("managed"):
@@ -218,9 +250,57 @@ def install(layout: Any, state: dict[str, Any], *, run: Callable[..., Any] = sub
         state["firewall_rules"] = old + records
         if note:
             notes.append(note)
-    notes.append(f"云服务器的安全组（防火墙）也要放行 TCP {info['device_port']}，手机才能连上")
+    notes.append(f"云服务器的安全组（防火墙）也要放行 TCP {info['device_port']}，手机才能连上；"
+                 "连不上可以换一个端口：/opt/violet/violet mcp-relay set-port")
     result = export(layout, state, run=run, unit_path=unit_path, public_ip=public_ip)
     return {**result, "ok": True, "healthy": ok, "notes": notes}
+
+
+def set_port(layout: Any, state: dict[str, Any], *, run: Callable[..., Any] = subprocess.run,
+             port_free: Callable[[int, str], bool], port: int | None = None,
+             open_port: Callable[[int], tuple[list[dict], str | None]] | None = None,
+             remove_rule: Callable[[dict], None] | None = None, unit_path: Path = UNIT_PATH,
+             wait: float = HEALTH_WAIT, public_ip: Callable[[], str | None] | None = None,
+             rng: random.Random | None = None) -> dict[str, Any]:
+    """Moves the device port of a relay this module installed (the same binary, data folder, secret and certificate).
+    Returns the result; updates `state` -- the caller saves it."""
+    if not unit_path.exists():
+        raise RelayError("这台服务器上还没有中继。安装：/opt/violet/violet mcp-relay install")
+    info = parse_unit(unit_path.read_text(encoding="utf-8"))
+    if not info["managed"] or not info["binary"]:
+        raise RelayError("这个中继不是 Violet 安装的：请在它的 systemd 服务里改 -device-listen 的端口")
+    old = int(info["device_port"])
+    if port == old:
+        return {**export(layout, state, run=run, unit_path=unit_path, public_ip=public_ip), "ok": True,
+                "changed": False, "previous": old, "notes": [f"端口没有变化：{old}"]}
+    new = _device_port(port, "0.0.0.0", port_free, {old, int(info["client_port"])}, rng)
+    unit_path.write_text(unit_text(info["binary"], new, int(info["client_port"])), encoding="utf-8")   # as written
+    run(["systemctl", "daemon-reload"], capture_output=True)
+    done = run(["systemctl", "restart", f"{UNIT_NAME}.service"], capture_output=True, text=True)
+    if getattr(done, "returncode", 0) != 0:
+        raise RelayError("中继服务重启失败：" + (getattr(done, "stderr", "") or "")[-400:] +
+                         f"\n查看原因：journalctl -u {UNIT_NAME} -n 30")
+    notes: list[str] = []
+    rules = state.get("firewall_rules") or []
+    stale = [r for r in rules if int(r.get("port") or 0) == old]
+    for rule in stale:
+        if remove_rule is not None:
+            remove_rule(rule)
+    state["firewall_rules"] = [r for r in rules if r not in stale]
+    if open_port is not None:
+        records, note = open_port(new)
+        state["firewall_rules"] = [r for r in state["firewall_rules"] if r not in records] + records
+        if note:
+            notes.append(note)
+    relay_state = state.setdefault("mcp_relay", {"managed": True})
+    relay_state["device_port"] = new
+    ok = _wait_healthy(int(info["client_port"]), wait)
+    if not ok:
+        notes.append(f"中继 {wait:.0f} 秒内没有响应健康检查：journalctl -u {UNIT_NAME} -n 30")
+    notes += [f"手机入口端口：{old} → {new}。设备密钥和证书指纹没有变，手机上只要改中继地址",
+              f"云服务器的安全组（防火墙）要放行 TCP {new}"]
+    result = export(layout, state, run=run, unit_path=unit_path, public_ip=public_ip)
+    return {**result, "ok": True, "changed": True, "previous": old, "healthy": ok, "notes": notes}
 
 
 def export(layout: Any, state: dict[str, Any], *, run: Callable[..., Any] = subprocess.run,

@@ -130,6 +130,8 @@ def list_models(chat_agent) -> dict[str, Any]:
         kind, message = classify_error(exc)
         if isinstance(exc, AttributeError):
             kind, message = "unsupported", "这个接口不支持列出模型，请直接填写模型名"
+        elif kind == "not_found":       # no model is involved here: a 404 is the address (or no /models on it)
+            message = "接口返回 404：多半是 API 地址不对（一般以 /v1 结尾）；地址没错的话，就是这个服务不支持列出模型"
         return {"ok": False, "kind": kind, "message": message, "models": []}
 
 
@@ -161,7 +163,8 @@ def checklist(*, admin_store=None, agents=None, runtime=None, data_dir=None, vio
     if not llm_configured():
         items.append(_item("model_service", "模型服务", "todo", "填写 API 地址和 API Key", "model", True, "model-api"))
     elif not test or test.get("settings") != _settings_fingerprint():
-        items.append(_item("model_service", "模型服务", "warn", "已填写，还没有用当前设置测试过", "model", True, "model-api"))
+        items.append(_item("model_service", "模型服务", "warn", "已填写，还没有测试过对话（选好模型后点“保存模型并测试对话”）",
+                           "model", True, "model-agents"))
     elif test.get("ok"):
         items.append(_item("model_service", "模型服务", "ok",
                            f"测试通过（{test.get('model')}，{test.get('latency_ms')} 毫秒）", "model", True, "model-api"))
@@ -190,12 +193,13 @@ def checklist(*, admin_store=None, agents=None, runtime=None, data_dir=None, vio
         if live and bound:
             items.append(_item("channels", "聊天渠道", "ok", "已连接：" + "、".join(c["label"] for c in live), "channels", True, "ch-list"))
         elif live:
+            # the channel's own card shows "最后一步：绑定你的账号" with the binding code button
             items.append(_item("channels", "聊天渠道", "todo", "渠道已连接，但还没有绑定你的账号（生成绑定码）",
-                               "channels", True, "ch-pair-box"))
+                               "channels", True, "ch-card-" + live[0]["id"]))
         else:
             needs = [c["label"] for c in rows if c["status"].get("state") == "needs_login"]
-            detail = ("扫码登录：" + "、".join(needs)) if needs else "还没有可用的聊天渠道（扫码登录微信，或添加 Telegram / QQ）"
-            items.append(_item("channels", "聊天渠道", "todo", detail, "channels", True, "ch-list" if needs else "ch-add-box"))
+            detail = ("扫码登录：" + "、".join(needs)) if needs else "还没有可用的聊天渠道（扫码登录微信，或使用 QQ / Telegram）"
+            items.append(_item("channels", "聊天渠道", "todo", detail, "channels", True, "ch-list"))
     # 5. persona and profile (the shipped persona works as is)
     items.append(_item("persona", "人设与用户档案", "optional",
                        "已使用默认人设；可以在“人设与生活”页查看，用户档案会在聊天中逐步建立", "persona", False))

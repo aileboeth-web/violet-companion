@@ -184,6 +184,21 @@ if [ "$MODE" = "systemd" ]; then
     [ "$(curl -sk --max-time 5 -o /dev/null -w '%{http_code}' "https://$LANIP:$DEV_PORT/device")" != "000" ] \
       || fail "device port $DEV_PORT not opened"
   fi
+  # 0.6.1: move the device port (a random new one); secret and certificate stay, the rule moves with it
+  SECRET_BEFORE="$(cat /var/lib/violet-mcp-relay/device.secret)"
+  MOVED="$("$ROOT/violet" mcp-relay set-port --json)" || { echo "$MOVED"; fail "mcp-relay set-port"; }
+  NEW_DEV="$(echo "$MOVED" | json 'd["device_port"]')"
+  [ "$NEW_DEV" != "$DEV_PORT" ] || fail "set-port kept port $DEV_PORT"
+  for _ in $(seq 1 20); do curl -fs "$CLIENT/health" >/dev/null 2>&1 && break; sleep 1; done
+  systemctl is-active --quiet violet-mcp-relay || fail "relay not active after set-port"
+  [ "$(cat /var/lib/violet-mcp-relay/device.secret)" = "$SECRET_BEFORE" ] || fail "set-port changed the device secret"
+  python3 -c "import json;d=json.load(open('$EXP'));assert d['device_port']==$NEW_DEV, d" || fail "pairing values not re-exported"
+  if [ "$STRICT" = "1" ]; then
+    [ "$(curl -sk --max-time 5 -o /dev/null -w '%{http_code}' "https://$LANIP:$NEW_DEV/device")" != "000" ] \
+      || fail "new device port $NEW_DEV not opened"
+  fi
+  pass "phone relay: set-port $DEV_PORT -> $NEW_DEV (secret kept, pairing values re-exported)"
+  DEV_PORT="$NEW_DEV"
   rm -f "$EXP"
   systemctl restart violet
   for _ in $(seq 1 30); do curl -fsSk "$SCHEME://127.0.0.1:$PORT/healthz" 2>/dev/null | grep -q violet && break; sleep 1; done

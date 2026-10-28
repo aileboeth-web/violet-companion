@@ -55,7 +55,7 @@ from typing import Any, Callable
 SOURCE_ROOT = Path(__file__).resolve().parent.parent          # the "violet" folder this installer came with
 SERVICE_NAME = "violet"
 DEFAULT_PORT = 7100
-PORT_RANGE = range(7100, 7200)
+PORT_RANGE = range(10000, 30000)     # 0.6.1: a new installation takes a random free port here (1Panel style)
 MIN_PYTHON = (3, 11)          # the tested version; 3.10 lacks builtins Violet uses (BaseExceptionGroup in ai/mcp.py)
 MIN_DISK_MB = 1024
 MIN_MEMORY_MB = 512
@@ -373,9 +373,11 @@ def _host_for_url(host: str) -> str:
 
 def choose_port(requested: int | None, previous: int | None, host: str = "127.0.0.1",
                 is_free: Callable[[int, str], bool] = port_free,
-                is_eve: Callable[[int, str], bool] = lambda p, h: probe_eve(p, h) is not None) -> tuple[int, str]:
+                is_eve: Callable[[int, str], bool] = lambda p, h: probe_eve(p, h) is not None,
+                rng: Any = None) -> tuple[int, str]:
     """(port, reason). A port given with --port must be usable (free, or this Violet already on it) -- never silently
-    replaced. Otherwise the port of the previous install is kept, then 7100, then the next free one in 7100-7199."""
+    replaced. Otherwise the port of the previous install is kept, else a random free one in 10000-29999 (well-known
+    ports like 8443 are blocked by many providers and scanned more; the installer prints the address anyway)."""
     if requested is not None:
         if not 1024 <= requested <= 65535:
             raise InstallError(f"端口 {requested} 不在 1024–65535 之间")
@@ -388,9 +390,14 @@ def choose_port(requested: int | None, previous: int | None, host: str = "127.0.
     if previous:
         if is_free(previous, host) or is_eve(previous, host):
             return previous, "沿用上次安装的端口"
-    for port in [DEFAULT_PORT, *PORT_RANGE]:
+    rng = rng or secrets.SystemRandom()
+    for _ in range(100):
+        port = rng.randrange(PORT_RANGE.start, PORT_RANGE.stop)
         if is_free(port, host):
-            return port, "默认端口" if port == DEFAULT_PORT else f"{DEFAULT_PORT} 被占用，自动选了下一个空闲端口"
+            return port, "随机选的空闲端口"
+    for port in PORT_RANGE:
+        if is_free(port, host):
+            return port, "随机选的空闲端口"
     raise InstallError(f"{PORT_RANGE.start}–{PORT_RANGE.stop - 1} 都被占用了；用 --port 指定一个空闲端口")
 
 
@@ -1923,14 +1930,15 @@ def _relay_module():
     return violet_relay
 
 
-RELAY_ACTIONS = ("install", "export", "status", "uninstall")
+RELAY_ACTIONS = ("install", "export", "status", "uninstall", "set-port")
 
 
 def mcp_relay(opts: Options, action: str, run: Callable[..., Any] = subprocess.run) -> dict[str, Any]:
-    """`violet mcp-relay install | export | status | uninstall` (tools/violet_relay.py)."""
+    """`violet mcp-relay install | export | status | uninstall | set-port` (tools/violet_relay.py). opts.port: the
+    device port for install / set-port (else a random free one)."""
     relay = _relay_module()
     if action not in RELAY_ACTIONS:
-        raise InstallError("用法：violet mcp-relay install | export | status | uninstall")
+        raise InstallError("用法：violet mcp-relay install | export | status | uninstall | set-port [端口]")
     layout = Layout(opts.root)
     state = load_state(layout)
     if not state:
@@ -1939,8 +1947,13 @@ def mcp_relay(opts: Options, action: str, run: Callable[..., Any] = subprocess.r
         raise InstallError("中继要以 root 在 Linux 上安装（/opt/violet/violet 会自动切换到 root）")
     try:
         if action == "install":
-            result = relay.install(layout, state, run=run, port_free=port_free,
+            result = relay.install(layout, state, run=run, port_free=port_free, port=opts.port,
                                    open_port=lambda p: open_port_everywhere(p, run), public_ip=public_ip)
+            save_state(layout, state)
+        elif action == "set-port":
+            result = relay.set_port(layout, state, run=run, port_free=port_free, port=opts.port,
+                                    open_port=lambda p: open_port_everywhere(p, run),
+                                    remove_rule=lambda r: remove_rule(r, run), public_ip=public_ip)
             save_state(layout, state)
         elif action == "export":            # violet.service runs this before every start: no network lookups
             result = relay.export(layout, state, run=run)
@@ -1961,7 +1974,7 @@ def render_relay(result: dict[str, Any], action: str) -> str:
     if not result.get("installed"):
         return "这台服务器上还没有中继。安装：/opt/violet/violet mcp-relay install"
     lines = ["", "Violet MCP 中继", "-" * 40]
-    if action == "install":
+    if action in ("install", "set-port") and "healthy" in result:
         lines.append("状态：" + ("运行正常" if result.get("healthy") else "没有通过健康检查"))
     elif "healthy" in result:
         lines.append("状态：" + ("运行正常" if result["healthy"] else "没有响应") +
@@ -2091,7 +2104,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--update-repo", help="install: GitHub owner/repo to update from (a fork)")
     parser.add_argument("--check", action="store_true", help="update: only report whether a newer release exists")
     parser.add_argument("archive", nargs="?", help="restore: the backup file; set-port: the new port; "
-                                                   "mcp-relay: install | export | status | uninstall")
+                                                   "mcp-relay: install | export | status | uninstall | set-port")
+    parser.add_argument("value", nargs="?", help="mcp-relay set-port: the new device port (else a random one)")
     parser.add_argument("--entrance", help="reset-entrance: this value instead of a random one")
     parser.add_argument("--no-entrance", action="store_true", help="reset-entrance: remove the security entrance")
     parser.add_argument("--root", type=Path, default=None)
@@ -2166,6 +2180,13 @@ def main(argv: list[str] | None = None) -> int:
             result = firewall_apply(Layout(root))
         elif args.command == "mcp-relay":
             action = args.archive or "status"
+            if args.value is not None:
+                if action not in ("install", "set-port"):
+                    raise InstallError(f"多余的参数：{args.value}")
+                try:
+                    opts.port = int(args.value)
+                except ValueError:
+                    raise InstallError(f"端口要是数字：{args.value}") from None
             result = mcp_relay(opts, action)
             if not args.json:
                 print(render_relay(result, action))

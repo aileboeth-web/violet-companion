@@ -58,7 +58,9 @@
         r.formal_certificate ? valueRow("证书指纹", "", { help: "中继用的是正式证书，手机上的证书指纹留空。" })
           : valueRow("证书指纹", r.pin, { help: r.pin ? "" : "中继还没有生成证书（第一次启动后才有）：等几秒再点刷新。" }),
         h("p", { class: "note", text: "然后点“保存并应用”，打开“启用中继连接”，回到主页点“启动”。上面的状态变成“手机已连接”就好了。" +
-          ` 连不上时检查云服务器安全组是否放行了 TCP ${r.device_port}。` })),
+          ` 连不上时先检查云服务器安全组是否放行了 TCP ${r.device_port}；还不行，可能是这个端口在路上被拦了，在服务器上运行下面的命令换一个随机端口（密钥和指纹不变，手机上只改中继地址）：` }),
+        d.set_port_command && r.managed ? h("div", { class: "kv" }, h("code", { class: "v", text: d.set_port_command }),
+          h("span", { class: "kv-actions" }, h("button", { type: "button", text: "复制", onclick: () => copyText(d.set_port_command) }))) : null),
       step(3, "把手机的访问令牌填到这里",
         h("p", { class: "note", text: "手机上打开“安全”页，复制访问令牌，粘贴到下面。Violet 会添加名为 android-phone 的工具服务器，并按模板把这些工具设为只读、交给 Chat 使用。" }),
         h("div", { class: "phone-token" }, token, h("button", { type: "button", text: server ? "替换令牌并检查" : "连接", onclick: async () => {

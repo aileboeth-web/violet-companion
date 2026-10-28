@@ -12,13 +12,13 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 
 装的是 GitHub Releases 上最新发布的版本。选项放在 `-s --` 后面，例如 `| bash -s -- --access public`。自己发布到别的地址时：`tools/make_release.py --base <发布地址>` 生成发布文件，`release.json` 里的 `install_command` 就是对应的命令。
 
-安装程序会依次：找到或自动安装 Python 3.11+（root 时用系统包管理器；系统自带的版本太旧时，例如 Ubuntu 22.04，再装 python3.11）→ 下载程序并核对 SHA-256 → 检查系统（venv、磁盘、内存、目录权限）→ 复制程序到 `/opt/violet/app` → 创建虚拟环境并安装依赖 → 生成配置 `config/violet.env` 和数据目录 → 选择端口（默认 7100，被占用就自动选下一个空闲的）→ 生成随机的安全入口、用户名和一次性的初始密码 → 创建系统用户 `violet`、注册 systemd 服务（崩溃自动重启、开机自启）→ 启动并做健康检查 → 输出后台地址、用户名、初始密码和网络检查结果。
+安装程序会依次：找到或自动安装 Python 3.11+（root 时用系统包管理器；系统自带的版本太旧时，例如 Ubuntu 22.04，再装 python3.11）→ 下载程序并核对 SHA-256 → 检查系统（venv、磁盘、内存、目录权限）→ 复制程序到 `/opt/violet/app` → 创建虚拟环境并安装依赖 → 生成配置 `config/violet.env` 和数据目录 → 选择端口（新装时在 10000–29999 里随机选一个空闲端口，重装 / 升级沿用原来的端口；`--port` 可以指定）→ 生成随机的安全入口、用户名和一次性的初始密码 → 创建系统用户 `violet`、注册 systemd 服务（崩溃自动重启、开机自启）→ 启动并做健康检查 → 输出后台地址、用户名、初始密码和网络检查结果。
 
 安装完成时会显示类似这样的信息（和 1Panel 一样，地址最后一段是安全入口）：
 
 ```
 管理后台地址：
-  https://203.0.113.10:7100/k3x9q2m7wz8a
+  https://203.0.113.10:21473/k3x9q2m7wz8a
   安全入口：/k3x9q2m7wz8a（地址里必须带上它，否则所有页面都显示 404）
 用户名：violet_q7m2kx
 密码：Xb7…（随机生成的 20 位密码，只显示这一次；可以一直用，也可以在后台“账号安全”里改）
@@ -32,10 +32,10 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 
 1. 打开输出里的后台地址（带安全入口），用用户名和密码登录。密码是随机生成的 20 位，可以一直用，也可以在“账号安全”页改；用户名和安全入口也在那里改。
 2. “开始”页列出还没完成的事，点哪一项就直接跳到要填的地方。
-3. “模型服务”页：填 API 地址和 Key，点“保存并测试”；点“从上游获取模型”，给每个 Agent 从列表里选模型。
-4. “聊天渠道”页：扫码登录微信，或者添加 QQ 官方机器人（AppID + AppSecret，不需要 NapCat）/ Telegram / QQ（OneBot v11，可选），用绑定码绑定你自己的账号。
+3. “模型服务”页：第 1 步填 API 地址和 Key，点“保存并测试连接”（只取一次模型列表，不调用模型）；第 2 步从列表里选模型（“全部 Agent 都用”一次填好），点“保存模型并测试对话”。
+4. “聊天渠道”页：微信、QQ、Telegram 三张卡片并列，用哪个点哪个——微信扫码；QQ 点“使用 QQ”，按步骤去 [q.qq.com](https://q.qq.com/#/) 建机器人、填 AppID 和 AppSecret；Telegram 点“使用 Telegram”，找 [@BotFather](https://t.me/BotFather) 要 Token。QQ / Telegram 连上后在卡片里生成绑定码，用你自己的账号发给机器人。NapCat（OneBot v11）等其他接入方式在“更多设置”里。
 5. “工具与手机”页（可选）：
-   - 手机 MCP：在服务器上运行 `/opt/violet/violet mcp-relay install` 装好中继，页面上会列出手机 App 要填的中继地址、设备密钥和证书指纹（都有复制按钮）；再把手机“安全”页的访问令牌粘贴回来就连上了。云服务器要在安全组放行中继端口（默认 TCP 8443）。
+   - 手机 MCP：在服务器上运行 `/opt/violet/violet mcp-relay install` 装好中继，页面上会列出手机 App 要填的中继地址、设备密钥和证书指纹（都有复制按钮）；再把手机“安全”页的访问令牌粘贴回来就连上了。中继的手机端口是安装时随机选的（20000–29999，页面上显示实际端口），云服务器要在安全组放行它。手机连不上时运行 `/opt/violet/violet mcp-relay set-port` 换一个随机端口（或 `set-port 端口号` 指定），设备密钥和证书指纹不变，手机上只改中继地址。中继要单独装一次：重装 / 升级 Violet 会保留已经装好的中继，不会自动安装新的；`uninstall --purge` 会把它一起删掉。
    - 其他 MCP 服务器：添加后给工具分类（只读 / 写入 / 高风险 / 拒绝）、授权给 Agent、点“测试”。
 6. “诊断”页：哪里不正常、为什么、怎么处理；能安全自动修复的有按钮。
 
@@ -47,7 +47,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 |---|---|
 | `--access public`（root 安装的默认） | 公网和局域网都能打开：`https://服务器公网IP:端口/安全入口`，强制 HTTPS（自签名证书，浏览器会提示“不安全”，核对安装输出里的证书指纹后继续访问）。安装时自动装 openssl、查询公网 IP（和 1Panel 一样问外部服务）、在本机所有防火墙里放行端口（加 `--keep-firewall` 不动防火墙，见下文）。云服务器还要在控制台安全组里放行这个端口 |
 | `--access lan` | 只给局域网用，同样是 HTTPS；本机防火墙只给出放行命令 |
-| `--access local`（普通用户 `--user-install` 的默认） | 只有服务器本机。远程管理：`ssh -L 7100:127.0.0.1:7100 用户@服务器`，再在自己电脑打开 `http://127.0.0.1:7100/安全入口` |
+| `--access local`（普通用户 `--user-install` 的默认） | 只有服务器本机。远程管理：`ssh -L 端口:127.0.0.1:端口 用户@服务器`，再在自己电脑打开 `http://127.0.0.1:端口/安全入口` |
 | `--access proxy` | 你自己的 HTTPS 反向代理（Caddy / Nginx，同一台机器）转发到 127.0.0.1 |
 
 **本机防火墙**（公网访问时自动处理）：
@@ -110,7 +110,7 @@ bash install.sh upgrade       # 或者：在新版本的程序目录里执行
 /opt/violet/violet mcp-relay uninstall  # 删除由 Violet 安装的中继（手工部署的不动）
 ```
 
-手机 MCP 的中继：已经按 Violet MCP 的 `DEPLOY_RELAY.md` 手工装过 `violet-mcp-relay` 服务的，`mcp-relay install` 直接使用它，不重新安装；端口 8443 / 8787 被占用时自动换下一个空闲端口，后台页面显示的就是实际端口。设备密钥只保存在中继自己的目录和 Violet 的 `data/control/mcp-relay.json`（只有 violet 账号能读），后台“工具与手机”页可以查看和复制。
+手机 MCP 的中继：已经按 Violet MCP 的 `DEPLOY_RELAY.md` 手工装过 `violet-mcp-relay` 服务的，`mcp-relay install` 直接使用它，不重新安装；手机端口在 20000–29999 里随机选（`mcp-relay install 端口号` 可以指定），给 Violet 用的本机端口是 8787（被占用时换下一个），后台页面显示的就是实际端口；`mcp-relay set-port [端口号]` 只能改 Violet 装的中继。设备密钥只保存在中继自己的目录和 Violet 的 `data/control/mcp-relay.json`（只有 violet 账号能读），后台“工具与手机”页可以查看和复制。
 
 重新运行 `install.sh` 就是修复：配置、数据、密钥、端口、用户名、安全入口和密码都保留。忘记地址或用户名：`/opt/violet/violet info`；忘记密码：`/opt/violet/violet reset-password`。
 

@@ -52,26 +52,26 @@
 
   <section id="tab-model" class="tab">
     <h2>模型服务</h2>
-    <p class="note">Violet 用的大模型接口（OpenAI 兼容）。先填地址和 API Key，再从服务上取回模型列表，给每个 Agent 选一个模型。</p>
+    <p class="note">Violet 用的大模型接口（OpenAI 兼容）。第 1 步填地址和 API Key 并测试连接；第 2 步从列表里选模型，保存后测试一次对话。</p>
     <div class="card" id="model-api">
       <h3>1. 接口地址和 API Key</h3>
       <form id="model-api-form" class="stack" autocomplete="off">
         <label>API 地址 <input id="model-url" maxlength="300" placeholder="https://api.example.com/v1" autocomplete="off"></label>
         <label>API Key <input id="model-key" type="password" maxlength="512" autocomplete="new-password"></label>
         <p class="err" id="model-api-error"></p>
-        <div class="row"><button type="submit">保存并测试</button><span id="model-test"></span></div>
+        <div class="row"><button type="submit">保存并测试连接</button><span id="model-test"></span></div>
       </form>
-      <p class="note">测试会用 Chat 的模型真实调用一次（很短的请求），只记录成功与否、耗时和错误类型。</p>
+      <p class="note">测试连接只向接口要一次模型列表，不调用任何模型，所以和下面选的模型无关；成功后列表会自动填到第 2 步。</p>
     </div>
     <div class="card" id="model-agents">
       <div class="row"><h3>2. 每个 Agent 用哪个模型</h3>
-        <button class="ghost" id="model-fetch" type="button">从上游获取模型</button></div>
-      <p class="note" id="model-fetch-note">点“从上游获取模型”，从你的接口取回可用的模型，然后直接在下面选。</p>
-      <div class="row" id="model-all-row"><span>全部 Agent 用</span><span id="model-all-slot"></span>
-        <button class="ghost" id="model-all-apply" type="button">应用到全部</button></div>
+        <button class="ghost" id="model-fetch" type="button">重新获取模型列表</button></div>
+      <p class="note" id="model-fetch-note">先完成第 1 步，模型列表会自动出现在这里。</p>
+      <div class="row" id="model-all-row"><span>全部 Agent 都用</span><span id="model-all-slot"></span></div>
       <div id="model-rows" class="model-rows"></div>
       <p class="err" id="model-error"></p>
-      <div class="row"><button id="model-save" type="button">保存并测试</button><span id="model-save-test"></span></div>
+      <div class="row"><button id="model-save" type="button">保存模型并测试对话</button><span id="model-save-test"></span></div>
+      <p class="note">测试对话用 Chat 的模型真实调用一次（很短的请求），只记录成功与否、耗时和错误类型。</p>
     </div>
     <details class="card" id="model-advanced"><summary>超时与重试</summary>
       <div id="model-adv-rows"></div>
@@ -141,31 +141,30 @@
   </section>
 
   <section id="tab-channels" class="tab">
-    <h2>聊天渠道</h2>
-    <nav class="jump" id="ch-jump" aria-label="渠道"></nav>
-    <p class="note">Violet 在哪些聊天平台上和你聊天。所有渠道共用同一个 Violet（同一份记忆、档案和人设）；只有绑定到你的账号发来的消息才会被处理，陌生人的消息不回复、不保存内容。
-      修改立即生效，不需要重启。凭据只能替换，不能查看。</p>
-    <div class="row"><label>主动消息发到 <select id="ch-proactive"></select></label>
-      <button class="ghost" id="ch-refresh">刷新状态</button></div>
-    <div id="ch-list" class="cards list"></div>
-    <div id="ch-add-box"><h3>添加渠道</h3>
-    <form id="ch-add" class="stack" autocomplete="off">
-      <div class="filters">
-        <label>类型 <select id="ch-add-type"></select></label>
-        <label>标识 <input id="ch-add-id" maxlength="31" placeholder="例如 telegram" required></label>
-        <label class="grow">名称 <input id="ch-add-label" maxlength="30" placeholder="后台显示的名字（可选）"></label>
+    <div class="row"><h2>聊天渠道</h2><button class="ghost" id="ch-refresh">刷新状态</button></div>
+    <p class="note">选一个或几个平台和 Violet 聊天，它们共用同一个 Violet（同一份记忆和人设）。只有你自己的账号发来的消息才会被处理，陌生人的消息不回复、不保存。</p>
+    <div id="ch-list" class="platforms"></div>
+    <details class="card" id="ch-more"><summary>更多设置（主动消息、其他接入方式、修改记录）</summary>
+      <div class="stack-wide">
+        <label class="inline">主动消息发到 <select id="ch-proactive"></select></label>
+        <div id="ch-extra" class="cards list"></div>
+        <div id="ch-add-box"><h3>其他接入方式</h3>
+        <p class="note">一般用不到：比如用 NapCat（OneBot v11）接入 QQ，或者再加一个 QQ / Telegram 机器人。</p>
+        <form id="ch-add" class="stack" autocomplete="off">
+          <div class="filters">
+            <label>类型 <select id="ch-add-type"></select></label>
+            <label>标识 <input id="ch-add-id" maxlength="31" placeholder="例如 telegram2" required></label>
+            <label class="grow">名称 <input id="ch-add-label" maxlength="30" placeholder="后台显示的名字（可选）"></label>
+          </div>
+          <p class="note" id="ch-add-help"></p>
+          <div id="ch-add-fields" class="stack"></div>
+          <p class="err" id="ch-add-error"></p>
+          <div class="row"><button type="submit">添加并启动</button></div>
+        </form></div>
+        <div id="ch-history-box"><h3>修改记录</h3>
+        <div id="ch-history" class="cards list"></div></div>
       </div>
-      <p class="note" id="ch-add-help"></p>
-      <div id="ch-add-fields" class="stack"></div>
-      <p class="err" id="ch-add-error"></p>
-      <div class="row"><button type="submit">添加并启动</button></div>
-    </form></div>
-    <div id="ch-pair-box"><h3>绑定新账号</h3>
-    <p class="note">生成一次性绑定码（10 分钟有效），然后用你自己的账号给 Violet 发送“/bind 绑定码”。也可以在上面的联系人列表里直接批准。</p>
-    <div class="row"><select id="ch-pair-channel"></select><button class="ghost" id="ch-pair">生成绑定码</button>
-      <span class="pill" id="ch-pair-code"></span></div></div>
-    <div id="ch-history-box"><h3>修改记录</h3>
-    <div id="ch-history" class="cards list"></div></div>
+    </details>
   </section>
 
   <section id="tab-tools" class="tab">

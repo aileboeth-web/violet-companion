@@ -81,21 +81,88 @@ def test_install_downloads_checks_registers_opens_the_port_and_exports(tmp_path,
     fetch, asked = _downloads(b"\x7fELF relay")
     runs, opened = Runs(), []
     monkeypatch.setattr(relay, "health", lambda port, **kw: {"ok": True})
-    busy = {8443}
+
+    class Rng:                                                 # the first random pick is taken, the second is free
+        picks = iter([23456, 24567])
+
+        def randrange(self, a, b):
+            assert (a, b) == (20000, 30000)
+            return next(self.picks)
+    busy = {23456}
     result = relay.install(layout, state, run=runs, fetch=fetch, port_free=lambda p, host: p not in busy,
                            open_port=lambda p: (opened.append(p) or [{"tool": "iptables", "port": p}], "已放行"),
-                           unit_path=unit, machine="x86_64", wait=0)
+                           unit_path=unit, machine="x86_64", wait=0, rng=Rng())
     binary = layout.root / "mcp-relay" / "violet-mcp-relay"
     assert binary.read_bytes() == b"\x7fELF relay" and asked[0].startswith("https://github.com/aileboeth-web/violet-mcp/")
     info = relay.parse_unit(unit.read_text(encoding="utf-8"))
-    assert info["managed"] and info["device_port"] == 8444 and info["client_port"] == 8787     # 8443 was taken
+    assert info["managed"] and info["device_port"] == 24567 and info["client_port"] == 8787
     assert ["systemctl", "enable", "--now", "violet-mcp-relay.service"] in runs.calls
-    assert opened == [8444] and state["firewall_rules"] == [{"tool": "iptables", "port": 8444}]
+    assert opened == [24567] and state["firewall_rules"] == [{"tool": "iptables", "port": 24567}]
     assert state["mcp_relay"]["managed"] and result["ok"] and result["healthy"]
-    assert any("8443 被占用" in n for n in result["notes"]) and any("安全组" in n for n in result["notes"])
+    assert any("随机" in n for n in result["notes"]) and any("安全组" in n and "set-port" in n for n in result["notes"])
     exported = json.loads(relay.export_path(layout.data).read_text(encoding="utf-8"))
-    assert exported["device_url"] == "wss://203.0.113.7:8444/device" and exported["client_url"] == "http://127.0.0.1:8787/mcp"
+    assert exported["device_url"] == "wss://203.0.113.7:24567/device" and exported["client_url"] == "http://127.0.0.1:8787/mcp"
     assert "device_secret" not in result                       # the CLI result never carries the secret
+
+
+def test_install_with_a_chosen_port_refuses_a_busy_one_before_downloading(tmp_path):
+    layout, unit = Layout(tmp_path / "violet"), tmp_path / "relay.service"
+
+    def no_fetch(url, limit):
+        raise AssertionError("nothing is downloaded")
+    with pytest.raises(relay.RelayError, match="已被占用"):
+        relay.install(layout, {}, run=Runs(), fetch=no_fetch, port_free=lambda p, h: p != 9443, unit_path=unit,
+                      machine="x86_64", wait=0, port=9443)
+    with pytest.raises(relay.RelayError, match="1024"):
+        relay.install(layout, {}, run=Runs(), fetch=no_fetch, port_free=lambda p, h: True, unit_path=unit,
+                      machine="x86_64", wait=0, port=80)
+    assert not unit.exists()
+
+
+def test_set_port_moves_our_relay_keeps_its_secret_and_moves_the_firewall_rule(tmp_path, monkeypatch):
+    """0.6.1: the user's relay on 8443 was unreachable (blocked on the way); a new port fixes it without re-pairing."""
+    layout, unit = Layout(tmp_path / "violet"), tmp_path / "relay.service"
+    unit.write_text(relay.unit_text("/opt/violet/mcp-relay/violet-mcp-relay", 8443, 8787), encoding="utf-8")
+    monkeypatch.setattr(relay, "health", lambda port, **kw: {"ok": True})
+    state = {"public_ip": "203.0.113.7", "mcp_relay": {"managed": True, "device_port": 8443},
+             "firewall_rules": [{"tool": "ufw", "port": 7101}, {"tool": "ufw", "port": 8443}]}
+    runs, removed, opened = Runs(), [], []
+    result = relay.set_port(layout, state, run=runs, port_free=lambda p, h: True, port=25000,
+                            open_port=lambda p: (opened.append(p) or [{"tool": "ufw", "port": p}], None),
+                            remove_rule=removed.append, unit_path=unit, wait=0)
+    info = relay.parse_unit(unit.read_text(encoding="utf-8"))
+    assert info["managed"] and info["device_port"] == 25000 and info["client_port"] == 8787
+    assert info["binary"] == "/opt/violet/mcp-relay/violet-mcp-relay"
+    assert ["systemctl", "restart", "violet-mcp-relay.service"] in runs.calls
+    assert removed == [{"tool": "ufw", "port": 8443}] and opened == [25000]
+    assert state["firewall_rules"] == [{"tool": "ufw", "port": 7101}, {"tool": "ufw", "port": 25000}]
+    assert state["mcp_relay"]["device_port"] == 25000
+    assert result["changed"] and result["previous"] == 8443 and result["device_url"] == "wss://203.0.113.7:25000/device"
+    assert any("8443 → 25000" in n for n in result["notes"])
+    again = relay.set_port(layout, state, run=Runs(), port_free=lambda p, h: True, port=25000, unit_path=unit, wait=0)
+    assert again["changed"] is False
+    # without a port: a random free one in 20000-29999, never the current one
+    result = relay.set_port(layout, state, run=Runs(), port_free=lambda p, h: True, unit_path=unit, wait=0)
+    assert 20000 <= result["device_port"] < 30000 and result["device_port"] != 25000
+
+
+def test_set_port_leaves_a_hand_deployed_relay_alone(tmp_path):
+    layout, unit = Layout(tmp_path / "violet"), tmp_path / "relay.service"
+    with pytest.raises(relay.RelayError, match="还没有中继"):
+        relay.set_port(layout, {}, run=Runs(), port_free=lambda p, h: True, unit_path=unit, wait=0)
+    unit.write_text(UPSTREAM_UNIT, encoding="utf-8")
+    with pytest.raises(relay.RelayError, match="不是 Violet 安装的"):
+        relay.set_port(layout, {}, run=Runs(), port_free=lambda p, h: True, unit_path=unit, wait=0)
+    assert unit.read_text(encoding="utf-8") == UPSTREAM_UNIT
+
+
+def test_cli_mcp_relay_set_port_takes_the_port_as_an_argument(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(inst, "mcp_relay", lambda opts, action: seen.update(action=action, port=opts.port) or
+                        {"ok": True, "installed": True, "notes": []})
+    assert inst.main(["mcp-relay", "set-port", "23456", "--root", str(tmp_path), "--json"]) == 0
+    assert seen == {"action": "set-port", "port": 23456}
+    assert inst.main(["mcp-relay", "status", "123", "--root", str(tmp_path), "--json"]) == 2
 
 
 def test_a_download_that_does_not_match_its_checksum_is_not_installed(tmp_path):
@@ -256,7 +323,8 @@ def test_pasting_the_phone_token_adds_the_android_phone_server(made, env_guard, 
 def test_start_page_items_link_to_the_exact_place(made):
     items = _admin(made).get("/api/control/setup").get_json()["data"]["items"]
     by_id = {i["id"]: i for i in items}
-    assert (by_id["model_service"]["tab"], by_id["model_service"]["anchor"]) == ("model", "model-api")
+    # filled in but no chat test yet: that test is step 2 of the model page (0.6.1)
+    assert (by_id["model_service"]["tab"], by_id["model_service"]["anchor"]) == ("model", "model-agents")
     assert (by_id["agent_models"]["tab"], by_id["agent_models"]["anchor"]) == ("model", "model-agents")
     assert by_id["tools"]["anchor"] == "phone-mcp" and by_id["features"]["anchor"] == "set-g-proactive"
     html = (ROOT / "wx_ilink_py" / "templates" / "control.html").read_text(encoding="utf-8")
@@ -267,13 +335,13 @@ def test_start_page_items_link_to_the_exact_place(made):
 
 def test_pages_are_reorganised_and_build_no_html():
     html = (ROOT / "wx_ilink_py" / "templates" / "control.html").read_text(encoding="utf-8")
-    for needle in ('data-tab="model"', 'id="tab-model"', 'id="model-fetch"', 'id="set-jump"', 'id="ch-jump"',
-                   'id="tools-jump"', 'id="phone-mcp"', 'id="ch-add-box"', 'id="ch-pair-box"', 'id="mcp-add-box"',
+    for needle in ('data-tab="model"', 'id="tab-model"', 'id="model-fetch"', 'id="set-jump"', 'id="ch-list"',
+                   'id="tools-jump"', 'id="phone-mcp"', 'id="ch-add-box"', 'id="ch-more"', 'id="mcp-add-box"',
                    '<script src="/static/control_model.js"></script>', '<script src="/static/control_phone.js"></script>'):
         assert needle in html, needle
     assert 'id="setup-api"' not in html and "初始化向导" not in html                 # moved to the model page
     assert html.index('data-tab="model"') < html.index('data-tab="settings"')
-    for name in ("control_model.js", "control_phone.js", "control_setup.js", "control.js"):
+    for name in ("control_model.js", "control_phone.js", "control_setup.js", "control.js", "control_channels.js"):
         js = (ROOT / "wx_ilink_py" / "static" / name).read_text(encoding="utf-8")
         for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function",
                      "localStorage", "sessionStorage"):

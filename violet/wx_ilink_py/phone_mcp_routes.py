@@ -87,6 +87,7 @@ def register_phone_mcp_routes(app: Flask, reload_agents=None) -> None:
         return ok({
             "installed": info is not None, "relay": info, "health": relay_health(info),
             "install_command": install_command(), "app_url": APP_URL, "server_name": SERVER_NAME,
+            "set_port_command": (install_command() or "").replace(" install", " set-port") or None,
             "server": None if server is None else {
                 "status": server.get("status"), "enabled": server.get("enabled"),
                 "tools": len(server.get("tools") or []), "url": server.get("url"),

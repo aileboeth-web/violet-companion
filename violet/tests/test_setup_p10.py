@@ -81,7 +81,7 @@ def test_the_model_test_uses_the_running_settings_and_keeps_only_the_outcome(mad
     assert items["model_service"]["state"] == "ok"
     monkeypatch.setenv("LLM_API_KEY", KEY + "x")                     # a changed key makes the old result stale
     items = {i["id"]: i for i in admin.get("/api/control/setup", headers=JSON).get_json()["data"]["items"]}
-    assert items["model_service"]["state"] == "warn" and "还没有用当前设置测试" in items["model_service"]["detail"]
+    assert items["model_service"]["state"] == "warn" and "还没有测试过对话" in items["model_service"]["detail"]
 
 
 @pytest.mark.parametrize("error, kind", [
