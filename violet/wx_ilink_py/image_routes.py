@@ -31,6 +31,76 @@ def register_image_routes(app: Flask, violetdb) -> None:
     def images_page():                                # 0.7.1: the old page is gone
         return redirect("/control#settings")
 
+    # ---------------------------------------------------------------- 0.7.2: the Control Center's "图片" page
+    def _panel_state() -> dict:
+        from ai.images.registry import panel_entry_id
+        from ai.settings import env_bool, env_str
+        registry = ImageProviderRegistry(violetdb)
+        entry_id = panel_entry_id()
+        entry = registry.get(entry_id) if entry_id else None
+        last = None
+        if entry is not None:
+            last = violetdb.fetch_one("SELECT passed, detail, config_hash, created_at FROM image_capability_checks "
+                                      "WHERE entry_id = ? AND capability = 'image_generation' ORDER BY id DESC LIMIT 1",
+                                      (entry_id,))
+            if last:
+                last = {"passed": bool(last["passed"]), "detail": last["detail"], "at": last["created_at"],
+                        "current": last["config_hash"] == entry.config_hash}
+        budget = ImageBudget(violetdb, registry)
+        return {"enabled": images_enabled(),
+                "gen": None if entry is None else {
+                    "entry_id": entry_id, "model": entry.model_id, "protocol": entry.adapter_type,
+                    "base_url": entry.base_url, "own_url": bool(env_str("VIOLET_IMAGE_API_URL", "")),
+                    "own_key": bool(env_str("VIOLET_IMAGE_API_KEY", "")),
+                    "key_present": entry.public()["api_key_present"],
+                    "verified": entry.state("image_generation") == "verified",
+                    "daily_limit": entry.limits.get("max_images_per_day"), "usage_today": budget.usage(entry_id),
+                    "last_check": last},
+                "vision": {"model": env_str("VISION_LLM_MODEL", "vision"),
+                           "legacy": env_bool("VIOLET_IMAGE_LEGACY_VISION", True)}}
+
+    @app.get("/api/images/panel")
+    def images_panel():
+        assets = MediaAssetStore(violetdb).list(limit=24)
+        for a in assets:
+            a.pop("storage_path", None)
+        return ok({**_panel_state(), "assets": [a for a in assets if a.get("status") == "ready"]})
+
+    @app.post("/api/images/panel/test-generate")
+    def images_panel_test_generate():
+        """One real drawing with the page's model (may cost money: {"confirm_paid": true}); a pass verifies it."""
+        from ai.images.registry import panel_entry_id
+        if body().get("confirm_paid") is not True:
+            return bad("测试会真实画一张图，可能产生费用：需要确认（confirm_paid: true）", 409)
+        entry_id = panel_entry_id()
+        if not entry_id:
+            return bad("先选一个画图模型并保存")
+        registry = ImageProviderRegistry(violetdb)
+        try:
+            result = ImageService(violetdb, registry=registry).verify(entry_id, "image_generation", actor="dashboard")
+        except (KeyError, ValueError) as exc:
+            return bad(str(exc))
+        return ok({**result, "state": _panel_state()})
+
+    @app.post("/api/images/panel/test-vision")
+    def images_panel_test_vision():
+        """One real call of the recognition model with a small red square ("图里是什么颜色？")."""
+        import tempfile
+        import time as _time
+        from pathlib import Path as _Path
+        from ai.images.adapters import make_png
+        from ai.vision import VisionError, describe_image
+        started = _time.monotonic()
+        with tempfile.TemporaryDirectory(prefix="violet-vision-") as folder:
+            path = _Path(folder) / "probe.png"
+            path.write_bytes(make_png(64, 64, (220, 40, 40)))
+            try:
+                text = describe_image(path)
+                return ok({"ok": True, "text": text[:300], "latency_ms": int((_time.monotonic() - started) * 1000)})
+            except VisionError as exc:
+                return ok({"ok": False, "error": str(exc)[:300],
+                           "latency_ms": int((_time.monotonic() - started) * 1000)})
+
     @app.get("/api/images/providers")
     def images_providers():
         registry = ImageProviderRegistry(violetdb)

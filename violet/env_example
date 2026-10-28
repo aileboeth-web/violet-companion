@@ -257,6 +257,13 @@ VIOLET_WEB_EXPLORER_LLM_MODEL=
 # ── 图片系统（第六阶段）──────────────────────────────────────────────────────
 # 总开关。关闭时（默认）收图沿用旧的 ai/vision.py，聊天里没有任何图片工具。
 VIOLET_IMAGE_ENABLED=0
+# 0.7.2：后台“图片”页的画图模型（注册表里的 panel 提供方）。留空 = 不画图；测试通过后才会在聊天里使用。
+# 地址 / Key 留空 = 和模型服务（LLM_API_URL / LLM_API_KEY）一样。每天最多画几张也是价格未知时的调用上限。
+# VIOLET_IMAGE_GEN_MODEL=gpt-image-1
+VIOLET_IMAGE_GEN_PROTOCOL=openai_images
+VIOLET_IMAGE_DAILY_LIMIT=10
+# VIOLET_IMAGE_API_URL=https://api.example.com/v1
+# VIOLET_IMAGE_API_KEY=
 # 模型注册表（能力矩阵、价格、优先级、备用模型）。密钥只写环境变量名（api_key_env），不写进文件。
 # VIOLET_IMAGE_PROVIDERS_FILE=config/image_providers.json
 # 媒体文件目录（默认 <VIOLET_DATA_DIR>/media，已被 Git 忽略）与保留天数

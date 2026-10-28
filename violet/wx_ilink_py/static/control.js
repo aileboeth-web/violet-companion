@@ -427,14 +427,43 @@ async function loadSearxng(box) {
         try { await searxngAction("enable"); toast("联网搜索已开启"); loaders.tools(); } catch (e) { toast(e.message, false); }
       } }));
     }
+    buttons.append(h("button", { class: "ghost", type: "button", text: "重新选择搜索引擎", onclick: async () => {
+      if (!(await confirmBox("测试一次搜索；没有结果时自动换一组搜索引擎（默认的 / 国内能访问的必应、百度、搜狗、360），选能搜到东西的那组。"))) return;
+      try { await searxngAction("tune"); watchSearxng("重新选择搜索引擎", null); } catch (e) { toast(e.message, false); }
+    } }));
     buttons.append(h("button", { class: "danger", type: "button", text: "卸载联网搜索", onclick: async () => {
       if (!(await confirmBox("卸载这台服务器上的 SearXNG？服务、程序和缓存都会删除，联网搜索随之关闭。以后可以再一键安装。"))) return;
       try { await searxngAction("uninstall"); watchSearxng("卸载联网搜索", "disable"); } catch (e) { toast(e.message, false); }
     } }));
   }
   const last = p.state === "failed" && String(p.task || "").startsWith("searxng") ? h("p", { class: "err", text: "上次操作失败：" + (p.message || "") }) : null;
+  // 0.7.2: test the search Violet really uses and one public page, right here
+  const testOut = h("div", { class: "stack web-test" });
+  if (s.web_enabled || s.installed) {
+    buttons.prepend(h("button", { class: "ghost", type: "button", text: "测试联网", onclick: async (ev) => {
+      ev.target.disabled = true;
+      testOut.replaceChildren(h("p", { class: "note", text: "正在测试：搜索一次“今天天气”，再打开一个网页…" }));
+      try { showWebTest(testOut, await api("POST", "/api/control/tools/web/test", {}), s.installed); }
+      catch (e) { testOut.replaceChildren(h("p", { class: "err", text: e.message })); }
+      ev.target.disabled = false;
+    } }));
+  }
+  const engines = s.engines_text ? h("p", { class: "note", text: `搜索引擎：${s.engines_text}` }) : null;
   box.replaceChildren(...[head, intro, s.installed && s.url ? h("p", { class: "note", text: `地址 ${s.url}（只有本机能访问）` }) : null,
-    buttons, last].filter(Boolean));                // replaceChildren(null) would insert the text "null"
+    engines, buttons, testOut, last].filter(Boolean));                // replaceChildren(null) would insert the text "null"
+}
+function showWebTest(box, t, installed) {
+  const s = t.search || {}, f = t.fetch || {};
+  const rows = [
+    h("div", { class: "row" }, pill(s.ok ? "搜索正常" : "搜索失败", s.ok ? "ok" : "bad"),
+      h("span", { class: "note", text: s.ok ? `搜到 ${s.count} 条（${s.latency_ms} 毫秒）` : `${s.error || "没有结果"}（${s.latency_ms} 毫秒）` })),
+    s.titles && s.titles.length ? h("ul", { class: "note" }, ...s.titles.map((x) => h("li", { text: x }))) : null,
+    t.dead_engines && t.dead_engines.length ? h("p", { class: "note", text: "没有响应的搜索引擎：" + t.dead_engines.join("、") }) : null,
+    !s.ok && installed ? h("p", { class: "note", text: "搜不到东西时点“重新选择搜索引擎”：服务器在国内时，默认的谷歌、DuckDuckGo 等通常连不上，会自动换成必应、百度、搜狗、360。" }) : null,
+    h("div", { class: "row" }, pill(f.ok ? "网页阅读正常" : "网页阅读失败", f.ok ? "ok" : "bad"),
+      h("span", { class: "note", text: f.ok ? `打开了 ${f.url}（${f.latency_ms} 毫秒）` : `打不开 ${f.url}：${f.error}` })),
+  ];
+  box.replaceChildren(...rows.filter(Boolean));
 }
 loaders.tools = async () => {
   try { const data = await api("GET", "/api/control/tools"); renderTools(data.servers); renderWeb(data.web); }
@@ -490,7 +519,7 @@ function settingInput(s, ctx = SETTINGS_PAGE) {
       running ? h("div", { class: "help", "data-running": s.key, text: running }) : null, reset, err));
   return row;
 }
-const SETTINGS_ELSEWHERE = ["api", "models"];          // the model page
+const SETTINGS_ELSEWHERE = ["api", "models", "images"];          // the model page; 0.7.2: the images page
 const SETTINGS_ORDER = ["behavior", "messages", "proactive", "life", "memory", "features", "images", "guard", "prompts",
   "mcp", "system", "updates"];
 loaders.settings = async () => {

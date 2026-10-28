@@ -262,6 +262,24 @@ if [ "$MODE" = "systemd" ]; then
   curl -sk -b "$JAR" -H 'Accept: application/json' "$SXAPI" | json 'd["data"]["web_enabled"] and d["data"]["in_use"]' \
     | grep -q True || fail "web search not switched on"
   pass "web search installed from the Control Center (progress reached $MAXP%), SearXNG JSON search on $SXURL, switched on"
+  # 0.7.2: the engine set for servers in mainland China (bing / baidu / sogou / 360search) must be a valid SearXNG
+  #        configuration: written, restarted, healthy, answering JSON; then "重新选择搜索引擎" from the page
+  SXPORT="${SXURL##*:}"
+  "$ROOT/venv/bin/python" -c "import sys;sys.path.insert(0,'$ROOT/app/tools');import violet_searxng as sx;open('$ROOT/searxng/settings.yml','w').write(sx.settings_text($SXPORT,'cn'))" \
+    || fail "write the cn engine settings"
+  systemctl restart violet-searxng
+  for _ in $(seq 1 45); do curl -fs "$SXURL/healthz" >/dev/null 2>&1 && break; sleep 2; done
+  curl -fs "$SXURL/healthz" >/dev/null || { journalctl -u violet-searxng -n 60 --no-pager || true; fail "SearXNG with the cn engines did not start"; }
+  CN="$(curl -fsS --max-time 30 "$SXURL/search?q=weather&format=json")" || fail "SearXNG JSON search with the cn engines"
+  CNN="$(echo "$CN" | python3 -c "import json,sys;d=json.load(sys.stdin);print(len(d.get('results') or []), sorted({r.get('engine') for r in d.get('results') or []}))")"
+  [ "$(post_sx tune)" = "200" ] || fail "engine choice request"
+  wait_task "SearXNG engine choice"
+  curl -sk -b "$JAR" -H 'Accept: application/json' "$SXAPI" | json 'bool(d["data"]["engines_text"])' | grep -q True \
+    || fail "engine choice not exported"
+  T="$(curl -sk -b "$JAR" -H "Origin: $SCHEME://127.0.0.1:$PORT" -H 'Content-Type: application/json' -X POST --data '{}' \
+        "$SCHEME://127.0.0.1:$PORT/api/control/tools/web/test")"
+  echo "$T" | json 'd["data"]["search"]["ok"] and d["data"]["fetch"]["ok"]' | grep -q True || { echo "$T"; fail "web test button"; }
+  pass "cn engine set valid (results, engines: $CNN); engine choice from the page; web test button: search and page reading OK"
   [ "$(post_sx uninstall)" = "200" ] || fail "web search uninstall request"
   wait_task "SearXNG uninstall"
   [ "$(post_sx disable)" = "200" ] || fail "web search disable"

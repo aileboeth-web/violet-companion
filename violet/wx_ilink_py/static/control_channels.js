@@ -69,6 +69,18 @@
   async function testChannel(ch) {
     try { const r = await api("POST", chUrl(ch, "/test")); toast(r.ok ? "连接正常" : "连接失败：" + (r.error || r.detail || r.state), !!r.ok); }
     catch (e) { toast(e.message, false); }
+    loaders.channels();                       // 0.7.2: the card showed "正在连接" until the page was opened again
+  }
+  // while a channel is still connecting, look again every few seconds (not while a form is open: it would be redrawn)
+  let pending = null, pendingTries = 0;
+  function watchConnecting(channels) {
+    clearTimeout(pending);
+    const busy = channels.some((c) => ["starting", "reconnecting"].includes(c.status.state));
+    if (!busy) { pendingTries = 0; return; }
+    if (pendingTries++ > 40 || opened.size || editing.size) return;
+    pending = setTimeout(() => {
+      if ($("#tab-channels").classList.contains("active") && !document.hidden) loaders.channels();
+    }, 3000);
   }
   function statusLine(ch) {
     return h("p", { class: "note", text: fmt(ch.status.detail) + (ch.status.last_error ? `（最近错误：${ch.status.last_error}）` : "") +
@@ -326,6 +338,7 @@
     const pick = (p) => { const ch = data.channels.find((c) => c.type === p.type && !used.has(c.id) && (p.key !== "wechat" || c.id === "wechat"));
       if (ch) used.add(ch.id); return ch; };
     $("#ch-list").replaceChildren(...PLATFORMS.map((p) => { const ch = pick(p); return p.key === "wechat" ? wechatCard(p, ch || { id: "wechat", enabled: true, status: { state: "stopped" } }) : botCard(p, ch); }));
+    watchConnecting(data.channels);
     const extra = data.channels.filter((c) => !used.has(c.id));
     $("#ch-extra").replaceChildren(...extra.map(extraCard));
     if (extra.length) $("#ch-more").open = true;

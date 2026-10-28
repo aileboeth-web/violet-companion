@@ -29,6 +29,7 @@ import shutil
 import subprocess
 import tarfile
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable
@@ -125,19 +126,30 @@ def safe_extract(archive: Path, target: Path) -> Path:
     return base / tops.pop()
 
 
-def settings_text(port: int) -> str:
+# 0.7.2 (user's server in mainland China: every default engine -- google, duckduckgo, brave, wikipedia, wikidata --
+# was unresponsive, 0 results): engines that answer from there. Chosen automatically when the defaults find nothing.
+CN_ENGINES = ("bing", "baidu", "sogou", "360search")
+ENGINE_SETS = {"default": "SearXNG 默认的搜索引擎", "cn": "国内能访问的搜索引擎（必应、百度、搜狗、360）"}
+
+
+def settings_text(port: int, engines: str = "default") -> str:
     """Violet's SearXNG settings (deploy/searxng/config/settings.yml, bound to loopback). The secret is not here: it
-    comes from SEARXNG_SECRET (secret.env)."""
+    comes from SEARXNG_SECRET (secret.env). engines: "default" (SearXNG's own) or "cn" (CN_ENGINES only, switched
+    on -- some of them are off in SearXNG's defaults)."""
+    if engines == "cn":
+        head = ["use_default_settings:", "  engines:", "    keep_only:", *[f"      - {e}" for e in CN_ENGINES]]
+        tail = ["engines:", *[line for e in CN_ENGINES for line in (f"  - name: {e}", "    disabled: false")], ""]
+    else:
+        head, tail = ["use_default_settings: true"], []
     return "\n".join([
-        "# Violet's private SearXNG (tools/violet_searxng.py). Rewritten on reinstall.",
-        "use_default_settings: true", "",
+        "# Violet's private SearXNG (tools/violet_searxng.py). Rewritten on reinstall.", *head, "",
         "general:", '  instance_name: "violet-searxng"', "  enable_metrics: false", "",
         "server:", f"  port: {port}", '  bind_address: "127.0.0.1"',
         '  secret_key: "set-by-SEARXNG_SECRET-environment-variable"', "  limiter: false", "  public_instance: false",
         "  image_proxy: false", '  method: "GET"', "",
         "search:", "  safe_search: 1", '  autocomplete: ""', '  default_lang: "zh-CN"', "  formats:", "    - html",
         "    - json", "",
-        "outgoing:", "  request_timeout: 4.0", "  max_request_timeout: 8.0", ""])
+        "outgoing:", "  request_timeout: 4.0", "  max_request_timeout: 8.0", "", *tail])
 
 
 def unit_text(base: Path, port: int, granian: bool) -> str:
@@ -166,18 +178,58 @@ def health(port: int, timeout: float = 3.0) -> bool:
         return False
 
 
-def test_search(port: int, timeout: float = 20.0) -> tuple[bool, str]:
-    """One JSON search (SearXNG asks its engines on the internet). (answers in JSON, a note)."""
+def test_search(port: int, timeout: float = 25.0, query: str = "天气") -> dict[str, Any]:
+    """One JSON search (SearXNG asks its engines on the internet): {answered, results, dead, note}."""
     try:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(f"http://127.0.0.1:{port}/search?q=SearXNG&format=json", timeout=timeout) as resp:
+        url = f"http://127.0.0.1:{port}/search?" + urllib.parse.urlencode({"q": query, "format": "json"})
+        with opener.open(url, timeout=timeout) as resp:
             data = json.loads(resp.read(2_000_000).decode("utf-8"))
         results = len(data.get("results") or [])
-        dead = [e[0] for e in data.get("unresponsive_engines") or [] if e]
+        dead = [str(e[0]) for e in data.get("unresponsive_engines") or [] if e]
         note = f"测试搜索返回 {results} 条结果" + (f"；没有响应的搜索引擎：{'、'.join(dead[:8])}" if dead else "")
-        return True, note
+        return {"answered": True, "results": results, "dead": dead, "note": note}
     except (OSError, ValueError) as exc:
-        return False, f"测试搜索没有成功（{exc.__class__.__name__}）：服务器可能访问不到外面的搜索引擎"
+        return {"answered": False, "results": 0, "dead": [],
+                "note": f"测试搜索没有成功（{exc.__class__.__name__}）"}
+
+
+def _apply_engines(base: Path, port: int, engines: str, run: Callable[..., Any], wait: float,
+                   check_health: Callable[[int], bool]) -> bool:
+    """Write the settings for that engine set, restart, wait for health. False when it did not come up."""
+    (base / "settings.yml").write_text(settings_text(port, engines), encoding="utf-8")
+    os.chmod(base / "settings.yml", 0o644)
+    run(["systemctl", "restart", f"{UNIT_NAME}.service"], capture_output=True, text=True)
+    deadline = time.monotonic() + wait
+    ok = check_health(port)
+    while not ok and time.monotonic() < deadline:
+        time.sleep(2)
+        ok = check_health(port)
+    return ok
+
+
+def choose_engines(base: Path, port: int, current: str, *, run: Callable[..., Any], wait: float,
+                   check_health: Callable[[int], bool], search: Callable[[int], dict[str, Any]],
+                   progress: Progress | None = None, first: dict[str, Any] | None = None) -> tuple[str, dict, list[str]]:
+    """Keep the engine set that finds something: test the current one (or use `first`), switch to the other one when
+    it finds nothing, and go back when the other one finds nothing either or does not start. (set, last test, notes)."""
+    notes: list[str] = []
+    result = first or search(port)
+    if result["results"] > 0:
+        return current, result, notes
+    other = "cn" if current == "default" else "default"
+    _say(progress, 96, f"{ENGINE_SETS[current]}没有结果，改用{ENGINE_SETS[other]}再试")
+    if not _apply_engines(base, port, other, run, wait, check_health):
+        _apply_engines(base, port, current, run, wait, check_health)
+        notes.append(f"换成{ENGINE_SETS[other]}后 SearXNG 没有启动，已换回原来的设置")
+        return current, result, notes
+    retry = search(port)
+    if retry["results"] > 0 or result["results"] == 0 and not result["answered"]:
+        notes.append(f"{ENGINE_SETS[current]}没有结果，已改用{ENGINE_SETS[other]}")
+        return other, retry, notes
+    _apply_engines(base, port, current, run, wait, check_health)
+    notes.append("两组搜索引擎都没有返回结果：服务器可能访问不到外面的网站（检查网络或代理）")
+    return current, result, notes
 
 
 def _pick_port(port_free: Callable[[int, str], bool], rng: random.Random | None) -> int:
@@ -216,7 +268,7 @@ def install(layout: Any, state: dict[str, Any], *, python: Path, port_free: Call
             stream: Callable[..., tuple[int, str]] = _stream, progress: Progress | None = None,
             unit_path: Path = UNIT_PATH, wait: float = HEALTH_WAIT, rng: random.Random | None = None,
             check_health: Callable[[int], bool] = health,
-            search: Callable[[int], tuple[bool, str]] = test_search) -> dict[str, Any]:
+            search: Callable[[int], dict[str, Any]] = test_search) -> dict[str, Any]:
     """Returns the result; updates `state` (install.json) -- the caller saves it. A reinstall replaces the program and
     keeps the port and secret."""
     if not shutil.which("systemctl") and run is subprocess.run:
@@ -283,7 +335,8 @@ def install(layout: Any, state: dict[str, Any], *, python: Path, port_free: Call
     granian = (venv / "bin" / "granian").exists()
 
     _say(progress, 86, "写配置、注册服务")
-    (base / "settings.yml").write_text(settings_text(port), encoding="utf-8")
+    engines = previous.get("engines") if previous.get("engines") in ENGINE_SETS else "default"
+    (base / "settings.yml").write_text(settings_text(port, engines), encoding="utf-8")
     os.chmod(base / "settings.yml", 0o644)
     secret_file = base / "secret.env"
     secret = previous.get("secret_kept") and secret_file.exists()
@@ -307,17 +360,47 @@ def install(layout: Any, state: dict[str, Any], *, python: Path, port_free: Call
     if not ok:
         raise SearxngError(f"SearXNG {wait:.0f} 秒内没有启动：journalctl -u {UNIT_NAME} -n 40")
     _say(progress, 95, "测试一次搜索")
-    searched, note = search(port)
-    notes.append(note)
+    engines, tested, more = choose_engines(base, port, engines, run=run, wait=wait, check_health=check_health,
+                                           search=search, progress=progress)
+    notes += [tested["note"], *more]
     url = f"http://127.0.0.1:{port}"
     state["searxng"] = {"managed": True, "port": port, "installed_at": int(time.time()), "source_sha256": digest,
-                        "server": "granian" if granian else "searx.webapp", "secret_kept": True}
+                        "server": "granian" if granian else "searx.webapp", "secret_kept": True, "engines": engines}
     _say(progress, 98, "交给 Violet")
-    export = {"installed": True, "url": url, "port": port, "installed_at": state["searxng"]["installed_at"],
-              "search_ok": searched}
+    _export(layout, state, tested)
+    return {"ok": True, "installed": True, "url": url, "port": port, "healthy": True,
+            "search_ok": tested["results"] > 0, "engines": engines, "notes": notes}
+
+
+def _export(layout: Any, state: dict[str, Any], tested: dict[str, Any]) -> None:
+    info = state["searxng"]
+    export = {"installed": True, "url": f"http://127.0.0.1:{info['port']}", "port": info["port"],
+              "installed_at": info["installed_at"], "engines": info.get("engines", "default"),
+              "engines_text": ENGINE_SETS.get(info.get("engines", "default")),
+              "search_ok": tested["results"] > 0, "last_results": tested["results"]}
     _write_owned(export_path(layout.data), json.dumps(export, ensure_ascii=False), state.get("user"))
-    return {"ok": True, "installed": True, "url": url, "port": port, "healthy": True, "search_ok": searched,
-            "notes": notes}
+
+
+def tune(layout: Any, state: dict[str, Any], *, run: Callable[..., Any] = subprocess.run,
+         progress: Progress | None = None, unit_path: Path = UNIT_PATH, wait: float = HEALTH_WAIT,
+         check_health: Callable[[int], bool] = health,
+         search: Callable[[int], dict[str, Any]] = test_search) -> dict[str, Any]:
+    """0.7.2: pick the engine set again on an installed SearXNG (for installs from 0.7.1, which never switched)."""
+    info = state.get("searxng") or {}
+    if not unit_path.exists() or not info.get("managed"):
+        raise SearxngError("还没有安装联网搜索（SearXNG）")
+    port = int(info["port"])
+    current = info.get("engines") if info.get("engines") in ENGINE_SETS else "default"
+    _say(progress, 10, f"用{ENGINE_SETS[current]}测试一次搜索")
+    if not check_health(port):
+        _apply_engines(folder(layout), port, current, run, wait, check_health)
+    engines, tested, notes = choose_engines(folder(layout), port, current, run=run, wait=wait,
+                                            check_health=check_health, search=search, progress=progress)
+    info["engines"] = engines
+    _say(progress, 98, "交给 Violet")
+    _export(layout, state, tested)
+    return {"ok": True, "url": f"http://127.0.0.1:{port}", "engines": engines, "search_ok": tested["results"] > 0,
+            "notes": [tested["note"], *notes]}
 
 
 def uninstall(layout: Any, state: dict[str, Any], *, run: Callable[..., Any] = subprocess.run,

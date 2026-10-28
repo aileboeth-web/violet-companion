@@ -411,6 +411,7 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
         export = searxng_export()
         url = env_str("VIOLET_WEB_SEARXNG_URL", "")
         return ok({"installed": export is not None, "url": export and export.get("url"), "available": available(),
+                   "engines_text": export and export.get("engines_text"),
                    "progress": read_progress("task"), "web_enabled": env_bool("VIOLET_WEB_ENABLED", False),
                    "in_use": bool(export) and url.rstrip("/") == str(export.get("url")).rstrip("/")
                    and env_str("VIOLET_WEB_SEARCH_PROVIDER", "searxng") == "searxng"})
@@ -424,7 +425,7 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
         if body.get("confirm") is not True:
             return bad("需要确认（confirm: true）")
         action = str(body.get("action") or "")
-        if action in ("install", "uninstall"):
+        if action in ("install", "uninstall", "tune"):
             try:
                 return ok(request_task("searxng-" + action))
             except (PermissionError, RuntimeError) as exc:
@@ -447,6 +448,47 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
         except StoreError as exc:
             return bad(str(exc), 500)
         return ok(result)
+
+    @app.post("/api/control/tools/web/test")
+    def control_tools_web_test():
+        """0.7.2 "测试联网": one search through the search service Violet really uses (same address checks and
+        timeout), the engines that did not answer (a SearXNG on this machine), and one public page through the safe
+        fetcher (what "网页阅读" uses). Not counted against the daily limits; nothing is stored."""
+        import time as _time
+        import urllib.parse
+        import urllib.request
+        from ai.settings import env_str
+        from ai.web.netguard import SafeFetcher, WebPolicyError
+        from ai.web.providers import SearchError, make_provider, provider_name
+        out: dict[str, Any] = {"provider": provider_name()}
+        query = "今天天气"
+        started = _time.monotonic()
+        try:
+            results = make_provider(SafeFetcher()).search(query, limit=5)
+            out["search"] = {"ok": bool(results), "count": len(results), "titles": [r.title for r in results[:3]],
+                             "error": None if results else "没有搜到结果"}
+        except SearchError as exc:
+            out["search"] = {"ok": False, "count": 0, "titles": [], "error": f"{exc.code}：{exc}"}
+        out["search"]["latency_ms"] = int((_time.monotonic() - started) * 1000)
+        url = env_str("VIOLET_WEB_SEARXNG_URL", "").rstrip("/")
+        if out["provider"] == "searxng" and url.startswith("http://127.0.0.1:"):
+            try:
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                with opener.open(f"{url}/search?" + urllib.parse.urlencode({"q": query, "format": "json"}),
+                                 timeout=25) as resp:
+                    data = json.loads(resp.read(2_000_000).decode("utf-8"))
+                out["dead_engines"] = [str(e[0]) for e in data.get("unresponsive_engines") or [] if e][:12]
+            except (OSError, ValueError):
+                out["dead_engines"] = None
+        started = _time.monotonic()
+        page = "https://www.bing.com/"
+        try:
+            fetched = SafeFetcher().fetch(page)
+            out["fetch"] = {"ok": bool(fetched.text()), "url": page, "error": None}
+        except WebPolicyError as exc:
+            out["fetch"] = {"ok": False, "url": page, "error": f"{exc.code}：{exc}"[:200]}
+        out["fetch"]["latency_ms"] = int((_time.monotonic() - started) * 1000)
+        return ok(out)
 
     @app.post("/api/control/tools/web/secret")
     def control_tools_web_secret():

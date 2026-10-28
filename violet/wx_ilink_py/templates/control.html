@@ -17,6 +17,7 @@
     <button data-tab="model">模型服务</button>
     <button data-tab="channels">聊天渠道</button>
     <button data-tab="tools">工具与手机</button>
+    <button data-tab="images">图片</button>
     <button data-tab="persona">人设与生活</button>
     <button data-tab="schedule">课表</button>
     <button data-tab="settings">设置</button>
@@ -137,6 +138,12 @@
     <h3>生活引擎</h3>
     <div class="row"><span id="life-mode" class="pill"></span>
       <button class="ghost" data-life="pause">暂停</button><button class="ghost" data-life="resume">恢复</button></div>
+  </section>
+
+  <section id="tab-images" class="tab">
+    <div class="row"><h2>图片</h2><button class="ghost" id="img-refresh" type="button">刷新</button></div>
+    <p class="note">看图：Violet 看懂你发来的图片。画图：Violet 在聊天里按你的要求画图、偶尔分享自己的“照片”（明确是 AI 画的）。两者都用“模型服务”里的接口，也可以给画图单独设置。</p>
+    <div id="img-root" class="stack-wide"></div>
   </section>
 
   <section id="tab-channels" class="tab">
@@ -374,5 +381,6 @@
 <script src="/static/control_logs.js"></script>
 <script src="/static/control_model.js"></script>
 <script src="/static/control_phone.js"></script>
+<script src="/static/control_images.js"></script>
 </body>
 </html>

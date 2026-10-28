@@ -66,7 +66,9 @@ def _install(tmp_path, *, stream=None, state=None, port_free=lambda p, h: True, 
     state = {"user": "violet"} if state is None else state
     result = sx.install(layout, state, python=Path("/usr/bin/python3"), port_free=port_free, run=Runs(), fetch=fetch,
                         stream=stream or ok_stream, progress=lambda p, s: seen.append((p, s)), unit_path=unit, wait=0,
-                        check_health=lambda port: True, search=lambda port: (True, "测试搜索返回 3 条结果"), **kw)
+                        check_health=lambda port: True,
+                        search=lambda port: {"answered": True, "results": 3, "dead": [], "note": "测试搜索返回 3 条结果"},
+                        **kw)
     return layout, unit, state, result, seen
 
 

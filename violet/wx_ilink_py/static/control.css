@@ -305,6 +305,12 @@ details.card>summary{cursor:pointer;font-weight:600}
 .kv>.v:first-child{grid-column:1/3}
 .kv-actions{display:flex;gap:6px}
 .kv .note{grid-column:2/-1;margin:0}
+/* 0.7.2: the images page */
+.tabs [data-tab=images]{--icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Ccircle cx='8.5' cy='8.5' r='1.5'/%3E%3Cpath d='M21 15l-5-5L5 21'/%3E%3C/svg%3E")}
+.img-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px}
+.img-item{margin:0;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.img-thumb{width:100%;aspect-ratio:1;object-fit:cover;border-radius:12px;border:1px solid var(--line);background:var(--panel-hover)}
+.img-thumb.big{width:220px;max-width:100%}
 /* 0.7.0: progress dialog (relay install, update) */
 .progress-dialog h3{margin:0}
 .pbar{height:12px;border-radius:999px;background:var(--panel-hover);border:1px solid var(--line);overflow:hidden}

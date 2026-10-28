@@ -44,6 +44,41 @@ def providers_path() -> Path:
     return Path(override) if override else PROJECT_ROOT / "config" / "image_providers.json"
 
 
+PANEL = "panel"
+DAILY_LIMIT_KEYS = ("max_images_per_day", "max_calls_per_day", "max_cost_per_day")
+
+
+def panel_providers() -> list[dict[str, Any]]:
+    """0.7.2: the drawing model set in the Control Center's "图片" page, as one provider "panel": the model service's
+    address and key unless the page gives its own (VIOLET_IMAGE_API_URL / VIOLET_IMAGE_API_KEY -- the key is read
+    from the environment at call time, never stored here). "image_generation" stays "declared" until the page's test
+    passes for exactly this address / protocol / model. The price is unknown, so the daily limit is the number of
+    calls allowed (pricing.unpriced_max_calls_per_day)."""
+    model = env_str("VIOLET_IMAGE_GEN_MODEL", "").strip()
+    if not model:
+        return []
+    protocol = env_str("VIOLET_IMAGE_GEN_PROTOCOL", "openai_images")
+    try:
+        limit = max(1, int(env_str("VIOLET_IMAGE_DAILY_LIMIT", "10") or 10))
+    except ValueError:
+        limit = 10
+    return [{"provider_id": PANEL, "adapter_type": protocol if protocol in ("openai_images", "chat_completions")
+             else "openai_images",
+             "base_url": env_str("VIOLET_IMAGE_API_URL", "") or env_str("LLM_API_URL", ""),
+             "api_key_env": "VIOLET_IMAGE_API_KEY" if env_str("VIOLET_IMAGE_API_KEY", "") else "LLM_API_KEY",
+             "enabled": True, "timeout": 180,
+             "retry_policy": {"max_attempts": 1, "circuit_failures": 3, "circuit_seconds": 600},
+             "models": [{"model_id": model, "enabled": True, "status_note": "后台“图片”页设置",
+                         "capabilities": {"image_generation": "declared"},
+                         "limits": {"max_outputs": 1, "max_concurrency": 1, "max_images_per_day": limit},
+                         "pricing": {"confirmed": False, "unpriced_max_calls_per_day": limit}, "priority": 1}]}]
+
+
+def panel_entry_id() -> str | None:
+    model = env_str("VIOLET_IMAGE_GEN_MODEL", "").strip()
+    return f"{PANEL}/{model}" if model else None
+
+
 @dataclass
 class ModelEntry:
     provider_id: str
@@ -70,7 +105,11 @@ class ModelEntry:
 
     @property
     def config_hash(self) -> str:
-        raw = {k: v for k, v in self.raw.items() if k not in ("enabled", "priority", "status_note")}
+        # what a passed check is valid for: endpoint, protocol, model and what is requested (sizes ...) -- not the
+        # daily counters or price notes (0.7.2: changing "每天最多画几张" must not throw the test away)
+        raw = {k: v for k, v in self.raw.items() if k not in ("enabled", "priority", "status_note", "pricing")}
+        if isinstance(raw.get("limits"), dict):
+            raw["limits"] = {k: v for k, v in raw["limits"].items() if k not in DAILY_LIMIT_KEYS}
         return hashlib.sha256(json.dumps(raw, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
 
     def state(self, capability: str) -> str:
@@ -96,6 +135,7 @@ class ImageProviderRegistry:
         self.db = db
         self.path = path or providers_path()
         self.data = data if data is not None else self._read()
+        self._with_panel = data is None              # a registry built from given data (tests) has only that data
         self.entries: dict[str, ModelEntry] = {}
         self._load()
 
@@ -107,7 +147,7 @@ class ImageProviderRegistry:
             return {}
 
     def _load(self) -> None:
-        for provider in self.data.get("providers") or []:
+        for provider in [*(self.data.get("providers") or []), *(panel_providers() if self._with_panel else [])]:
             if not isinstance(provider, dict):
                 continue
             for model in provider.get("models") or []:
