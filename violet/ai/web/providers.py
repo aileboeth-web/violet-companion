@@ -13,6 +13,7 @@ VIOLET_WEB_SEARCH_PROVIDER selects one:
            VIOLET_WEB_SEARCH_AUTH_HEADER (header name, default Authorization) and
            VIOLET_WEB_SEARCH_API_KEY (value; sent as "Bearer <key>" for
            Authorization). Sent only to that endpoint, which may not redirect.
+  bing     (0.7.4) Bing's RSS results (BingRssProvider): no key, nothing to install; works from mainland China
   none     no search backend: web_search answers "not configured";
            everything else keeps working
   mock     offline fictional results (tests / local development); never
@@ -315,6 +316,44 @@ class BraveProvider(_ApiProvider):
                 for i in items if isinstance(i, dict) and i.get("url")][:limit]
 
 
+class BingRssProvider:
+    """0.7.4: Bing's own RSS search results (https://cn.bing.com/search?q=...&format=rss), no key, nothing to install.
+    The user's server in mainland China: every SearXNG engine failed, but this answered (curl, 2026-10-28). Goes
+    through the safe fetcher like any public page (public addresses only, redirects checked, size and time limits)
+    with a browser User-Agent; VIOLET_WEB_BING_HOST picks cn.bing.com (default) or www.bing.com. Bing's terms allow
+    these results for personal, non-commercial use -- which is what a self-hosted companion is."""
+    name = "bing"
+    HOSTS = ("cn.bing.com", "www.bing.com")
+    USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+
+    def __init__(self, fetcher: SafeFetcher, host: str | None = None):
+        chosen = (host or env_str("VIOLET_WEB_BING_HOST", "cn.bing.com")).strip().lower()
+        self.host = chosen if chosen in self.HOSTS else "cn.bing.com"
+        self.fetcher = fetcher
+
+    def search(self, query, *, recency_days=None, limit=5):
+        import xml.etree.ElementTree as ET
+        params = {"q": query, "format": "rss", "setlang": "zh-Hans", "mkt": "zh-CN"}
+        url = f"https://{self.host}/search?{urlencode(params)}"
+        try:
+            result = self.fetcher.fetch(url, accept_types=("application/rss+xml", "text/xml", "application/xml"))
+        except WebPolicyError as exc:
+            raise search_error(exc) from None
+        try:
+            root = ET.fromstring(result.text())          # expat refuses entity expansion bombs; size is capped above
+        except ET.ParseError:
+            raise SearchError("blocked", "bing answered with a web page instead of results (a verification page?)") from None
+        out = []
+        for item in root.iter("item"):
+            link = (item.findtext("link") or "").strip()
+            if not link.startswith(("https://", "http://")):
+                continue
+            out.append(SearchResult((item.findtext("title") or "").strip()[:200], link[:2048],
+                                    (item.findtext("description") or "").strip()[:500],
+                                    (item.findtext("pubDate") or "").strip() or None, "bing"))
+        return out[:limit]
+
+
 _REGISTRY: dict[str, Callable[[SafeFetcher], Any]] = {}
 
 
@@ -347,6 +386,12 @@ def make_provider(fetcher: SafeFetcher) -> Any:
         provider_fetcher = SafeFetcher(policy, resolver=fetcher.resolver, dialer=fetcher.dialer,
                                        ssl_context=fetcher.ssl_context)
         return SearxngProvider(base, provider_fetcher)
+    if name == "bing":
+        policy = replace(fetcher.policy, user_agent=BingRssProvider.USER_AGENT,
+                         total_timeout=min(fetcher.policy.total_timeout,
+                                           env_float("VIOLET_WEB_SEARCH_TIMEOUT_SECONDS", 10.0)))
+        return BingRssProvider(SafeFetcher(policy, resolver=fetcher.resolver, dialer=fetcher.dialer,
+                                           ssl_context=fetcher.ssl_context))
     if name in ("bocha", "brave"):
         policy = replace(fetcher.policy, total_timeout=min(fetcher.policy.total_timeout,
                                                            env_float("VIOLET_WEB_SEARCH_TIMEOUT_SECONDS", 10.0)))

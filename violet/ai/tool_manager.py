@@ -288,7 +288,7 @@ def web_status(db) -> dict[str, Any]:
     if provider == "searxng":
         url = env_str("VIOLET_WEB_SEARXNG_URL", "")
         problem = "VIOLET_WEB_SEARXNG_URL 没有设置" if not url else searxng_url_problem(url)
-    configured = (provider == "mock" or (provider == "searxng" and problem is None)
+    configured = (provider in ("mock", "bing") or (provider == "searxng" and problem is None)
                   or (provider in ("bocha", "brave") and bool(stored or from_env)))
     cfg, store = WebConfig.from_env(), FindingsStore(db)
     day = db.now()[:10]

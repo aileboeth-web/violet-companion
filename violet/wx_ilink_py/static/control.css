@@ -305,6 +305,11 @@ details.card>summary{cursor:pointer;font-weight:600}
 .kv>.v:first-child{grid-column:1/3}
 .kv-actions{display:flex;gap:6px}
 .kv .note{grid-column:2/-1;margin:0}
+/* 0.7.4: the two ways to search */
+.web-option{margin:0;box-shadow:none}
+.web-option:hover{transform:none}
+.web-option.current{border-color:var(--accent);background:var(--accent-soft)}
+.web-option>summary{list-style-position:inside}
 /* 0.7.3: the engine picker */
 .engine-group{border:1px solid var(--line);border-radius:12px;padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px 18px}
 .engine-group legend{padding:0 6px;color:var(--muted);font-size:12.5px}

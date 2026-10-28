@@ -290,6 +290,15 @@ if [ "$MODE" = "systemd" ]; then
   OWN="$(curl -fsS --max-time 30 "$SXURL/search?q=weather&format=json" | python3 -c "import json,sys;d=json.load(sys.stdin);print(len(d.get('results') or []), d.get('unresponsive_engines'))")" \
     || fail "SearXNG JSON search with IPv4 only"
   pass "own engine choice from the page (bing + sogou, IPv4 only): SearXNG healthy, search: $OWN"
+  # 0.7.4: "必应直连" -- the page switches the search service to Bing; the web test runs through it (the answer of
+  #        Bing to a cloud machine is reported, not required)
+  [ "$(post_sx bing)" = "200" ] || fail "switch to Bing"
+  T="$(curl -sk -b "$JAR" -H "Origin: $SCHEME://127.0.0.1:$PORT" -H 'Content-Type: application/json' -X POST --data '{}' \
+        "$SCHEME://127.0.0.1:$PORT/api/control/tools/web/test")"
+  BING="$(echo "$T" | json 'd["data"]["provider"] + " " + str(d["data"]["search"]["ok"]) + " " + str(d["data"]["search"]["count"]) + " " + str(d["data"]["search"]["error"])')" \
+    || { echo "$T"; fail "web test with Bing"; }
+  case "$BING" in bing\ *) ;; *) fail "search service is not Bing: $BING" ;; esac
+  pass "Bing as the search service from the page; web test through it: $BING"
   [ "$(post_sx uninstall)" = "200" ] || fail "web search uninstall request"
   wait_task "SearXNG uninstall"
   [ "$(post_sx disable)" = "200" ] || fail "web search disable"

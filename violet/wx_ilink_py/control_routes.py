@@ -411,7 +411,9 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
         export = searxng_export()
         url = env_str("VIOLET_WEB_SEARXNG_URL", "")
         from tools.violet_searxng import CN_ENGINES, ENGINES
+        from ai.web.providers import provider_name
         return ok({"installed": export is not None, "url": export and export.get("url"), "available": available(),
+                   "provider": provider_name(),
                    "engines_text": export and export.get("engines_text"),
                    "engines": export.get("engines", "default") if export else None,
                    "ipv4": bool(export and export.get("ipv4")), "last_note": export and export.get("last_note"),
@@ -465,7 +467,15 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
                        "VIOLET_WEB_SEARXNG_URL": export["url"]}
             reason = "一键安装联网搜索：启用"
         elif action == "disable":
-            changes, reason = {"VIOLET_WEB_ENABLED": False, "VIOLET_WEB_SEARXNG_URL": None}, "卸载联网搜索：关闭"
+            # SearXNG removed: web search goes off only when it was the search service (0.7.4: not when Bing is)
+            from ai.web.providers import provider_name
+            changes = {"VIOLET_WEB_SEARXNG_URL": None}
+            if provider_name() == "searxng":
+                changes["VIOLET_WEB_ENABLED"] = False
+            reason = "卸载 SearXNG"
+        elif action == "bing":
+            changes = {"VIOLET_WEB_ENABLED": True, "VIOLET_WEB_SEARCH_PROVIDER": "bing"}
+            reason = "联网搜索：改用必应直连"
         else:
             return bad("不支持的操作")
         try:

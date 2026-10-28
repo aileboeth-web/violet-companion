@@ -203,6 +203,8 @@ VIOLET_WEB_OFFER=on_demand
 # 搜索后端：searxng（默认，自建开源 SearXNG，部署见 deploy/searxng/README.md）| none（不搜索）
 # | mock（离线虚构结果，仅开发）| bocha / brave（可选的付费搜索 API，Phase 9.3）
 VIOLET_WEB_SEARCH_PROVIDER=searxng
+# 0.7.4：bing = 必应直连（必应自己的 RSS 搜索结果，不用 Key、不用安装，国内服务器也能用）；用哪个地址：
+VIOLET_WEB_BING_HOST=cn.bing.com
 # SearXNG 地址（JSON 输出已在 deploy/searxng/config/settings.yml 打开）。这是唯一受信任的内部地址：只有搜索
 # 请求能去，fetch_url 永远不能去。http 只允许本机 / 内网 / Docker 服务名，其他地址必须 https。
 #   Violet 直接跑在服务器上（start.sh）：http://127.0.0.1:18089（compose 只把端口发布到本机回环）

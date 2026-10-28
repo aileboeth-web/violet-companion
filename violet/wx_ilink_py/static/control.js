@@ -407,52 +407,71 @@ function watchSearxng(title, after) {
     loaders.tools();
   } });
 }
+// 0.7.4: two ways to search -- Bing directly (recommended: nothing to install; the user's server in mainland China
+// got Bing's results while every SearXNG engine timed out) and the optional self-hosted SearXNG
 async function loadSearxng(box) {
   let s;
   try { s = await api("GET", "/api/control/tools/web/searxng"); } catch (e) { box.replaceChildren(h("p", { class: "err", text: e.message })); return; }
   const p = s.progress || {};
   const running = (p.state === "queued" || p.state === "running") && String(p.task || "").startsWith("searxng");
+  const using = s.web_enabled ? s.provider : null;
+  const NAMES = { bing: "必应直连", searxng: "自建 SearXNG", bocha: "博查", brave: "Brave Search", mock: "测试数据" };
   const head = h("div", { class: "row" }, h("strong", { text: "联网搜索" }),
-    s.installed ? (s.in_use && s.web_enabled ? pill("已开启", "ok") : pill("已安装，未开启", "warn")) : pill("未安装", ""));
-  const intro = h("p", { class: "note", text: "让 Violet 能查实时信息（天气、新闻、资料）。一键在这台服务器上装一个私有的 SearXNG 开源搜索：" +
-    "只在本机 127.0.0.1 监听、不对外开放、不需要 Docker，装好自动开启；卸载会把它和它的文件全部删掉。" });
+    using ? pill(`已开启 · ${NAMES[using] || using}`, "ok") : pill("未开启", ""));
+  const intro = h("p", { class: "note", text: "让 Violet 能查实时信息（天气、新闻、资料）。选一种搜索方式就行，下面的“测试联网”可以马上看到能不能用。" });
+
+  // option 1: Bing
+  const bingOn = using === "bing";
+  const bing = h("div", { class: "card web-option" + (bingOn ? " current" : "") },
+    h("div", { class: "row" }, h("strong", { text: "必应直连（推荐）" }), bingOn ? pill("正在使用", "ok") : null),
+    h("p", { class: "note", text: "直接用必应的搜索结果，不用安装任何东西、不用 Key，国内服务器也能用。" }),
+    h("div", { class: "row" }, bingOn ? null : h("button", { type: "button", text: "使用必应直连", onclick: async () => {
+      try { await searxngAction("bing"); toast("联网搜索已开启：必应直连"); loaders.tools(); } catch (e) { toast(e.message, false); }
+    } })));
+
+  // option 2: SearXNG
+  const sxOn = using === "searxng" && s.in_use;
   const buttons = h("div", { class: "row" });
   if (running) {
-    buttons.append(h("button", { type: "button", text: "正在执行…查看进度", onclick: () => watchSearxng("联网搜索", p.task === "searxng-install" ? "enable" : "disable") }));
+    buttons.append(h("button", { type: "button", text: "正在执行…查看进度", onclick: () => watchSearxng("联网搜索", p.task === "searxng-install" ? "enable" : p.task === "searxng-uninstall" ? "disable" : null) }));
   } else if (!s.available) {
     buttons.append(h("p", { class: "note", text: "这种安装方式不能在网页上安装。以 root 在服务器上运行：/opt/violet/violet searxng install，再在“设置 → 功能开关”里打开联网搜索。" }));
   } else if (!s.installed) {
-    buttons.append(h("button", { type: "button", text: "一键安装联网搜索", onclick: async () => {
-      try { await searxngAction("install"); watchSearxng("安装联网搜索（SearXNG）", "enable"); } catch (e) { toast(e.message, false); }
+    buttons.append(h("button", { class: "ghost", type: "button", text: "一键安装 SearXNG", onclick: async () => {
+      // switched to SearXNG afterwards only when nothing else is searching yet
+      try { await searxngAction("install"); watchSearxng("安装 SearXNG", using ? null : "enable"); } catch (e) { toast(e.message, false); }
     } }));
   } else {
-    if (!(s.in_use && s.web_enabled)) {
-      buttons.append(h("button", { type: "button", text: "开启联网搜索", onclick: async () => {
-        try { await searxngAction("enable"); toast("联网搜索已开启"); loaders.tools(); } catch (e) { toast(e.message, false); }
+    if (!sxOn) {
+      buttons.append(h("button", { class: "ghost", type: "button", text: "改用 SearXNG", onclick: async () => {
+        try { await searxngAction("enable"); toast("联网搜索已开启：自建 SearXNG"); loaders.tools(); } catch (e) { toast(e.message, false); }
       } }));
     }
     buttons.append(h("button", { class: "ghost", type: "button", text: "选择搜索引擎", onclick: () => engineDialog(s) }));
-    buttons.append(h("button", { class: "danger", type: "button", text: "卸载联网搜索", onclick: async () => {
-      if (!(await confirmBox("卸载这台服务器上的 SearXNG？服务、程序和缓存都会删除，联网搜索随之关闭。以后可以再一键安装。"))) return;
-      try { await searxngAction("uninstall"); watchSearxng("卸载联网搜索", "disable"); } catch (e) { toast(e.message, false); }
+    buttons.append(h("button", { class: "danger", type: "button", text: "卸载 SearXNG", onclick: async () => {
+      if (!(await confirmBox("卸载这台服务器上的 SearXNG？服务、程序和缓存都会删除。" + (sxOn ? "它正在用来搜索，卸载后联网搜索会关闭（可以改用必应直连）。" : "")))) return;
+      try { await searxngAction("uninstall"); watchSearxng("卸载 SearXNG", "disable"); } catch (e) { toast(e.message, false); }
     } }));
   }
   const last = p.state === "failed" && String(p.task || "").startsWith("searxng") ? h("p", { class: "err", text: "上次操作失败：" + (p.message || "") }) : null;
-  // 0.7.2: test the search Violet really uses and one public page, right here
-  const testOut = h("div", { class: "stack web-test" });
-  if (s.web_enabled || s.installed) {
-    buttons.prepend(h("button", { class: "ghost", type: "button", text: "测试联网", onclick: async (ev) => {
-      ev.target.disabled = true;
-      testOut.replaceChildren(h("p", { class: "note", text: "正在测试：搜索一次“今天天气”，再打开一个网页…" }));
-      try { showWebTest(testOut, await api("POST", "/api/control/tools/web/test", {}), s.installed); }
-      catch (e) { testOut.replaceChildren(h("p", { class: "err", text: e.message })); }
-      ev.target.disabled = false;
-    } }));
-  }
   const engines = s.engines_text ? h("p", { class: "note", text: `搜索引擎：${s.engines_text}` +
     (s.last_note ? `。上次测试：${s.last_note}` : "") }) : null;
-  box.replaceChildren(...[head, intro, s.installed && s.url ? h("p", { class: "note", text: `地址 ${s.url}（只有本机能访问）` }) : null,
-    engines, buttons, testOut, last].filter(Boolean));                // replaceChildren(null) would insert the text "null"
+  const searxng = h("details", { class: "card web-option" + (sxOn ? " current" : ""), open: sxOn || s.installed || running ? true : null },
+    h("summary", {}, h("strong", { text: "自建 SearXNG（可选）" }), sxOn ? " · 正在使用" : s.installed ? " · 已安装" : ""),
+    ...[h("p", { class: "note", text: "在这台服务器上装一个私有的开源搜索（只在本机 127.0.0.1 监听、不需要 Docker），它同时问好几个搜索引擎。" +
+      "国内服务器上它的搜索引擎经常连不上，那样请用上面的必应直连。卸载会把它和它的文件全部删掉。" }),
+      s.installed && s.url ? h("p", { class: "note", text: `地址 ${s.url}（只有本机能访问）` }) : null, engines, buttons, last].filter(Boolean));
+
+  // the test: whatever is in use right now
+  const testOut = h("div", { class: "stack web-test" });
+  const test = h("div", { class: "row" }, h("button", { type: "button", text: "测试联网", disabled: using ? null : true, onclick: async (ev) => {
+    ev.target.disabled = true;
+    testOut.replaceChildren(h("p", { class: "note", text: "正在测试：搜索一次“今天天气”，再打开一个网页…" }));
+    try { showWebTest(testOut, await api("POST", "/api/control/tools/web/test", {}), s.installed && using === "searxng"); }
+    catch (e) { testOut.replaceChildren(h("p", { class: "err", text: e.message })); }
+    ev.target.disabled = false;
+  } }), using ? null : h("span", { class: "note", text: "先选一种搜索方式" }));
+  box.replaceChildren(head, intro, bing, searxng, test, testOut);
 }
 // 0.7.3 (user: "做成可以自定义的，点开来可以自己选择搜索引擎"): tick the engines (only names from the server's list),
 // IPv4 only, then "保存并测试" (exactly that choice) or "自动选择" (try the usual choices until one finds results)
@@ -502,7 +521,8 @@ function showWebTest(box, t, installed) {
     t.by_engine && Object.keys(t.by_engine).length ? h("p", { class: "note", text: "有结果的搜索引擎：" +
       Object.entries(t.by_engine).map(([k, v]) => `${k} ${v} 条`).join("、") }) : null,
     t.dead_engines && t.dead_engines.length ? h("p", { class: "note", text: "没有响应的搜索引擎：" + t.dead_engines.join("、") }) : null,
-    !s.ok && installed ? h("p", { class: "note", text: "搜不到东西时点“选择搜索引擎”：只勾国内能访问的；如果每个引擎都是“超时”，再勾上“只用 IPv4”。也可以点“自动选择”。" }) : null,
+    !s.ok && installed ? h("p", { class: "note", text: "搜不到东西时点“选择搜索引擎”：只勾国内能访问的；如果每个引擎都是“超时”，再勾上“只用 IPv4”。还不行就用上面的“必应直连”。" }) : null,
+    !s.ok && t.provider === "bing" ? h("p", { class: "note", text: "必应没有给结果：可以在“设置 → 功能开关 → 必应地址”换成另一个地址再试；还不行，说明必应拒绝了这台服务器，可以改用博查等付费搜索（同一页的“搜索服务”）。" }) : null,
     h("div", { class: "row" }, pill(f.ok ? "网页阅读正常" : "网页阅读失败", f.ok ? "ok" : "bad"),
       h("span", { class: "note", text: f.ok ? `打开了 ${f.url}（${f.latency_ms} 毫秒）` : `打不开 ${f.url}：${f.error}` })),
   ];

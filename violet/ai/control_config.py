@@ -136,9 +136,13 @@ SETTINGS: list[Setting] = [
     # Violet stage 3: everything a user may want to change without editing .env. Left out on purpose: what the
     # installer owns (paths, port, HTTPS, data directory, admin token), stdio MCP commands, test switches.
     Setting("VIOLET_WEB_SEARCH_PROVIDER", "搜索服务", "features", "choice", "now",
-            "SearXNG 是自建的开源搜索；博查 / Brave 是付费搜索 API（Key 在“工具”页的联网工具里替换）", "searxng",
-            choices=(("searxng", "SearXNG（自建）"), ("bocha", "博查（付费 API）"), ("brave", "Brave Search（付费 API）"),
-                     ("none", "不搜索"))),
+            "必应直连不用安装、国内服务器也能用；SearXNG 是自建的开源搜索；博查 / Brave 是付费搜索 API（Key 在“工具”页的联网工具里替换）",
+            "searxng",
+            choices=(("bing", "必应直连（不用安装）"), ("searxng", "SearXNG（自建）"), ("bocha", "博查（付费 API）"),
+                     ("brave", "Brave Search（付费 API）"), ("none", "不搜索"))),
+    Setting("VIOLET_WEB_BING_HOST", "必应地址", "features", "choice", "now",
+            "必应直连用哪个地址：国内服务器用 cn.bing.com", "cn.bing.com",
+            choices=(("cn.bing.com", "cn.bing.com（国内）"), ("www.bing.com", "www.bing.com（国际）"))),
     Setting("VIOLET_WEB_SEARCH_ENDPOINT", "搜索 API 地址", "features", "url", "now",
             "只对博查 / Brave：换成别的接口地址；留空 = 官方地址", optional=True),
     Setting("VIOLET_WEB_SEARCH_LANGUAGE", "搜索语言", "features", "choice", "now", "SearXNG 搜索结果的语言", "zh-CN",
