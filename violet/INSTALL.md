@@ -36,6 +36,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 4. “聊天渠道”页：微信、QQ、Telegram 三张卡片并列，用哪个点哪个——微信扫码；QQ 点“使用 QQ”，按步骤去 [q.qq.com](https://q.qq.com/#/) 建机器人、填 AppID 和 AppSecret；Telegram 点“使用 Telegram”，找 [@BotFather](https://t.me/BotFather) 要 Token。QQ / Telegram 连上后在卡片里生成绑定码，用你自己的账号发给机器人。NapCat（OneBot v11）等其他接入方式在“更多设置”里。
 5. “工具与手机”页（可选）：
    - 手机 MCP（可选，一行安装命令不会装它）：点“一键安装中继”，弹窗里有进度条（下载、校验、注册服务、放行端口）；装好后页面会列出手机 App 要填的中继地址、设备密钥和证书指纹（都有复制按钮）；再把手机“安全”页的访问令牌粘贴回来就连上了。中继的手机端口是安装时随机选的（20000–29999，页面上显示实际端口），云服务器要在安全组放行它。手机连不上时点“换一个端口”（同样有进度条），设备密钥和证书指纹不变，手机上只改中继地址。网页上的这两个按钮由 root 的 `violet-task` 服务执行，只有 root + systemd 的安装才有；其他安装方式页面上给出命令（`/opt/violet/violet mcp-relay install`、`mcp-relay set-port [端口号]`）。重装 / 升级 Violet 会保留已经装好的中继；彻底卸载会把它一起删掉。
+   - 联网搜索（可选）：在“联网工具”里点“一键安装联网搜索”，弹窗显示进度：从 GitHub 下载 SearXNG 开源搜索的源码，装进它自己的 Python 环境，注册成系统服务 `violet-searxng`（只在本机 127.0.0.1 监听，不对外开放，不放行任何防火墙端口，不需要 Docker），测试一次搜索，然后自动打开联网搜索。点“卸载联网搜索”会删掉服务、程序、缓存并关闭联网搜索；彻底卸载 Violet 时也会一起删掉。服务器上的命令：`/opt/violet/violet searxng install | uninstall | status`。依赖从和 Violet 相同的 pip 源安装（服务器设置了 `PIP_INDEX_URL` 或 pip.conf 的镜像也会用上）。想用 Docker 部署的，仍可按 `deploy/searxng/README.md` 手动部署。
    - 其他 MCP 服务器：添加后给工具分类（只读 / 写入 / 高风险 / 拒绝）、授权给 Agent、点“测试”。
 6. “诊断”页：哪里不正常、为什么、怎么处理；能安全自动修复的有按钮。
 

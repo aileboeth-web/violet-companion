@@ -320,8 +320,14 @@ details.card>summary{cursor:pointer;font-weight:600}
 .pbar-step{margin:0;font-size:13.5px;overflow-wrap:anywhere}
 .pbar-pct{font-weight:700;font-variant-numeric:tabular-nums;color:var(--accent)}
 /* the channels page: WeChat, QQ and Telegram side by side */
-.platforms{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin:14px 0;align-items:start}
+.platforms{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin:14px 0;align-items:stretch}
 .platform{display:flex;flex-direction:column;gap:10px}
+.platform-intro{min-height:2.6em}                            /* one or two lines: the cards' bodies start level */
+.platform-body{flex:1;display:flex;flex-direction:column;gap:10px;min-width:0}
+.platform-body:empty{display:none}
+.platform-foot{margin-top:auto;padding-top:10px;border-top:1px solid var(--line)}
+.platform-foot:empty,.platform-foot>.row:empty{display:none}
+.platform .wx-qr{width:168px;height:168px}
 .platform,.platform:hover{transform:none;animation:none}     /* re-rendered on every click: no entrance animation */
 .platform-head{display:flex;align-items:center;gap:10px}
 .platform-head strong{font-size:17px}

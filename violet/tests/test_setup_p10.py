@@ -124,7 +124,7 @@ def test_the_generated_password_is_not_forced_to_change(made, env_guard):
     assert setup.status_code == 200
     assert next(i for i in setup.get_json()["data"]["items"] if i["id"] == "admin")["state"] == "ok"
     assert c.get("/api/control/overview", headers=JSON).status_code == 200
-    assert c.get("/memories", headers={"Accept": "text/html"}).status_code == 200
+    assert c.get("/control", headers={"Accept": "text/html"}).status_code == 200
     assert c.get("/auth/status", headers=JSON).get_json()["must_change"] is True
     ok =c.post("/auth/password", json={"current": "Initial1Password2x", "new": "my own long passphrase 7",
                                         "confirm": "my own long passphrase 7"}, headers=SAME)

@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, request
 
 from ai.reconcile import RESOLUTIONS, pending_items, resolve
 
 
 def register_ops_routes(app: Flask, violetdb) -> None:
     @app.get("/reconciliation")
-    def reconciliation_page():
-        return render_template("reconciliation.html")
+    def reconciliation_page():                        # 0.7.1: the old page is gone
+        return redirect("/control#diagnostics")
 
     @app.get("/api/reconciliation")
     def reconciliation_list():

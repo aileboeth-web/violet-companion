@@ -384,7 +384,7 @@ def test_dashboard_image_management(api, violetdb, provider_file, monkeypatch, t
     assert v.status_code == 200 and v.get_json()["version"] == "1.1.0"
     assert api.put("/api/images/visual-profile", headers=AUTH, json={"patch": {"identity_note": "真人"}}).status_code == 200
     assert api.put("/api/images/visual-profile", headers=AUTH, json={"patch": {"secret": 1}}).status_code == 400
-    assert api.get("/images", headers=AUTH).status_code == 200
+    assert api.get("/images", headers=AUTH).status_code == 302               # 0.7.1: old page -> Control Center
 
 
 def test_image_guard_itself_refuses_unrequested_images(violetdb):

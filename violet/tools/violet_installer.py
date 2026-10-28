@@ -974,8 +974,10 @@ def systemd_unit(layout: Layout, user: str | None, user_mode: bool = False) -> s
 
 UPDATER_NAME = f"{SERVICE_NAME}-update"
 TASK_NAME = f"{SERVICE_NAME}-task"
-# 0.7.0: what the Control Center may ask the root task service to do (one word in <data>/control/task-request)
-TASK_ACTIONS = {"relay-install": "install", "relay-set-port": "set-port"}
+# 0.7.0: what the Control Center may ask the root task service to do (one word in <data>/control/task-request):
+# word -> (which tool, its action). 0.7.1: the private SearXNG for web search.
+TASK_ACTIONS = {"relay-install": ("relay", "install"), "relay-set-port": ("relay", "set-port"),
+                "searxng-install": ("searxng", "install"), "searxng-uninstall": ("searxng", "uninstall")}
 PROGRESS_STALE_SECONDS = 1800
 
 
@@ -1984,16 +1986,26 @@ def root_task(opts: Options, run: Callable[..., Any] = subprocess.run) -> dict[s
         progress.failed("不认识的请求，没有执行")
         return {"ok": False, "action": "rejected"}
     progress(2, "开始")
+    tool, action = TASK_ACTIONS[task]
     try:
-        result = mcp_relay(opts, TASK_ACTIONS[task], run=run, progress=progress)
+        if tool == "relay":
+            result = mcp_relay(opts, action, run=run, progress=progress)
+        else:
+            result = searxng_command(opts, action, run=run, progress=progress)
     except InstallError as exc:
         progress.failed(str(exc))
         raise
     port = result.get("device_port")
-    message = ("中继已安装" if task == "relay-install" else "手机入口已换到新端口") + (f"，手机入口端口 {port}" if port else "")
-    if result.get("healthy") is False:
-        message += "（但中继还没有通过健康检查，稍后点“刷新”看看）"
-    progress.done(message, device_port=port, notes=[str(n) for n in result.get("notes") or []][:8])
+    if task == "searxng-install":
+        message = f"联网搜索已安装：{result.get('url')}"
+    elif task == "searxng-uninstall":
+        message = "联网搜索（SearXNG）已卸载"
+    else:
+        message = ("中继已安装" if task == "relay-install" else "手机入口已换到新端口") + (f"，手机入口端口 {port}" if port else "")
+        if result.get("healthy") is False:
+            message += "（但中继还没有通过健康检查，稍后点“刷新”看看）"
+    notes = [str(n) for n in result.get("notes") or result.get("removed") or []][:8]
+    progress.done(message, device_port=port, notes=notes, url=result.get("url"))
     return {"ok": True, "action": task, **{k: v for k, v in result.items() if k != "ok"}}
 
 
@@ -2075,6 +2087,10 @@ def purge_system(layout: Layout, state: dict, run: Callable[..., Any] = subproce
         removed += _relay_module().uninstall(layout, state, run=run, remove_rule=lambda r: remove_rule(r, run))
     except Exception:                       # noqa: BLE001 -- never let it stop the rest of the purge
         pass
+    try:                                    # 0.7.1: the private SearXNG (`violet searxng install` / the web button)
+        removed += _searxng_module().uninstall(layout, state, run=run)
+    except Exception:                       # noqa: BLE001
+        pass
     for rule in state.get("firewall_rules") or []:
         if rule.get("tool") not in ("ufw", "firewalld", "iptables", "ip6tables", "nftables"):
             continue
@@ -2125,7 +2141,8 @@ def purge_leftovers(layout: Layout, run: Callable[..., Any] = subprocess.run,
     """`uninstall --purge` without install.json: remove what a Violet installation leaves (units, the relay we
     installed, marked firewall rules, our system account, Violet's own folders in <root>) -- never anything else."""
     removed = purge_system(layout, {"user": SERVICE_USER}, run=run, linux_root=linux_root)
-    known = ("app", "app.previous", "app.failed", "app.new", "venv", "config", "data", "backups", "logs", "mcp-relay")
+    known = ("app", "app.previous", "app.failed", "app.new", "venv", "config", "data", "backups", "logs", "mcp-relay",
+             "searxng")
     if layout.root.exists() and ((layout.root / "app" / "tools" / "violet_installer.py").exists()
                                  or (layout.root / "config" / "violet.env").exists()
                                  or (layout.root / "data" / "control").exists()):
@@ -2194,6 +2211,44 @@ def mcp_relay(opts: Options, action: str, run: Callable[..., Any] = subprocess.r
                                                             remove_rule=lambda r: remove_rule(r, run))}
             save_state(layout, state)
     except relay.RelayError as exc:
+        raise InstallError(str(exc)) from None
+    return {"ok": True, **result}
+
+
+def _searxng_module():
+    try:
+        import violet_searxng                 # run as a script: <app>/tools is on sys.path
+    except ImportError:
+        from tools import violet_searxng
+    return violet_searxng
+
+
+SEARXNG_ACTIONS = ("install", "uninstall", "status")
+
+
+def searxng_command(opts: Options, action: str, run: Callable[..., Any] = subprocess.run,
+                    progress: Callable[[int, str], None] | None = None) -> dict[str, Any]:
+    """`violet searxng install | uninstall | status` (tools/violet_searxng.py): the private web-search service."""
+    mod = _searxng_module()
+    if action not in SEARXNG_ACTIONS:
+        raise InstallError("用法：violet searxng install | uninstall | status")
+    layout = Layout(opts.root)
+    state = load_state(layout)
+    if not state:
+        raise InstallError(f"{layout.root} 没有安装 Violet")
+    if action != "status" and (os.name == "nt" or not _is_root()):
+        raise InstallError("联网搜索要以 root 在 Linux 上安装（/opt/violet/violet 会自动切换到 root）")
+    try:
+        if action == "install":
+            result = mod.install(layout, state, python=venv_python(layout), port_free=port_free, run=run,
+                                 progress=progress)
+            save_state(layout, state)
+        elif action == "uninstall":
+            result = {"ok": True, "removed": mod.uninstall(layout, state, run=run)}
+            save_state(layout, state)
+        else:
+            result = mod.status(state)
+    except mod.SearxngError as exc:
         raise InstallError(str(exc)) from None
     return {"ok": True, **result}
 
@@ -2329,7 +2384,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", choices=["install", "upgrade", "update", "rollback", "status", "backup", "restore",
                                             "uninstall", "doctor", "start", "stop", "restart", "info",
                                             "reset-password", "reset-entrance", "set-port", "auto-update",
-                                            "firewall-apply", "mcp-relay", "root-task"])
+                                            "firewall-apply", "mcp-relay", "root-task", "searxng"])
     parser.add_argument("--update-feed", help=argparse.SUPPRESS)  # install: a release.json instead of GitHub
     parser.add_argument("--update-repo", help="install: GitHub owner/repo to update from (a fork)")
     parser.add_argument("--check", action="store_true", help="update: only report whether a newer release exists")
@@ -2410,6 +2465,8 @@ def main(argv: list[str] | None = None) -> int:
             result = firewall_apply(Layout(root))
         elif args.command == "root-task":
             result = root_task(opts)
+        elif args.command == "searxng":
+            result = searxng_command(opts, args.archive or "status")
         elif args.command == "mcp-relay":
             action = args.archive or "status"
             if args.value is not None:

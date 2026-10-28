@@ -403,6 +403,51 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
             return bad("保存失败，没有改动", problems=str(exc))
         return ok({"saved": saved, "web": web_status(violetdb)})
 
+    @app.get("/api/control/tools/web/searxng")
+    def control_tools_web_searxng_state():
+        """0.7.1: the one-click private SearXNG -- installed?, the root helper, the last task, web search's settings."""
+        from ai.root_tasks import available, read_progress, searxng_export
+        from ai.settings import env_bool, env_str
+        export = searxng_export()
+        url = env_str("VIOLET_WEB_SEARXNG_URL", "")
+        return ok({"installed": export is not None, "url": export and export.get("url"), "available": available(),
+                   "progress": read_progress("task"), "web_enabled": env_bool("VIOLET_WEB_ENABLED", False),
+                   "in_use": bool(export) and url.rstrip("/") == str(export.get("url")).rstrip("/")
+                   and env_str("VIOLET_WEB_SEARCH_PROVIDER", "searxng") == "searxng"})
+
+    @app.post("/api/control/tools/web/searxng")
+    def control_tools_web_searxng():
+        """0.7.1 {action, confirm: true}: install / uninstall -> the root task service (progress: /api/control/progress/
+        task); enable -> web search on with the URL root exported (never a URL from the request); disable -> off."""
+        from ai.root_tasks import request_task, searxng_export
+        body = request.get_json(silent=True) or {}
+        if body.get("confirm") is not True:
+            return bad("需要确认（confirm: true）")
+        action = str(body.get("action") or "")
+        if action in ("install", "uninstall"):
+            try:
+                return ok(request_task("searxng-" + action))
+            except (PermissionError, RuntimeError) as exc:
+                return bad(str(exc), 409)
+        if action == "enable":
+            export = searxng_export()
+            if export is None:
+                return bad("还没有安装联网搜索（SearXNG）", 409)
+            changes = {"VIOLET_WEB_ENABLED": True, "VIOLET_WEB_SEARCH_PROVIDER": "searxng",
+                       "VIOLET_WEB_SEARXNG_URL": export["url"]}
+            reason = "一键安装联网搜索：启用"
+        elif action == "disable":
+            changes, reason = {"VIOLET_WEB_ENABLED": False, "VIOLET_WEB_SEARXNG_URL": None}, "卸载联网搜索：关闭"
+        else:
+            return bad("不支持的操作")
+        try:
+            result = store().save(changes, actor(), reason, apply=apply_now)
+        except ValidationError as exc:
+            return bad("保存失败，没有改动任何设置", problems=exc.problems)
+        except StoreError as exc:
+            return bad(str(exc), 500)
+        return ok(result)
+
     @app.post("/api/control/tools/web/secret")
     def control_tools_web_secret():
         """Phase 9.3: replace (or remove with value null) the search provider credential. Write-only."""

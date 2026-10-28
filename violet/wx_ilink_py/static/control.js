@@ -369,7 +369,10 @@ function renderWeb(web) {
     h("span", { text: WEB_SETTING_LABELS[k] || k }),
     h("input", { type: "number", value: v, min: web.limits[k][0], max: web.limits[k][1], "data-web": k })));
   const failures = web.recent_failures.map((f) => h("div", { class: "note", text: `${f.created_at.slice(11, 16)} ${f.kind} ${f.status} ${f.error_code || ""}` }));
-  box.replaceChildren(h("div", { class: "card" }, h("h3", { text: "联网工具（violet-web）" }),
+  const oneClick = h("div", { class: "stack-wide", id: "searxng-box" });
+  loadSearxng(oneClick);
+  box.replaceChildren(h("div", { class: "card" }, h("h3", { text: "联网工具（violet-web）" }), oneClick,
+    h("details", {}, h("summary", { text: "详细状态和限额" }),
     ...facts.map((t) => h("div", { class: "note", text: t })), ...settings,
     h("div", { class: "row" },
       h("button", { text: "保存设置", onclick: async () => {
@@ -383,7 +386,55 @@ function renderWeb(web) {
         try { await api("POST", "/api/control/tools/web/secret", { value, confirm: true }); toast("凭据已替换"); loaders.tools(); } catch (e) { toast("替换失败：" + e.message, false); }
       } })),
     h("p", { class: "note", text: "搜索服务、SearXNG 地址和搜索语言在“设置 → 功能开关”里改；停用单个联网工具在下面 violet-web 的工具列表里。" }),
-    ...(failures.length ? [h("div", { class: "note", text: "今天的失败：" }), ...failures] : [])));
+    ...(failures.length ? [h("div", { class: "note", text: "今天的失败：" }), ...failures] : []))));
+}
+// 0.7.1: one click installs a private SearXNG on this server (root task service, progress dialog) and switches web
+// search on with it; uninstalling removes it and switches web search off
+async function searxngAction(action) {
+  return api("POST", "/api/control/tools/web/searxng", { action, confirm: true });
+}
+function watchSearxng(title, after) {
+  progressDialog({ title, url: "/api/control/progress/task", onFinish: async (p, extra) => {
+    if (p.state === "done" && after) {
+      try { await searxngAction(after); toast(after === "enable" ? "联网搜索已开启" : "联网搜索已关闭"); }
+      catch (e) { toast(e.message, false); }
+    }
+    if (p.state === "done" && p.notes && p.notes.length) extra.replaceChildren(h("ul", { class: "note" }, ...p.notes.map((n) => h("li", { text: n }))));
+    loaders.tools();
+  } });
+}
+async function loadSearxng(box) {
+  let s;
+  try { s = await api("GET", "/api/control/tools/web/searxng"); } catch (e) { box.replaceChildren(h("p", { class: "err", text: e.message })); return; }
+  const p = s.progress || {};
+  const running = (p.state === "queued" || p.state === "running") && String(p.task || "").startsWith("searxng");
+  const head = h("div", { class: "row" }, h("strong", { text: "联网搜索" }),
+    s.installed ? (s.in_use && s.web_enabled ? pill("已开启", "ok") : pill("已安装，未开启", "warn")) : pill("未安装", ""));
+  const intro = h("p", { class: "note", text: "让 Violet 能查实时信息（天气、新闻、资料）。一键在这台服务器上装一个私有的 SearXNG 开源搜索：" +
+    "只在本机 127.0.0.1 监听、不对外开放、不需要 Docker，装好自动开启；卸载会把它和它的文件全部删掉。" });
+  const buttons = h("div", { class: "row" });
+  if (running) {
+    buttons.append(h("button", { type: "button", text: "正在执行…查看进度", onclick: () => watchSearxng("联网搜索", p.task === "searxng-install" ? "enable" : "disable") }));
+  } else if (!s.available) {
+    buttons.append(h("p", { class: "note", text: "这种安装方式不能在网页上安装。以 root 在服务器上运行：/opt/violet/violet searxng install，再在“设置 → 功能开关”里打开联网搜索。" }));
+  } else if (!s.installed) {
+    buttons.append(h("button", { type: "button", text: "一键安装联网搜索", onclick: async () => {
+      try { await searxngAction("install"); watchSearxng("安装联网搜索（SearXNG）", "enable"); } catch (e) { toast(e.message, false); }
+    } }));
+  } else {
+    if (!(s.in_use && s.web_enabled)) {
+      buttons.append(h("button", { type: "button", text: "开启联网搜索", onclick: async () => {
+        try { await searxngAction("enable"); toast("联网搜索已开启"); loaders.tools(); } catch (e) { toast(e.message, false); }
+      } }));
+    }
+    buttons.append(h("button", { class: "danger", type: "button", text: "卸载联网搜索", onclick: async () => {
+      if (!(await confirmBox("卸载这台服务器上的 SearXNG？服务、程序和缓存都会删除，联网搜索随之关闭。以后可以再一键安装。"))) return;
+      try { await searxngAction("uninstall"); watchSearxng("卸载联网搜索", "disable"); } catch (e) { toast(e.message, false); }
+    } }));
+  }
+  const last = p.state === "failed" && String(p.task || "").startsWith("searxng") ? h("p", { class: "err", text: "上次操作失败：" + (p.message || "") }) : null;
+  box.replaceChildren(...[head, intro, s.installed && s.url ? h("p", { class: "note", text: `地址 ${s.url}（只有本机能访问）` }) : null,
+    buttons, last].filter(Boolean));                // replaceChildren(null) would insert the text "null"
 }
 loaders.tools = async () => {
   try { const data = await api("GET", "/api/control/tools"); renderTools(data.servers); renderWeb(data.web); }

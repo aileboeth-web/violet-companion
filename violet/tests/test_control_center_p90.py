@@ -595,12 +595,10 @@ def test_control_page_script_never_builds_html_from_data():
     assert "localStorage" not in js and "sessionStorage" not in js
 
 
-def test_memories_page_keeps_model_written_categories_out_of_inline_js():
-    """Audit fix: a core-memory category (MemoryAgent output) used to be pasted into onclick="setCoreFilter('...')"."""
-    js = (Path(__file__).resolve().parent.parent / "wx_ilink_py" / "static" / "memories.js").read_text(encoding="utf-8")
-    assert "setCoreFilter('${" not in js
-    assert re.search(r"onclick=\"[^\"]*\$\{(?!s ===)", js) is None          # no data interpolated into inline handlers
-    assert ".replace(/'/g, '&#39;')" in js
+def test_the_old_memories_page_is_gone():
+    """The old memories.js (audit fix: a model-written category pasted into an inline onclick) went with the old
+    panel in 0.7.1; the Control Center builds DOM nodes only."""
+    assert not (Path(__file__).resolve().parent.parent / "wx_ilink_py" / "static" / "memories.js").exists()
 
 
 def test_admin_cli_sets_a_password_without_echoing_it(env_guard, capsys):

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Callable
 
 import os
 
-from flask import Flask, Response, jsonify, redirect, render_template, request
+from flask import Flask, Response, jsonify, redirect, request
 
 from ai.settings import env_bool
 from .auth import install_auth, resolve_admin_token
@@ -69,31 +69,18 @@ def create_app(
                 pass
         return state
 
+    # 0.7.1 (user: "把旧面板都删了吧"): the old pages are gone; their addresses lead to the Control Center
     @app.get("/")
-    def index() -> str:
-        autostart = request.args.get("autostart") == "1"
-        if autostart and not client.get_status().get("logged_in"):
-            client.start_login_async()
-        return render_template("dashboard.html", state=_status())
+    def index() -> Response:
+        return redirect("/control")
 
-    @app.post("/login")
-    def trigger_login() -> Response:
-        force_refresh = request.form.get("force_refresh") == "1"
-        client.start_login_async(force_refresh=force_refresh)
-        return redirect("/")
-
-    @app.post("/logout")
-    def trigger_logout() -> Response:
-        client.clear_credentials()
-        return redirect("/")
+    @app.get("/memories")
+    def memories_page() -> Response:
+        return redirect("/control#memories")
 
     @app.get("/api/status")
     def api_status() -> Response:
         return jsonify(_status())
-
-    @app.get("/memories")
-    def memories_page() -> str:
-        return render_template("memories.html")
 
     @app.get("/api/memories")
     def api_memories() -> Response:

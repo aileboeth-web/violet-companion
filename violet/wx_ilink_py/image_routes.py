@@ -8,7 +8,7 @@ models) are POSTs, so they also pass the dashboard's same-origin checks.
 
 from __future__ import annotations
 
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, redirect, request, send_file
 
 from ai.images.media import MediaAssetStore, MediaError
 from ai.images.registry import CAPABILITIES, ImageProviderRegistry
@@ -28,8 +28,8 @@ def register_image_routes(app: Flask, violetdb) -> None:
         return request.get_json(silent=True) or {}
 
     @app.get("/images")
-    def images_page():
-        return render_template("images.html")
+    def images_page():                                # 0.7.1: the old page is gone
+        return redirect("/control#settings")
 
     @app.get("/api/images/providers")
     def images_providers():

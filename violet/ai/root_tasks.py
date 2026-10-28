@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-TASKS = ("relay-install", "relay-set-port")
+TASKS = ("relay-install", "relay-set-port", "searxng-install", "searxng-uninstall")
 NAMES = ("task", "update")
 STALE_SECONDS = 1800           # a running entry this old belongs to a helper that was killed
 
@@ -43,7 +43,7 @@ def read_progress(name: str, now: float | None = None) -> dict[str, Any]:
     if not isinstance(data, dict):
         return {"state": "none"}
     out = {k: data.get(k) for k in ("task", "state", "percent", "step", "message", "at", "started_at", "version",
-                                    "device_port", "notes")}
+                                    "device_port", "notes", "url")}
     if out["state"] in ("queued", "running") and (now or time.time()) - float(out.get("at") or 0) > STALE_SECONDS:
         out["state"] = "stale"
         out["message"] = "很久没有进度了：服务器上的任务可能已经中断，可以再试一次"
@@ -73,6 +73,16 @@ def available() -> bool:
 def busy(name: str = "task") -> bool:
     request = control_dir() / ("task-request" if name == "task" else "update-request")
     return request.exists() or read_progress(name)["state"] in ("queued", "running")
+
+
+def searxng_export() -> dict[str, Any] | None:
+    """What root wrote after installing the private SearXNG (<data>/control/searxng.json): {url, port, ...}."""
+    try:
+        data = json.loads((control_dir() / "searxng.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    url = str(data.get("url") or "") if isinstance(data, dict) else ""
+    return data if url.startswith("http://127.0.0.1:") else None
 
 
 def request_task(task: str) -> dict[str, Any]:

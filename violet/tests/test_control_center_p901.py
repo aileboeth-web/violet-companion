@@ -432,21 +432,17 @@ def test_main_reload_hook_makes_the_two_switches_immediate(monkeypatch):
     assert "extra_reload_hooks=[reload_debounce_config, reload_runtime_switches]" in src
 
 
-# ---------------------------------------------------------------- 6. legacy pages: no data inside inline handlers
+# ---------------------------------------------------------------- 6. no data inside inline handlers
 
-ALLOWED = ("+", "jsarg(", "esc(JSON.stringify(", "!!")
-CONSTANT = {"s === '全部' ? 'null' : '\"' + s + '\"'"}                      # memories.js: a fixed status list
-
-
-def test_inline_handlers_only_take_numbers_or_json_strings():
+def test_no_page_has_inline_handlers_with_data_any_more():
+    """The legacy pages (whose inline onclick="..." handlers this used to check) were removed in 0.7.1; what is left --
+    the Control Center and the login page -- builds DOM nodes and puts no ${...} into any inline handler."""
     files = list((ROOT / "wx_ilink_py" / "templates").glob("*.html")) + list((ROOT / "wx_ilink_py" / "static").glob("*.js"))
-    seen = 0
+    assert files
     for path in files:
         for line in path.read_text(encoding="utf-8").splitlines():
             for handler in re.findall(r'on\w+="(.*?)">', line):
-                for expr in re.findall(r"\$\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}", handler):
-                    seen += 1
-                    assert expr.startswith(ALLOWED) or expr in CONSTANT, f"{path.name}: ${{{expr}}}"
-    # the check still sees the legacy pages' handlers (13 since stage 3 moved persona.html, with ~12 of them, into
-    # the Control Center, which builds DOM nodes and has no inline handlers at all)
-    assert seen >= 10
+                assert not re.search(r"\$\{", handler), f"{path.name}: {handler}"
+    names = {p.name for p in files}
+    assert not names & {"dashboard.html", "memories.html", "images.html", "web.html", "reconciliation.html",
+                        "dashboard.js", "memories.js"}

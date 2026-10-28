@@ -355,7 +355,7 @@ def test_dashboard_web_views_and_controls(api, violetdb, authorized, web, provid
     assert reading and reading[0]["source_url"] == findings[0]["url"]
     requests = api.get("/api/web/requests", headers=AUTH).get_json()["requests"]
     assert {r["kind"] for r in requests} == {"search", "fetch"}
-    assert api.get("/web", headers=AUTH).status_code == 200
+    assert api.get("/web", headers=AUTH).status_code == 302                  # 0.7.1: old page -> Control Center
 
 
 # ---------------------------------------------------------------------------

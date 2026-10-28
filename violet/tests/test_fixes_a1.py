@@ -323,7 +323,7 @@ def test_D4_dashboard_lists_explains_and_resolves(make_world, tmp_path):
     assert c.post(f"/api/reconciliation/outbound/{oid}", headers=auth, json={"resolution": "maybe"}).status_code == 400
     assert c.post(f"/api/reconciliation/outbound/{oid}", headers=auth, json={"resolution": "sent"}).get_json()["status"] == "sent"
     assert c.post(f"/api/reconciliation/outbound/{oid}", headers=auth, json={"resolution": "sent"}).status_code == 404
-    assert c.get("/reconciliation", headers=auth).status_code == 200
+    assert c.get("/reconciliation", headers=auth).status_code == 302          # 0.7.1: old page -> Control Center
 
 
 # ---------------------------------------------------------------------------

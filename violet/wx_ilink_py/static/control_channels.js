@@ -135,44 +135,54 @@
       } })));
   }
 
-  // a bot channel in use (QQ, Telegram, and the extra ones under "更多设置")
-  function channelBody(ch, who) {
+  // a bot channel in use (QQ, Telegram, and the extra ones under "更多设置"): {body, foot}
+  function channelParts(ch, who) {
     const toggleEdit = () => { if (editing.has(ch.id)) editing.delete(ch.id); else editing.add(ch.id); loaders.channels(); };
-    return [
-      statusLine(ch),
-      ch.webhook_path ? h("p", { class: "note", text: `上报地址（填到 OneBot 实现里）：${location.origin}${ch.webhook_path}` }) : null,
-      ch.enabled && !ch.peers.bound ? step("✓", "最后一步：绑定你的账号", bindBox(ch, who)) : null,
-      h("div", { class: "row" },
+    return {
+      body: [
+        statusLine(ch),
+        ch.webhook_path ? h("p", { class: "note", text: `上报地址（填到 OneBot 实现里）：${location.origin}${ch.webhook_path}` }) : null,
+        ch.enabled && !ch.peers.bound ? step("✓", "最后一步：绑定你的账号", bindBox(ch, who)) : null,
+        editing.has(ch.id) ? editForm(ch) : null,
+        peersDetails(ch),
+        ch.peers.bound ? h("details", {}, h("summary", { text: "再绑定一个账号" }), bindBox(ch, who)) : null,
+      ],
+      foot: [
         h("button", { class: "ghost", type: "button", text: "测试连接", onclick: () => testChannel(ch) }),
         h("button", { class: "ghost", type: "button", text: ch.enabled ? "关闭" : "开启", onclick: () => setEnabled(ch, !ch.enabled) }),
-        h("button", { class: "ghost", type: "button", text: editing.has(ch.id) ? "收起配置" : "修改配置", onclick: toggleEdit })),
-      editing.has(ch.id) ? editForm(ch) : null,
-      peersDetails(ch),
-      ch.peers.bound ? h("details", {}, h("summary", { text: "再绑定一个账号" }), bindBox(ch, who)) : null,
-    ];
+        h("button", { class: "ghost", type: "button", text: editing.has(ch.id) ? "收起配置" : "修改配置", onclick: toggleEdit }),
+      ],
+    };
   }
 
   // ---------------------------------------------------------------- the three platform cards
-  function platformCard(p, ch, ...body) {
+  // 0.7.1 (user: "没有对齐一高一低的，这三个工具是平级的不要更优待微信"): every card has the same parts -- name and
+  // state, one line of introduction, a body that fills the card, and the buttons in a row at the bottom; the cards in
+  // a row are equally tall. A platform not in use shows one button "使用 X" in every case.
+  function platformCard(p, ch, title, body, foot) {
+    // WeChat waiting for a scan counts as "not used" until loadWechat knows better (it sets the state itself)
+    const used = ch && ch.status.state !== "disabled" && !(p.key === "wechat" && ch.status.state === "needs_login");
     return h("div", { class: "card platform", id: "ch-card-" + (ch ? ch.id : p.key) },
-      h("div", { class: "platform-head" }, h("strong", { text: p.name }),
-        ch && ch.status.state !== "disabled" ? statePill(ch) : pill(ch ? "未使用（已关闭）" : "未使用", "")), ...body);
+      h("div", { class: "platform-head" }, h("strong", { text: title || p.name }), used ? statePill(ch) : pill("未使用", "")),
+      p.intro ? h("p", { class: "note platform-intro", text: p.intro }) : null,
+      h("div", { class: "platform-body" }, ...body),
+      h("div", { class: "row platform-foot" }, ...foot));
   }
 
   function wechatCard(p, ch) {
-    return platformCard(p, ch, h("p", { class: "note", text: p.intro }), wechatBox(ch),
-      ch.enabled ? h("div", { class: "row" },
-        h("button", { class: "ghost", type: "button", text: "测试连接", onclick: () => testChannel(ch) }),
-        h("button", { class: "ghost", type: "button", text: "关闭微信", onclick: () => setEnabled(ch, false) })) : null);
+    const body = h("div", { class: "stack" });
+    const foot = h("div", { class: "row" });
+    const card = platformCard(p, ch, null, [body], [foot]);
+    loadWechat(body, foot, ch, card);
+    return card;
   }
 
   function setupSteps(p) {
     const spec = (data.types || []).find((t) => t.type === p.type) || { defaults: {} };
     const form = h("div", { class: "stack" });
     const err = h("p", { class: "err" });
-    let steps;
     if (p.type === "qqbot") {
-      steps = [
+      form.append(
         step(1, "打开 QQ 开放平台，创建一个机器人", h("p", { class: "note" }, "用手机 QQ 扫码登录 ", extLink(QQ_URL, "q.qq.com"),
           "，在“机器人”里新建一个（个人就可以注册）。")),
         step(2, "在机器人的“开发设置”里复制 AppID 和 AppSecret",
@@ -180,107 +190,123 @@
           secretInput("app_secret", "开发设置里的 AppSecret")),
         step(3, "在“沙箱配置”里把你自己的 QQ 加进去", h("p", { class: "note", text: "机器人审核上线之前，只有沙箱里的成员能和它聊天。" }),
           fieldInput("sandbox", !!spec.defaults.sandbox, false)),
-      ];
+        h("p", { class: "note", text: "注意：QQ 只允许机器人在你发消息后的一段时间内回复，Violet 主动发的消息可能被 QQ 拒绝。" }));
     } else {
       const adv = h("details", {}, h("summary", { text: "高级：代理、接口地址" }), h("div", { class: "stack" },
         fieldInput("proxy", spec.defaults.proxy ?? "", false), fieldInput("api_base", spec.defaults.api_base ?? "", false),
         fieldInput("poll_timeout", spec.defaults.poll_timeout ?? 25, false)));
-      steps = [
+      form.append(
         step(1, "在 Telegram 里打开 @BotFather", h("p", { class: "note" }, "点 ", extLink(BOTFATHER_URL, "t.me/BotFather"),
           " 打开，发送 /newbot，按提示给机器人起名字和用户名。")),
         step(2, "把 BotFather 回复的 Token 填到这里", secretInput("bot_token", "形如 123456789:AAE…"),
-          h("p", { class: "note", text: "服务器在中国大陆时连不上 Telegram，需要在下面的“高级”里填代理。" }), adv),
-      ];
+          h("p", { class: "note", text: "服务器在中国大陆时连不上 Telegram，需要在下面的“高级”里填代理。" }), adv));
     }
-    form.append(...steps);
-    return h("div", { class: "stack" }, form, err, h("div", { class: "row" },
-      h("button", { type: "button", text: "保存并连接", onclick: async () => {
-        err.textContent = "";
-        const { config, secrets } = collect(form);
-        const ids = new Set(data.channels.map((c) => c.id));
-        const id = [p.key, p.key + "bot", ...[2, 3, 4, 5, 6, 7, 8, 9].map((n) => p.key + n)].find((x) => !ids.has(x));
-        try {
-          await api("POST", "/api/control/channels", { type: p.type, id, label: p.name, config, secrets });
-          opened.delete(p.key); toast(`${p.name} 已保存，正在连接`); loaders.channels();
-        } catch (e) { err.textContent = problemsText(e); }
-      } }),
-      h("button", { class: "ghost", type: "button", text: "取消", onclick: () => { opened.delete(p.key); loaders.channels(); } })),
-      p.type === "qqbot" ? h("p", { class: "note", text: "注意：QQ 只允许机器人在你发消息后的一段时间内回复，Violet 主动发的消息可能被 QQ 拒绝。" }) : null);
+    return {
+      body: [form, err],
+      foot: [
+        h("button", { type: "button", text: "保存并连接", onclick: async () => {
+          err.textContent = "";
+          const { config, secrets } = collect(form);
+          const ids = new Set(data.channels.map((c) => c.id));
+          const id = [p.key, p.key + "bot", ...[2, 3, 4, 5, 6, 7, 8, 9].map((n) => p.key + n)].find((x) => !ids.has(x));
+          try {
+            await api("POST", "/api/control/channels", { type: p.type, id, label: p.name, config, secrets });
+            opened.delete(p.key); toast(`${p.name} 已保存，正在连接`); loaders.channels();
+          } catch (e) { err.textContent = problemsText(e); }
+        } }),
+        h("button", { class: "ghost", type: "button", text: "取消", onclick: () => { opened.delete(p.key); loaders.channels(); } }),
+      ],
+    };
   }
 
   function botCard(p, ch) {
-    if (ch) return platformCard(p, ch, ...channelBody(ch, p.type === "qqbot" ? "你的 QQ" : "你自己的 Telegram 账号"));
-    if (!opened.has(p.key)) {
-      return platformCard(p, null, h("p", { class: "note", text: p.intro }),
-        h("div", { class: "row" }, h("button", { type: "button", text: `使用 ${p.name}`, onclick: () => { opened.add(p.key); loaders.channels(); } })));
+    if (ch) {
+      const parts = channelParts(ch, p.type === "qqbot" ? "你的 QQ" : "你自己的 Telegram 账号");
+      return platformCard({ ...p, intro: "" }, ch, null, parts.body, parts.foot);
     }
-    return platformCard(p, null, setupSteps(p));
+    if (!opened.has(p.key)) {
+      return platformCard(p, null, null, [],
+        [h("button", { type: "button", text: `使用 ${p.name}`, onclick: () => { opened.add(p.key); loaders.channels(); } })]);
+    }
+    const parts = setupSteps(p);
+    return platformCard({ ...p, intro: "" }, null, null, parts.body, parts.foot);
   }
 
   // ---------------------------------------------------------------- WeChat QR login (Violet stage 3; was the old page)
   let wxTimer = null;
-  function wechatBox(ch) {
-    const box = h("div", { class: "wx-login", id: "wx-login" });
-    loadWechat(box, ch);
-    return box;
-  }
-  function scheduleWechat(box, ch, ms) {
+  function scheduleWechat(body, foot, ch, card, ms) {
     clearTimeout(wxTimer);
     wxTimer = setTimeout(() => {
-      if (box.isConnected && $("#tab-channels").classList.contains("active") && !document.hidden) loadWechat(box, ch);
-      else if (box.isConnected) scheduleWechat(box, ch, 3000);
+      if (body.isConnected && $("#tab-channels").classList.contains("active") && !document.hidden) loadWechat(body, foot, ch, card);
+      else if (body.isConnected) scheduleWechat(body, foot, ch, card, 3000);
     }, ms);
   }
-  async function loadWechat(box, ch) {
+  function setHead(card, text, kind) {
+    const old = card.querySelector(".platform-head .pill");
+    if (old) old.replaceWith(pill(text, kind));
+  }
+  function setIntro(card, show) {
+    const intro = card.querySelector(".platform-intro");
+    if (intro) intro.hidden = !show;
+  }
+  async function loadWechat(body, foot, ch, card) {
     let w;
-    try { w = await api("GET", "/api/control/wechat"); } catch (e) { box.replaceChildren(h("p", { class: "err", text: e.message })); return; }
+    try { w = await api("GET", "/api/control/wechat"); } catch (e) { body.replaceChildren(h("p", { class: "err", text: e.message })); return; }
     if (w.logged_in) {
-      const wasLoggingIn = box.dataset.loggingIn === "1";
-      box.dataset.loggingIn = ""; box.dataset.qr = "";
-      box.replaceChildren(h("div", { class: "row" }, pill("微信已登录", "ok"), h("span", { class: "note", text: `账号 ${w.account}` }),
-        h("button", { class: "ghost", text: "退出微信登录", onclick: async () => {
+      const wasLoggingIn = body.dataset.loggingIn === "1";
+      body.dataset.loggingIn = ""; body.dataset.qr = "";
+      setIntro(card, false);
+      if (!ch.enabled) setHead(card, "未使用", "");
+      body.replaceChildren(statusLine(ch), h("p", { class: "note", text: `已登录的微信：${w.account}` }));
+      foot.replaceChildren(
+        h("button", { class: "ghost", type: "button", text: "测试连接", onclick: () => testChannel(ch) }),
+        h("button", { class: "ghost", type: "button", text: ch.enabled ? "关闭" : "开启", onclick: () => setEnabled(ch, !ch.enabled) }),
+        h("button", { class: "ghost", type: "button", text: "退出登录", onclick: async () => {
           if (!(await confirmBox("退出微信登录？Violet 会停止收发微信消息，之后要重新扫码。"))) return;
           try { await api("POST", "/api/control/wechat/logout", { confirm: true }); toast("已退出微信登录"); loaders.channels(); }
           catch (e) { toast(e.message, false); }
-        } })));
+        } }));
       if (wasLoggingIn) { toast("微信登录成功"); loaders.channels(); }
       return;
     }
     if (w.logging_in && w.qr) {
-      box.dataset.loggingIn = "1";
+      body.dataset.loggingIn = "1";
+      setIntro(card, false);
+      setHead(card, w.qr.status === "scaned" ? "已扫码" : "等待扫码", "warn");
       const status = [pill(w.qr.status_text, w.qr.status === "scaned" ? "ok" : "warn"),
         h("p", { class: "note", text: "用要给 Violet 使用的微信扫码，并在手机上确认。二维码过期会自动换新" +
           (w.qr.refreshes ? `（已换 ${w.qr.refreshes} 次）` : "") + "。" })];
       const key = w.qr.image || w.qr.url || "";
-      const slot = box.querySelector(".wx-status");
-      if (slot && box.dataset.qr === key) {
+      const slot = body.querySelector(".wx-status");
+      if (slot && body.dataset.qr === key) {
         slot.replaceChildren(...status);        // same code: only the words change, the picture stays (no flicker)
       } else {
-        box.dataset.qr = key;
+        body.dataset.qr = key;
         const img = w.qr.image ? h("img", { class: "wx-qr", src: w.qr.image, alt: "微信登录二维码" }) : h("div", { class: "wx-qr wx-qr-wait" });
-        box.replaceChildren(h("div", { class: "wx-qr-wrap" }, img,
-          h("div", { class: "stack" }, h("strong", { text: "用微信扫一扫登录" }), h("div", { class: "stack wx-status" }, ...status),
-            w.qr.url ? h("a", { href: w.qr.url, target: "_blank", rel: "noopener", text: "二维码显示不出来？打开登录链接" }) : null)));
+        body.replaceChildren(step(1, "用微信扫一扫", img, h("div", { class: "stack wx-status" }, ...status)));
+        foot.replaceChildren(w.qr.url ? h("a", { href: w.qr.url, target: "_blank", rel: "noopener", text: "二维码显示不出来？打开登录链接" }) : "");
       }
-      scheduleWechat(box, ch, 2000);
+      scheduleWechat(body, foot, ch, card, 2000);
       return;
     }
-    box.dataset.loggingIn = ""; box.dataset.qr = "";
-    box.replaceChildren(h("div", { class: "row" }, pill("微信未登录", "warn"),
-      w.error ? h("span", { class: "note", text: `上次失败：${w.error}` }) : null,
-      h("button", { text: "扫码登录", onclick: async () => {
-        try {
-          if (ch && !ch.enabled) await api("POST", chUrl(ch), { enabled: true });       // scanning means "use WeChat"
-          await api("POST", "/api/control/wechat/login", {}); box.dataset.loggingIn = "1"; scheduleWechat(box, ch, 800); toast("正在获取二维码…");
-        } catch (e) { toast(e.message, false); }
-      } })));
+    body.dataset.loggingIn = ""; body.dataset.qr = "";
+    setIntro(card, true);
+    setHead(card, ch.enabled && ch.status.state !== "needs_login" ? "未登录" : "未使用", "");
+    body.replaceChildren(...(w.error ? [h("p", { class: "err", text: `上次登录失败：${w.error}` })] : []));
+    foot.replaceChildren(h("button", { type: "button", text: "使用 微信", onclick: async () => {
+      try {
+        if (!ch.enabled) await api("POST", chUrl(ch), { enabled: true });       // scanning means "use WeChat"
+        await api("POST", "/api/control/wechat/login", {}); body.dataset.loggingIn = "1";
+        body.replaceChildren(h("p", { class: "note", text: "正在获取二维码…" }));
+        scheduleWechat(body, foot, ch, card, 800);
+      } catch (e) { toast(e.message, false); }
+    } }));
   }
 
   // ---------------------------------------------------------------- "更多设置": other channels, the add form, history
   function extraCard(ch) {
-    return h("div", { class: "card platform", id: "ch-card-" + ch.id },
-      h("div", { class: "platform-head" }, h("strong", { text: ch.label }), h("span", { class: "note", text: `${ch.id} · ${ch.type}` }), statePill(ch)),
-      ...channelBody(ch, "你自己的账号"));
+    const parts = channelParts(ch, "你自己的账号");
+    return platformCard({ key: ch.id, name: ch.label, intro: "" }, ch, `${ch.label}（${ch.type}）`, parts.body, parts.foot);
   }
 
   function renderAddForm() {

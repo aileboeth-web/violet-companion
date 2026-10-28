@@ -10,6 +10,7 @@ on:
             "violet/tools/violet_service.py", "violet/tools/violet_relay.py", "violet/requirements.txt",
             "violet/deploy/linux-e2e/**", "violet/wx_ilink_py/auth.py", "violet/wx_ilink_py/phone_mcp_routes.py",
             "violet/wx_ilink_py/setup_routes.py", "violet/ai/root_tasks.py", "violet/ai/updates.py",
+            "violet/tools/violet_searxng.py", "violet/wx_ilink_py/control_routes.py",
             ".github/workflows/install-linux.yml"]
 jobs:
   systemd:

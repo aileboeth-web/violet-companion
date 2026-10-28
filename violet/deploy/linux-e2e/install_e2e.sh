@@ -231,6 +231,47 @@ if [ "$MODE" = "systemd" ]; then
   pass "phone relay: $(echo "$RELAY" | json 'd.get("asset") or "existing relay"') installed (sha256 checked), device port $DEV_PORT open, pairing values in the Control Center"
 fi
 
+# 4e. 0.7.1: web search -- the page's "一键安装联网搜索": the root task service puts SearXNG (source from GitHub, own
+#     venv, systemd, 127.0.0.1 only) on this server; the page then switches web search on with the exported URL;
+#     uninstall removes it again. Installed once more by the CLI so the purge at the end has to remove it too.
+if [ "$MODE" = "systemd" ]; then
+  wait_task() {   # $1 what (for messages): polls /api/control/progress/task until done (fails otherwise); WT_MAX
+    local st="" tp="" pct
+    WT_MAX=0
+    for _ in $(seq 1 300); do
+      tp="$(curl -sk -b "$JAR" -H 'Accept: application/json' "$SCHEME://127.0.0.1:$PORT/api/control/progress/task")"
+      st="$(echo "$tp" | json 'd["data"]["state"]')"
+      pct="$(echo "$tp" | json 'd["data"].get("percent") or 0')"; [ "$pct" -gt "$WT_MAX" ] && WT_MAX="$pct"
+      case "$st" in done|failed|stale) break ;; esac
+      sleep 3
+    done
+    [ "$st" = "done" ] || { echo "$tp"; journalctl -u violet-task -n 60 --no-pager || true; fail "$1: $st"; }
+  }
+  SXAPI="$SCHEME://127.0.0.1:$PORT/api/control/tools/web/searxng"
+  post_sx() { code -b "$JAR" -H "Origin: $SCHEME://127.0.0.1:$PORT" -H 'Content-Type: application/json' \
+                --data "{\"action\":\"$1\",\"confirm\":true}" "$SXAPI"; }
+  [ "$(post_sx install)" = "200" ] || fail "web search install request"
+  wait_task "SearXNG install"; MAXP="$WT_MAX"
+  systemctl is-active --quiet violet-searxng || { journalctl -u violet-searxng -n 60 --no-pager || true; fail "violet-searxng not active"; }
+  SXURL="$(python3 -c "import json;print(json.load(open('$ROOT/data/control/searxng.json'))['url'])")"
+  case "$SXURL" in http://127.0.0.1:*) ;; *) fail "searxng url $SXURL" ;; esac
+  ! ss -ltnH "( sport = :${SXURL##*:} )" | grep -v '127.0.0.1' | grep -q . || fail "SearXNG listens beyond loopback"
+  curl -fsS --max-time 30 "$SXURL/search?q=violet&format=json" | python3 -c "import json,sys;d=json.load(sys.stdin);assert 'results' in d" \
+    || fail "SearXNG JSON search"
+  [ "$(post_sx enable)" = "200" ] || fail "web search enable"
+  curl -sk -b "$JAR" -H 'Accept: application/json' "$SXAPI" | json 'd["data"]["web_enabled"] and d["data"]["in_use"]' \
+    | grep -q True || fail "web search not switched on"
+  pass "web search installed from the Control Center (progress reached $MAXP%), SearXNG JSON search on $SXURL, switched on"
+  [ "$(post_sx uninstall)" = "200" ] || fail "web search uninstall request"
+  wait_task "SearXNG uninstall"
+  [ "$(post_sx disable)" = "200" ] || fail "web search disable"
+  [ ! -e /etc/systemd/system/violet-searxng.service ] && [ ! -e "$ROOT/searxng" ] && [ ! -e "$ROOT/data/control/searxng.json" ] \
+    || fail "SearXNG left behind after uninstall"
+  pass "web search uninstalled from the Control Center (service, files and export gone)"
+  "$ROOT/violet" searxng install --json >/dev/null || fail "violet searxng install (CLI)"
+  systemctl is-active --quiet violet-searxng || fail "violet-searxng not active after the CLI install"
+fi
+
 # 5. repair keeps port and password; backup; status
 OUT2="$(curl -fsSL "http://127.0.0.1:$PORT_HTTP/install.sh" | bash -s -- --root "$ROOT" --json)" || fail "repair"
 [ "$(echo "$OUT2" | json 'd["port"]')" = "$PORT" ] || fail "repair changed the port"
@@ -266,10 +307,12 @@ fi
 if [ "$MODE" = "systemd" ]; then
   ! id violet >/dev/null 2>&1 || fail "system account violet left behind"
   for unit in violet.service violet-update.service violet-update.timer violet-update.path violet-task.service \
-              violet-task.path violet-mcp-relay.service; do
+              violet-task.path violet-mcp-relay.service violet-searxng.service; do
     [ ! -e "/etc/systemd/system/$unit" ] || fail "$unit left behind"
   done
   [ ! -e /var/lib/private/violet-mcp-relay ] && [ ! -e /var/lib/violet-mcp-relay ] || fail "relay data left behind"
+  [ ! -e /var/cache/private/violet-searxng ] && [ ! -e /var/cache/violet-searxng ] || fail "SearXNG cache left behind"
+  ! systemctl is-active --quiet violet-searxng || fail "SearXNG still running after purge"
 fi
 pass "uninstall --purge removed everything (folder, services, update timer, phone relay, system account)"
 echo "ALL PASSED"

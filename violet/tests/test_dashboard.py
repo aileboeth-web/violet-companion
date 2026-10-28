@@ -11,7 +11,7 @@ TOKEN = os.environ["VIOLET_ADMIN_TOKEN"]
 
 PROTECTED_GET = ["/", "/memories", "/api/status", "/api/memories", "/proactive/status",
                  "/api/pipeline-status", "/api/health"]
-PROTECTED_POST = ["/login", "/logout", "/reload-env", "/proactive/test", "/proactive/schedule-now", "/shutdown"]
+PROTECTED_POST = ["/reload-env", "/proactive/test", "/proactive/schedule-now", "/shutdown"]
 
 
 class StubScheduler:
@@ -114,7 +114,21 @@ def test_public_endpoints_leak_nothing(make_app):
     c = app.test_client()
     # phase 10.4: the service name only (the installer tells Violet from another program on the port); no version, no state
     assert c.get("/healthz").get_json() == {"ok": True, "service": "violet"}
-    assert c.get("/static/dashboard.js").status_code == 200
+    assert c.get("/static/control.js").status_code == 200
+
+
+def test_the_old_pages_are_gone_and_lead_to_the_control_center(make_app):
+    """0.7.1 (user: "把旧面板都删了吧"): the old dashboard and its pages; their addresses redirect."""
+    app, _, _ = make_app()
+    c = app.test_client()
+    for path, target in (("/", "/control"), ("/memories", "/control#memories"), ("/web", "/control#tools"),
+                         ("/images", "/control#settings"), ("/reconciliation", "/control#diagnostics")):
+        resp = c.get(path, headers=bearer())
+        assert resp.status_code == 302 and resp.headers["Location"] == target, path
+    assert c.post("/login", headers=bearer()).status_code in (404, 405)
+    assert c.get("/static/dashboard.js").status_code == 404
+    html = c.get("/control", headers=bearer()).get_data(as_text=True)
+    assert "旧版面板" not in html
 
 
 def test_manual_proactive_send_disabled_by_default(make_app, monkeypatch):

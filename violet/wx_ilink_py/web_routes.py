@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, request
 
 from ai.settings import env_bool, env_str
 from ai.web.explorer import WebExplorer
@@ -25,8 +25,8 @@ def register_web_routes(app: Flask, violetdb) -> None:
         return request.get_json(silent=True) or {}
 
     @app.get("/web")
-    def web_page():
-        return render_template("web.html")
+    def web_page():                                   # 0.7.1: the old page is gone
+        return redirect("/control#tools")
 
     @app.get("/api/web/status")
     def web_status():
