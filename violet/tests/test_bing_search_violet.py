@@ -24,14 +24,14 @@ RSS = ('<?xml version="1.0" encoding="utf-8" ?><rss version="2.0"><channel><titl
 
 
 class Fetcher:
-    def __init__(self, text=None, error=None):
-        self.text_, self.error, self.urls = text, error, []
+    def __init__(self, text=None, error=None, by_host=None):
+        self.text_, self.error, self.urls, self.by_host = text, error, [], by_host or {}
 
     def fetch(self, url, **kw):
         self.urls.append((url, kw))
         if self.error:
             raise self.error
-        body = self.text_
+        body = next((t for h, t in self.by_host.items() if f"//{h}/" in url), self.text_)
 
         class R:
             def text(self):
@@ -51,13 +51,22 @@ def test_bing_rss_results_become_search_results():
     assert BingRssProvider(Fetcher(RSS)).search("天气", limit=1)[0].title == "北京天气预报"
 
 
-def test_bing_failures_are_search_errors(monkeypatch):
+def test_bing_failures_are_search_errors_and_the_other_address_is_tried(monkeypatch):
+    page = Fetcher("<html><body>请完成验证</body>")
     with pytest.raises(SearchError) as info:
-        BingRssProvider(Fetcher("<html><body>请完成验证</body>")).search("x")
+        BingRssProvider(page).search("x")
+    assert info.value.code == "blocked" and [u for u, _ in page.urls][1].startswith("https://www.bing.com/")
+    assert "text/html" in page.urls[0][1]["accept_types"]               # the body decides, not the label
+    # cn.bing.com answers with a page (CI, a US machine), www.bing.com with RSS: results
+    mixed = Fetcher(by_host={"cn.bing.com": "<html>redirect</html>", "www.bing.com": RSS})
+    assert BingRssProvider(mixed).search("天气")[0].title == "北京天气预报"
+    with pytest.raises(SearchError) as info:
+        BingRssProvider(Fetcher("<?xml version='1.0'?><feed/>")).search("x")
     assert info.value.code == "blocked"
+    slow = Fetcher(error=WebPolicyError("timeout", "total time limit reached"))
     with pytest.raises(SearchError) as info:
-        BingRssProvider(Fetcher(error=WebPolicyError("timeout", "total time limit reached"))).search("x")
-    assert info.value.code == "timeout"
+        BingRssProvider(slow).search("x")
+    assert info.value.code == "timeout" and len(slow.urls) == 1          # no second wait
     monkeypatch.setenv("VIOLET_WEB_BING_HOST", "evil.example")              # only the two Bing hosts
     assert BingRssProvider(Fetcher(RSS)).host == "cn.bing.com"
     monkeypatch.setenv("VIOLET_WEB_BING_HOST", "www.bing.com")

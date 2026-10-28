@@ -332,17 +332,35 @@ class BingRssProvider:
         self.fetcher = fetcher
 
     def search(self, query, *, recency_days=None, limit=5):
+        """The chosen address first, then the other one once (CI, 0.7.4: from a US cloud machine cn.bing.com answered
+        with a web page; from mainland China both answer RSS as text/xml)."""
+        other = next(h for h in self.HOSTS if h != self.host)
+        error: SearchError | None = None
+        for host in (self.host, other):
+            try:
+                return self._search(host, query, limit)
+            except SearchError as exc:
+                if exc.code == "timeout":                # the other address would only double the wait
+                    raise
+                error = exc
+        raise error
+
+    def _search(self, host, query, limit):
         import xml.etree.ElementTree as ET
         params = {"q": query, "format": "rss", "setlang": "zh-Hans", "mkt": "zh-CN"}
-        url = f"https://{self.host}/search?{urlencode(params)}"
+        url = f"https://{host}/search?{urlencode(params)}"
         try:
-            result = self.fetcher.fetch(url, accept_types=("application/rss+xml", "text/xml", "application/xml"))
+            # text/html too: what counts is that the body really is RSS (checked below), not the label
+            result = self.fetcher.fetch(url, accept_types=("application/rss+xml", "text/xml", "application/xml",
+                                                           "text/html"))
         except WebPolicyError as exc:
             raise search_error(exc) from None
         try:
             root = ET.fromstring(result.text())          # expat refuses entity expansion bombs; size is capped above
         except ET.ParseError:
-            raise SearchError("blocked", "bing answered with a web page instead of results (a verification page?)") from None
+            raise SearchError("blocked", f"{host} answered with a web page instead of results (a verification page?)") from None
+        if root.tag != "rss":
+            raise SearchError("blocked", f"{host} did not answer with RSS")
         out = []
         for item in root.iter("item"):
             link = (item.findtext("link") or "").strip()
