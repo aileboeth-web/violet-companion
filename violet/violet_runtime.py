@@ -506,9 +506,13 @@ class MessageSender:
                     continue
                 logger.error("send failed (outbound #%s): %s", outbound_id, last_error)
                 self.db.update_outbound_message(outbound_id, status="failed", error=last_error)
+                from ai import trace
+                trace.step("发送", 渠道=self.channel, 消息号=outbound_id, 结果="失败", 尝试次数=attempt, 原因=last_error)
                 return last_error
             message_id = self.db.add_assistant_message("text", content, channel=self.channel) if record_history else None
             self.db.update_outbound_message(outbound_id, status="sent", message_id=message_id)
+            from ai import trace
+            trace.step("发送", 渠道=self.channel, 消息号=outbound_id, 结果="已发出", 尝试次数=attempt, 内容=trace.text(content))
             return None
         self.db.update_outbound_message(outbound_id, status="failed", error=last_error)
         return last_error
@@ -1030,6 +1034,10 @@ class VioletRuntime:
         combined = turn.combined
         self.db.update_inbound_messages(turn.inbound_ids, status="processing", turn_id=turn.turn_id, increment_attempts=True)
         conversation = (turn.channel or "wechat", turn.peer_id or "")
+        from ai import trace
+        peer = conversation[1]
+        trace.step("收到消息", 渠道=conversation[0], 对方=(peer[:4] + "…" + peer[-3:]) if len(peer) > 10 else peer or None,
+                   条数=len(turn.inbound_ids) or None, 内容=trace.text(combined))
         try:
             sender = self.sender_for(conversation)
         except LookupError:
@@ -1111,6 +1119,8 @@ class VioletRuntime:
                         self._bump("turns_send_failed")
                         error = f"send: {report.failed[0]['error'] if report.failed else 'cancelled'}"[:500]
         self.db.update_inbound_messages(turn.inbound_ids, status=status, error=error)
+        trace.step("这一轮结束", 结果=status, 错误=error, 回复=trace.text("\n".join(sent_texts)) if sent_texts else "没有发出回复",
+                   不回复=(pipeline or {}).get("should_reply") is False or None, 记忆整理="已排队" if memory_job else None)
         if pipeline is not None and sent_texts:
             try:
                 self.tracker.note_eve_reply("\n".join(sent_texts), pipeline.get("recalled_memories") or [],

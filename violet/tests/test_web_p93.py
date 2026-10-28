@@ -287,6 +287,37 @@ def test_a_question_about_the_latest_version_searches_and_cites_a_real_link(web_
     assert "http://news.example.org/release" in w.client.sent_texts[-1]
 
 
+def test_the_troubleshooting_log_follows_a_whole_turn(web_world, monkeypatch, caplog):
+    """0.7.5: with 排查日志 on, every step of the turn is one line of logger violet.trace with the turn id."""
+    import logging
+    w = web_world
+    w.llm.responders["fake-intent"] = wants(SEARCH)
+    chat_plays(w, (SEARCH, {"query": "Violet 新版 发布"}), final="刚查了一下，2.0 已经发布了 http://news.example.org/release")
+    monkeypatch.setenv("VIOLET_TRACE", "0")
+    with caplog.at_level(logging.INFO, logger="violet.trace"):
+        say(w, "Violet 现在最新是哪个版本啊")
+    assert not [r for r in caplog.records if r.name == "violet.trace"]       # off by default: nothing
+    caplog.clear()
+    monkeypatch.setenv("VIOLET_TRACE", "1")
+    with caplog.at_level(logging.INFO, logger="violet.trace"):
+        say(w, "那 2.0 有什么新功能")
+    lines = [r.getMessage() for r in caplog.records if r.name == "violet.trace"]
+    steps = [line.split(" · ")[0] for line in lines]
+    for name in ("收到消息", "可用工具", "意图识别", "工具计划", "模型调用", "工具调用", "联网搜索", "发送", "这一轮结束"):
+        assert name in steps, (name, steps)
+    assert any("工具请求=" in l and "needed" in l for l in lines if l.startswith("意图识别"))
+    assert any(f"工具=[{SEARCH}]" in l for l in lines if l.startswith("工具计划"))
+    assert any("内容=那 2.0 有什么新功能" in l for l in lines if l.startswith("收到消息"))
+    turns = {getattr(r, "turn", "") for r in caplog.records if r.name == "violet.trace"}
+    assert len(turns) == 1 and next(iter(turns)).startswith(" [turn ")      # all of them carry the same turn id
+    caplog.clear()
+    monkeypatch.setenv("VIOLET_TRACE_CONTENT", "none")
+    with caplog.at_level(logging.INFO, logger="violet.trace"):
+        say(w, "好的谢谢")
+    received = [r.getMessage() for r in caplog.records if r.name == "violet.trace" and r.getMessage().startswith("收到消息")]
+    assert received and "好的谢谢" not in received[0] and "未记录内容" in received[0]
+
+
 def test_small_talk_gets_no_web_tool_and_no_web_note(web_world):
     w = web_world
     chat_plays(w, final="早呀～")

@@ -71,8 +71,10 @@ def register_ops_page_routes(app: Flask, client) -> None:
             limit = int(args.get("limit") or 300)
         except ValueError:
             limit = 300
-        return ok(read(level=args.get("level") or "INFO", query=(args.get("q") or "")[:200],
-                       turn=(args.get("turn") or "")[:64], logger=(args.get("logger") or "")[:100], limit=limit))
+        from ai.trace import enabled
+        result = read(level=args.get("level") or "INFO", query=(args.get("q") or "")[:200],
+                      turn=(args.get("turn") or "")[:64], logger=(args.get("logger") or "")[:100], limit=limit)
+        return ok({**result, "trace_enabled": enabled()})
 
     @app.get("/api/control/logs/download")
     def control_logs_download():

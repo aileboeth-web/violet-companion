@@ -736,6 +736,10 @@ class ProactiveScheduler:
         """kind: "scheduled" / "fixed" for Violet-initiated runs of the scheduler (None: a manual force_run)."""
         event_id = pipeline.get("event_id")
         chat_result = pipeline.get("chat")
+        from ai import trace
+        trace.step("主动联系", 方式=kind or "手动测试", 事件=event_id, 决定=pipeline.get("proactive_decision"),
+                   要发送=pipeline.get("should_send", True), 内容=trace.text((chat_result or {}).get("content")),
+                   错误=pipeline.get("error"))
         if event_id is None or not chat_result or not pipeline.get("should_send", True):
             return
         event_id = int(event_id)

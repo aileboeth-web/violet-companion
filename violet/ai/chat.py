@@ -607,6 +607,9 @@ def _run_pipeline(
     except Exception:
         logger.exception("tool discovery failed; this turn runs without external tools")
         catalog = Catalog()
+    from ai import trace
+    trace.step("可用工具", 工具=sorted(catalog.tools) or None, 连不上=[u.get("server") for u in catalog.unavailable] or None,
+               已停用=catalog.disabled or None, 未授权=catalog.refused or None)
 
     # Step 1: 意图识别
     visualize_step("Intent Recognition", "识别用户意图：对话 or 任务")
@@ -623,6 +626,8 @@ def _run_pipeline(
     if problem:
         logger.warning("Intent output unusable (%s); continuing as %s", problem, intent_json["route"])
         errors.setdefault("intent", problem)
+    trace.step("意图识别", 路线=intent_json.get("route"), 要回复=intent_json.get("should_reply"),
+               工具请求=intent_json.get("tool_query") or "没有", 问题=problem, 原始输出=trace.text(intent_result.get("content")))
     recalled_memories = extract_tool_memories(intent_result)
     try:
         # phase 9.1 (A2): memories the user's own words are about, whether or not Intent searched
@@ -684,6 +689,9 @@ def _run_pipeline(
             plan = plan_for_turn(intent_json, catalog)
         except Exception:
             logger.exception("tool plan failed; this turn runs without external tools")
+    trace.step("工具计划", 方式=plan.get("mode"), 工具=plan.get("tools") or None, 状态=plan.get("status"),
+               原因=plan.get("reason"), 缺少=plan.get("missing"),
+               说明="提醒 / 遗忘请求这一轮不用工具" if reminder is not None or forget is not None else None)
     new_task = intent_json["route"] == "task" and intent_json.get("active_task_id") is None
     if plan["mode"] in ("chat", "blocked") and new_task:
         intent_json = {**intent_json, "route": "chat", "route_override": f"tool_{plan['mode']}"}

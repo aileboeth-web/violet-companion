@@ -222,8 +222,17 @@ SETTINGS: list[Setting] = [
             "Violet 启动后发给你的一句话；留空 = 不发", "", optional=True),
     Setting("VIOLET_TIMEZONE", "时区", "system", "timezone", "restart",
             "提醒、静默时段、课表和每天 03:00 的记忆整理都按这个时区（IANA 名称，例如 Asia/Shanghai）", "Asia/Shanghai"),
-    Setting("VIOLET_LOG_LEVEL", "日志详细程度", "system", "choice", "restart", "日志里从不记录 API Key 和密码", "INFO",
-            choices=(("WARNING", "只记问题"), ("INFO", "标准"), ("DEBUG", "详细（排查问题时用）"))),
+    # 0.7.5 (user: "做一个日志的功能放在设置里面，默认关闭，尽量写清楚一点，方便我们后续排查问题"): ai/trace.py
+    Setting("VIOLET_TRACE", "排查日志", "logs", "bool", "now",
+            "开启后，每一轮对话的处理过程都会写进日志：收到了什么、意图判断、有哪些工具可用、给了 Chat 哪些工具、"
+            "调用了什么模型和工具、结果和耗时、联网搜索、回复和发送。在“日志”页勾“只看排查日志”查看，点对话编号只看这一轮。"
+            "默认关闭；排查完建议关掉（日志会变大）", False),
+    Setting("VIOLET_TRACE_CONTENT", "排查日志里的聊天内容", "logs", "choice", "now",
+            "日志只有管理员能看，显示和下载时会去掉 API Key 等密钥", "short",
+            choices=(("short", "记录前 200 字"), ("full", "记录完整内容（最多 2000 字）"), ("none", "不记录内容，只记字数"))),
+    Setting("VIOLET_LOG_LEVEL", "日志详细程度", "logs", "choice", "restart",
+            "一般用“标准”；“详细”会记下很多程序库的内部信息，排查问题请优先用上面的排查日志。日志里从不记录 API Key 和密码", "INFO",
+            choices=(("WARNING", "只记问题"), ("INFO", "标准"), ("DEBUG", "详细（程序库的内部信息）"))),
     Setting("VIOLET_DASHBOARD_IDLE_MINUTES", "后台无操作多久要重新登录（分钟）", "system", "int", "restart", "", 120, 5, 1440),
     Setting("VIOLET_DASHBOARD_SESSION_HOURS", "后台登录最长保持（小时）", "system", "int", "restart", "", 12, 1, 720),
     Setting("VIOLET_UPDATE_MODE", "更新方式", "updates", "choice", "now",
@@ -234,7 +243,7 @@ SETTINGS: list[Setting] = [
 BY_KEY = {s.key: s for s in SETTINGS}
 GROUPS = {"api": "接口", "models": "模型与 Agent", "prompts": "提示词版本", "messages": "消息发送", "proactive": "主动联系",
           "life": "生活引擎", "behavior": "聊天行为", "memory": "记忆与提醒", "guard": "回复检查", "features": "功能开关",
-          "images": "图片", "mcp": "MCP 工具调用", "system": "系统", "updates": "版本更新"}
+          "images": "图片", "mcp": "MCP 工具调用", "system": "系统", "logs": "日志与排查", "updates": "版本更新"}
 TEXT_MAX = 200
 
 

@@ -128,8 +128,11 @@ class MemoryWorker:
         if job is None:
             return False
         self._running_job = job["id"]
+        from ai.diagnostics import turn_scope
         try:
-            self._process(job)
+            # 0.7.5: the job's log lines (and the troubleshooting log) carry the turn it belongs to
+            with turn_scope(job.get("turn_id")):
+                self._process(job)
         finally:
             self._running_job = None
         return True

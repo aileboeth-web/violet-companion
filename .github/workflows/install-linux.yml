@@ -3,15 +3,15 @@
 # On failure the last lines of the output are also written as an error annotation, on success the PASS lines as a
 # notice (both readable without signing in, through the check-run annotations API).
 name: install-linux
+# 0.7.5 (user: small changes should not wait ~20 minutes for this): only when the installer or what it sets up on
+# the system changes, only on main (a release tag does not run it again); by hand with workflow_dispatch.
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths: ["violet/install.sh", "violet/tools/violet_installer.py", "violet/tools/violet_setup.py",
-            "violet/tools/violet_service.py", "violet/tools/violet_relay.py", "violet/requirements.txt",
-            "violet/deploy/linux-e2e/**", "violet/wx_ilink_py/auth.py", "violet/wx_ilink_py/phone_mcp_routes.py",
-            "violet/wx_ilink_py/setup_routes.py", "violet/ai/root_tasks.py", "violet/ai/updates.py",
-            "violet/tools/violet_searxng.py", "violet/wx_ilink_py/control_routes.py", "violet/ai/web/providers.py",
-            ".github/workflows/install-linux.yml"]
+            "violet/tools/violet_service.py", "violet/tools/violet_relay.py", "violet/tools/violet_searxng.py",
+            "violet/requirements.txt", "violet/deploy/linux-e2e/**", ".github/workflows/install-linux.yml"]
 jobs:
   systemd:
     strategy:

@@ -184,6 +184,11 @@ class WebService:
             self.file_budget.add(kind)
         if status not in ("ok",):
             logger.info("[web] %s %s -> %s (%s)", kind, target, status, error_code)
+        from ai import trace
+        trace.step("联网搜索" if kind == "search" else "读网页", 来源=origin,
+                   服务=getattr(self.provider, "name", None) if kind == "search" else None,
+                   查询=trace.text(target) if kind == "search" else target, 结果=status, 错误=error_code,
+                   条数=result_count if kind == "search" else None, 大小=size or None, 耗时毫秒=latency_ms)
 
     @staticmethod
     def _error(code: str, message: str) -> dict[str, Any]:

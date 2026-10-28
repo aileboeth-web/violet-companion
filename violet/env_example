@@ -54,6 +54,11 @@ VIOLET_RECOVERY_MAX_AGE_SECONDS=600
 VIOLET_SEND_MAX_ATTEMPTS=2
 VIOLET_SIMULATE_TYPING=1
 VIOLET_LOG_LEVEL=INFO
+# 0.7.5 排查日志（ai/trace.py，后台“设置 → 日志与排查”）：每一轮对话的处理过程（收到、意图、可用工具、工具计划、
+# 模型和工具调用、联网搜索、回复、发送）写进日志，logger 为 violet.trace。默认关闭。
+VIOLET_TRACE=0
+# 排查日志里的聊天内容：short（前 200 字）| full（最多 2000 字）| none（只记字数）
+VIOLET_TRACE_CONTENT=short
 
 # ── LLM 调用超时与重试 ────────────────────────────────────────────────────────
 # SDK 自带重试已关闭，只保留这里的业务重试，并受总时长上限约束。

@@ -314,15 +314,32 @@ class BaseAgent:
 
     def _create_completion(self, client, cfg: LLMConfig, **kwargs):
         """Phase 10.6: every model call's outcome goes to the diagnosis (agent, model, error kind -- no content)."""
+        from ai import trace
         from ai.diagnostics import record
+        started = time.monotonic()
+        offered = [t.get("function", {}).get("name") for t in kwargs.get("tools") or [] if isinstance(t, dict)]
         try:
             completion = self._create_completion_primary(client, cfg, **kwargs)
         except Exception as exc:
             from ai.setup_status import classify_error
-            record("model", False, agent=self.__class__.__name__, model=kwargs.get("model"),
-                   error_kind=classify_error(exc)[0])
+            kind = classify_error(exc)[0]
+            record("model", False, agent=self.__class__.__name__, model=kwargs.get("model"), error_kind=kind)
+            trace.step("模型调用", agent=self.__class__.__name__, 模型=kwargs.get("model"), 给的工具=offered or None,
+                       tool_choice=kwargs.get("tool_choice"), 耗时毫秒=int((time.monotonic() - started) * 1000),
+                       结果=f"失败（{kind}：{exc.__class__.__name__}）")
             raise
         record("model", True, agent=self.__class__.__name__)
+        if trace.enabled():
+            usage = getattr(completion, "usage", None)
+            calls = []
+            try:
+                calls = [c.function.name for c in (completion.choices[0].message.tool_calls or [])]
+            except (AttributeError, IndexError, TypeError):
+                pass
+            trace.step("模型调用", agent=self.__class__.__name__, 模型=getattr(completion, "model", None) or kwargs.get("model"),
+                       给的工具=offered or None, tool_choice=kwargs.get("tool_choice"),
+                       耗时毫秒=int((time.monotonic() - started) * 1000),
+                       tokens=getattr(usage, "total_tokens", None), 要调用=calls or None, 结果="ok")
         return completion
 
     def _create_completion_primary(self, client, cfg: LLMConfig, **kwargs):
@@ -479,6 +496,12 @@ class BaseAgent:
                         guard.observe(tool_name, result_text)
                     if "__" in tool_name and tool_name not in handlers:
                         _record_tool_call(tool_name, result_text, self.__class__.__name__)
+                    from ai import trace
+                    if trace.enabled():
+                        outcome, why = trace.tool_outcome(result_text)
+                        trace.step("工具调用", agent=self.__class__.__name__, 工具=tool_name, 参数=trace.text(arguments),
+                                   结果=("被拦下：" + outcome) if denial is not None else outcome, 原因=why,
+                                   长度=len(result_text or ""), 内容=trace.text(result_text))
                     chat_history.append({
                         "role": "tool",
                         "tool_call_id": tool_call.id,

@@ -602,7 +602,7 @@ function settingInput(s, ctx = SETTINGS_PAGE) {
 }
 const SETTINGS_ELSEWHERE = ["api", "models", "images"];          // the model page; 0.7.2: the images page
 const SETTINGS_ORDER = ["behavior", "messages", "proactive", "life", "memory", "features", "images", "guard", "prompts",
-  "mcp", "system", "updates"];
+  "mcp", "system", "logs", "updates"];
 loaders.settings = async () => {
   try {
     const d = await api("GET", "/api/control/settings");
