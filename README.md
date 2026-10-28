@@ -24,7 +24,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 
 Debian、Ubuntu、Rocky 等都用这一条：root 直接装（Debian 最小安装没有 sudo 也可以）；普通用户会自动通过 sudo 运行；没有 sudo 的普通用户先 `su -` 切换到 root。
 
-安装程序会自动装好 Python 和依赖、注册 systemd 服务、选端口，并像 1Panel 一样生成随机的安全入口、用户名和初始密码，最后显示后台地址（`https://服务器IP:端口/安全入口`）。忘记了用 `/opt/violet/violet info` 查看地址和用户名，`/opt/violet/violet reset-password` 重置密码。之后打开后台，按"开始"页填写模型服务的地址和 Key、在"渠道"页登录微信或添加机器人就可以聊天了。详细说明见 [violet/INSTALL.md](violet/INSTALL.md)。
+安装程序会自动装好 Python 和依赖、注册 systemd 服务、选端口，并像 1Panel 一样生成随机的安全入口、用户名和初始密码，最后显示后台地址（`https://服务器IP:端口/安全入口`）。忘记了用 `/opt/violet/violet info` 查看地址和用户名，`/opt/violet/violet reset-password` 重置密码。之后打开后台，按"开始"页填写模型服务的地址和 Key、在“聊天渠道”页连上微信、QQ 或 Telegram 中的任意一个就可以聊天了。详细说明见 [violet/INSTALL.md](violet/INSTALL.md)。
 
 访问方式：以 root 安装时默认开放公网访问，后台地址是 `https://服务器公网IP:端口/安全入口`（自签名证书，浏览器提示“不安全”时选择继续访问）。云服务器还要在控制台的“安全组 / 防火墙”里放行这个端口。只想在服务器本机访问（用 SSH 隧道管理）：安装命令后面加 `-s -- --access local`。已经装好的也可以随时切换，重新运行一次（数据、账号和端口都保留）：
 

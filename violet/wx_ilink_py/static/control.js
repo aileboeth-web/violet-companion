@@ -174,21 +174,39 @@ function lifeText(life) {
   const mode = { on: "运行中", off: "已关闭", paused: "已暂停" }[life.mode] || life.mode;
   return life.last_run_key ? `${mode}（上次 ${life.last_run_key}：${fmt(life.last_outcome)}）` : mode;
 }
+// 0.7.5: the scheduler's reasons are internal English codes
+const DUE = { "not due yet": "还没到时间", "next proactive time initialized": "已排好下次时间", "quiet hours": "免打扰时段",
+  "no user message yet": "还没聊过天", "too soon after user message": "刚聊过，晚点再说", "due": "到时间了" };
+function proactiveText(p) {
+  if (p.enabled === false) return "已关闭";
+  const reason = DUE[p.due_reason] || p.due_reason || "—";
+  const next = p.next_proactive_at ? String(p.next_proactive_at).replace("T", " ").slice(5, 16) : "";
+  return p.due_reason === "not due yet" && next ? `${reason}（下次 ${next}）` : reason;
+}
+// 0.7.5: every channel, not only WeChat ("已连接：QQ"; WeChat not logged in while another one works is not a warning)
+function channelsStat(d) {
+  const rows = (d.channels || []).filter((c) => c.state !== "disabled");
+  const live = rows.filter((c) => c.state === "connected");
+  if (live.length) return stat("聊天渠道", "已连接：" + live.map((c) => c.label).join("、"), "ok");
+  if (!rows.length && d.wechat) return stat("聊天渠道", d.wechat.logged_in ? "微信已登录" : "还没有可用的渠道", d.wechat.logged_in ? "ok" : "warn");
+  return stat("聊天渠道", rows.length ? "都没有连上" : "还没有可用的渠道", "warn");
+}
 loaders.overview = async () => {
   try {
     const d = await api("GET", "/api/control/overview");
-    const s = d.service || {}, p = d.proactive || {}, life = d.life || {}, w = d.wechat || {};
+    const s = d.service || {}, p = d.proactive || {}, life = d.life || {};
     const alive = (x) => (x ? "ok" : "bad");
+    const totals = d.message_totals ? `收 ${d.message_totals.received} · 发 ${d.message_totals.sent}` : messageCount(d.messages);
     const cards = $("#ov-cards"); cards.replaceChildren(
-      stat("微信", w.logged_in ? "已登录" : "未登录", w.logged_in ? "ok" : "warn"),
+      channelsStat(d),
       stat("收消息线程", s.poll_thread_alive ? "运行中" : "未运行", alive(s.poll_thread_alive)),
       stat("回复线程", s.worker_thread_alive ? "运行中" : "未运行", alive(s.worker_thread_alive)),
       stat("记忆线程", s.memory_worker_alive ? "运行中" : "未运行", alive(s.memory_worker_alive)),
       stat("排队中的对话", s.queued_turns ?? 0),
-      stat("主动联系", p.enabled === false ? "已关闭" : (p.due_reason || "—")),
+      stat("主动联系", proactiveText(p)),
       stat("今天主动", p.daily_sent_count === undefined ? "—" : `${p.daily_sent_count} / ${fmt(p.daily_message_limit)}`),
       stat("生活引擎", lifeText(life), life.mode === "on" ? "ok" : (life.mode ? "warn" : "")),
-      stat("消息总数", messageCount(d.messages)),
+      stat("消息总数", totals),
       stat("设置修改次数", d.settings_revision ?? 0));
     const agents = $("#ov-agents");
     agents.replaceChildren(h("tr", {}, h("th", { text: "Agent" }), h("th", { text: "模型" }), h("th", { text: "备用模型" }), h("th", { text: "温度" })),

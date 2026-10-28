@@ -198,7 +198,7 @@ def checklist(*, admin_store=None, agents=None, runtime=None, data_dir=None, vio
                                "channels", True, "ch-card-" + live[0]["id"]))
         else:
             needs = [c["label"] for c in rows if c["status"].get("state") == "needs_login"]
-            detail = ("扫码登录：" + "、".join(needs)) if needs else "还没有可用的聊天渠道（扫码登录微信，或使用 QQ / Telegram）"
+            detail = ("扫码登录：" + "、".join(needs)) if needs else "还没有可用的聊天渠道（微信、QQ、Telegram 连上任意一个就行）"
             items.append(_item("channels", "聊天渠道", "todo", detail, "channels", True, "ch-list"))
     # 5. persona and profile (the shipped persona works as is)
     items.append(_item("persona", "人设与用户档案", "optional",

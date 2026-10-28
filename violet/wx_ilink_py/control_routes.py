@@ -143,7 +143,21 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
                                    "ORDER BY id DESC LIMIT 5"):
             errors.append({"where": "主动联系", "id": row["id"], "at": row["updated_at"], "type": "failed"})
         errors.sort(key=lambda e: e.get("at") or "", reverse=True)
+        # 0.7.5 (user, with QQ bound: the overview showed only "微信 未登录" and WeChat's message counter): every
+        # channel's state, and the message totals of the chat history (all channels)
+        channels = []
+        manager = getattr(runtime, "channels", None) if runtime is not None else None
+        if manager is not None:
+            try:
+                channels = [{"label": c["label"], "type": c["type"], "state": c["status"].get("state")}
+                            for c in manager.describe()]
+            except Exception:
+                channels = []
+        totals = {r["role"]: int(r["n"]) for r in violetdb.fetch_all(
+            "SELECT role, COUNT(*) AS n FROM messages GROUP BY role")}
         return ok({"agents": agents, "service": health, "wechat": wechat, "proactive": proactive, "life": life,
+                   "channels": channels,
+                   "message_totals": {"received": totals.get("user", 0), "sent": totals.get("assistant", 0)},
                    "aux_calls_24h": aux, "messages": violetdb.get_message_stats(), "errors": errors[:12],
                    "settings_revision": store().revision(),
                    "notes": {"model_calls": "Intent / Chat / Memory / Proactive 的单次调用不写数据库，这里只有服务计数"

@@ -2363,7 +2363,7 @@ def render_result(result: dict[str, Any]) -> str:
         lines.append("  " + result["firewall"])
     lines += ["", "核心服务：" + ("运行正常" if result.get("core_ok") else "未通过健康检查"),
               "公网访问：" + ("已验证可以访问" if result.get("public_ready") else "未配置或未验证（见上面的网络检查）"),
-              "", "下一步：登录后台，按“开始”页填写模型服务（API 地址和 Key）、扫码登录微信或添加其他聊天渠道。",
+              "", "下一步：登录后台，按“开始”页填写模型服务（API 地址和 Key）、在“聊天渠道”页连上微信、QQ 或 Telegram 中的任意一个。",
               f"日常管理：{Path(result.get('root', '.')) / ('violet.cmd' if os.name == 'nt' else 'violet')} status | stop | "
               "start | backup | update（升级到 GitHub 上的最新版本）| info | reset-password | reset-entrance | "
               "set-port <端口> | uninstall", ""]

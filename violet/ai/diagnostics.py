@@ -259,10 +259,17 @@ def _channel_findings(runtime) -> list[dict[str, Any]]:
     if manager is None:
         return []
     out = []
-    for c in manager.describe():
+    rows = manager.describe()
+    any_connected = any(c["status"].get("state") == "connected" for c in rows)
+    for c in rows:
         state = c["status"].get("state")
         label = c["label"]
         if state == "disabled":
+            continue
+        if state == "needs_login" and c["type"] == "wechat_ilink" and any_connected:
+            # 0.7.5 (user: "我已经绑定了QQ，但是这里好像还是在优待微信"): WeChat not logged in while another channel
+            # works is simply WeChat not being used -- not a problem
+            out.append(_finding("channels", "channel_down", "ok", f"{label} 没有在用（未登录；要用的话在“聊天渠道”扫码）"))
             continue
         if state == "connected":
             if c["type"] != "wechat_ilink" and not c["peers"]["bound"]:
