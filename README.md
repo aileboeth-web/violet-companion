@@ -32,17 +32,17 @@ Debian、Ubuntu、Rocky 等都用这一条：root 直接装（Debian 最小安�
 curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- --access public
 ```
 
-更新：默认自动更新（有新版本就在服务器上自动升级，先备份、失败自动退回），也可以在后台“设置 → 版本更新”改成只提醒或手动检查；手动升级用 `/opt/violet/violet update`。所有日常设置都在网页后台完成，不需要编辑配置文件。
+更新：默认自动更新（有新版本就在服务器上自动升级，先备份、失败自动退回），也可以在后台“设置 → 版本更新”改成只提醒或手动检查；在后台“开始”页点“立即更新”会弹出进度条，手动升级也可以用 `/opt/violet/violet update`。手机 MCP 是可选的：安装命令不装它，需要时在后台“工具与手机”页点“一键安装中继”（同样有进度条）。所有日常设置都在网页后台完成，不需要编辑配置文件。
 
 ## 卸载
 
-一行命令彻底卸载：删除程序、服务、自动更新任务、配置、数据（聊天记录和记忆）、备份、`violet` 系统账号，以及安装时放行的防火墙规则，**不可恢复**：
+一行命令彻底卸载，不需要再执行别的命令：删除程序、服务、自动更新和后台任务服务、手机 MCP 中继（程序、服务和它的数据）、配置、数据（聊天记录和记忆）、备份、`violet` 系统账号、`/opt/violet` 目录，以及 Violet 放行的所有防火墙规则，**不可恢复**：
 
 ```bash
 curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
 ```
 
-只删程序、保留配置和数据（以后重新安装还能接着用）：`/opt/violet/violet uninstall`。
+安装记录丢了、只装了一半，或者之前只卸载了程序，这条命令也会把剩下的清理掉。安装时用系统包管理器装的 Python、openssl 不会删除（其他程序可能在用）。
 
 需要：一个 OpenAI 兼容的模型接口。已在 Ubuntu 22.04 / 24.04、Debian 12、Rocky Linux 9 上自动测试过安装（GitHub Actions）。
 

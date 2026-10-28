@@ -5,6 +5,8 @@
   POST /api/control/phone-mcp/connect   {token}: the access token copied from the phone's "安全" page -> the MCP server
                                         "android-phone" (local relay URL, Authorization: Bearer, the android-phone
                                         permission template, Chat) is added or its token replaced, then checked
+  POST /api/control/phone-mcp/task      0.7.0 {action: install | set-port, confirm: true}: the root task service
+                                        installs the relay / moves its phone port (progress: /api/control/progress/task)
 
 The relay values come from <data>/control/mcp-relay.json, written by root (`violet mcp-relay export`, run before
 every Violet start; tools/violet_relay.py). Unlike other credentials the device secret is shown here on purpose (the
@@ -66,6 +68,12 @@ def install_command() -> str | None:
     return f"{root / 'violet'} mcp-relay install" if root else None
 
 
+def _task_info() -> dict[str, Any]:
+    """Whether the relay can be installed / moved from the page (a root helper exists), and the last task's progress."""
+    from ai.root_tasks import available, read_progress
+    return {"available": available(), "progress": read_progress("task")}
+
+
 def register_phone_mcp_routes(app: Flask, reload_agents=None) -> None:
     def ok(data: Any = None) -> Response:
         return jsonify({"ok": True, "data": data})
@@ -88,11 +96,32 @@ def register_phone_mcp_routes(app: Flask, reload_agents=None) -> None:
             "installed": info is not None, "relay": info, "health": relay_health(info),
             "install_command": install_command(), "app_url": APP_URL, "server_name": SERVER_NAME,
             "set_port_command": (install_command() or "").replace(" install", " set-port") or None,
+            "task": _task_info(),
             "server": None if server is None else {
                 "status": server.get("status"), "enabled": server.get("enabled"),
                 "tools": len(server.get("tools") or []), "url": server.get("url"),
                 "token_set": any(h.get("is_set") for h in server.get("headers") or [])},
         })
+
+    @app.post("/api/control/phone-mcp/task")
+    def phone_mcp_task():
+        """0.7.0: {action: install | set-port, confirm: true} -- asks the root task service (the page then follows
+        /api/control/progress/task). Only the action word is passed on."""
+        from ai.root_tasks import request_task
+        body = request.get_json(silent=True) or {}
+        if body.get("confirm") is not True:
+            return bad("需要确认（confirm: true）")
+        action = {"install": "relay-install", "set-port": "relay-set-port"}.get(str(body.get("action") or ""))
+        if action is None:
+            return bad("不支持的操作")
+        if action == "relay-set-port" and load_relay() is None:
+            return bad("还没有安装中继")
+        try:
+            return ok(request_task(action))
+        except PermissionError as exc:
+            return bad(str(exc), 409)
+        except RuntimeError as exc:
+            return bad(str(exc), 409)
 
     @app.post("/api/control/phone-mcp/connect")
     def phone_mcp_connect():

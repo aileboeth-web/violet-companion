@@ -79,7 +79,9 @@ def automatic(root: Path = PROJECT_ROOT) -> dict[str, Any]:
     state = install_state(root)
     last = state.get("auto_update") or {}
     available = state.get("auto_update_agent") == "systemd"
-    return {"available": available, "requested": request_path().exists(),
+    from ai.root_tasks import read_progress
+    running = read_progress("update")["state"] in ("queued", "running")
+    return {"available": available, "requested": request_path().exists() or running,
             "reason": None if available else
             ("这种安装方式（不是 root + systemd）不能自动更新，请在服务器上执行下面的命令" if install_root(root)
              else "这份程序不是用安装器装的，不能自动更新"),
@@ -93,6 +95,9 @@ def request_update(by: str = "manual", root: Path = PROJECT_ROOT) -> dict[str, A
         raise PermissionError(automatic(root)["reason"])
     path = request_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    if by != "auto":                                # 0.7.0: the progress dialog starts from "queued"
+        from ai.root_tasks import mark_queued
+        mark_queued("update", "update")
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text("auto" if by == "auto" else "manual", encoding="utf-8")
     os.replace(tmp, path)

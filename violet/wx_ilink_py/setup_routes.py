@@ -4,6 +4,7 @@
   GET  /api/control/update              installed version vs. the newest GitHub release (?refresh=1), update mode,
                                         automatic-update state
   POST /api/control/update/apply        {confirm: true}: ask the root update service to update now
+  GET  /api/control/progress/<name>     0.7.0: progress of the root update (update) / task (task) service
   POST /api/control/setup/test-model    one short real request with the settings Violet uses now {model?}
   POST /api/control/setup/models        the model names the API offers (GET /models of the configured service)
   GET  /api/control/diagnostics         phase 10.6: findings by area (channels, model, MCP, tools, network, core)
@@ -45,6 +46,14 @@ def register_setup_routes(app: Flask, all_agents=None, runtime=None) -> None:
         """The installed version and the newest GitHub release (cached 6 h; ?refresh=1 asks GitHub again)."""
         from ai.updates import check
         return ok(check(refresh=request.args.get("refresh") == "1"))
+
+    @app.get("/api/control/progress/<name>")
+    def control_progress(name: str):
+        """0.7.0: what the root update / task service is doing (task | update), for the progress dialog."""
+        from ai.root_tasks import NAMES, read_progress
+        if name not in NAMES:
+            return bad("没有这个进度", 404)
+        return ok(read_progress(name))
 
     @app.post("/api/control/update/apply")
     def control_update_apply():

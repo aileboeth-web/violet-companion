@@ -270,12 +270,13 @@ def test_register_updater_only_for_system_systemd(tmp_path, monkeypatch):
     assert inst.Service(layout, "systemd-user", run=run).register_updater() is False
     assert inst.Service(layout, "systemd", run=run).register_updater() is True
     assert sorted(p.name for p in (tmp_path / "units").iterdir()) == \
-        ["violet-update.path", "violet-update.service", "violet-update.timer"]
-    assert ["systemctl", "enable", "--now", "violet-update.timer", "violet-update.path"] in calls
-    assert not any("violet-update.service" in c and ("restart" in c or "start" in c) for c in calls)
+        ["violet-task.path", "violet-task.service", "violet-update.path", "violet-update.service", "violet-update.timer"]
+    assert ["systemctl", "enable", "--now", "violet-update.timer", "violet-update.path", "violet-task.path"] in calls
+    assert not any(("violet-update.service" in c or "violet-task.service" in c) and ("restart" in c or "start" in c)
+                   for c in calls)
     inst.Service(layout, "systemd", run=run).unregister()
     assert list((tmp_path / "units").iterdir()) == []
-    assert ["systemctl", "disable", "--now", "violet-update.timer", "violet-update.path"] in calls
+    assert ["systemctl", "disable", "--now", "violet-update.timer", "violet-update.path", "violet-task.path"] in calls
 
 
 # ------------------------------------------------------------------------------------------------ installer: auto-update
@@ -319,8 +320,10 @@ def test_the_request_file_is_taken_once(tmp_path):
 
 
 def _fake_update(layout, calls, fail=False):
-    def do_update(opts, release):
+    def do_update(opts, release, progress=None):
         calls.append(release["version"])
+        if progress is not None:
+            progress(15, "下载并校验")
         if fail:
             raise inst.InstallError("新版本启动后健康检查没有通过")
         state = inst.load_state(layout)                         # what install.sh upgrade writes

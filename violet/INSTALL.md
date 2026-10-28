@@ -35,7 +35,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 3. “模型服务”页：第 1 步填 API 地址和 Key，点“保存并测试连接”（只取一次模型列表，不调用模型）；第 2 步从列表里选模型（“全部 Agent 都用”一次填好），点“保存模型并测试对话”。
 4. “聊天渠道”页：微信、QQ、Telegram 三张卡片并列，用哪个点哪个——微信扫码；QQ 点“使用 QQ”，按步骤去 [q.qq.com](https://q.qq.com/#/) 建机器人、填 AppID 和 AppSecret；Telegram 点“使用 Telegram”，找 [@BotFather](https://t.me/BotFather) 要 Token。QQ / Telegram 连上后在卡片里生成绑定码，用你自己的账号发给机器人。NapCat（OneBot v11）等其他接入方式在“更多设置”里。
 5. “工具与手机”页（可选）：
-   - 手机 MCP：在服务器上运行 `/opt/violet/violet mcp-relay install` 装好中继，页面上会列出手机 App 要填的中继地址、设备密钥和证书指纹（都有复制按钮）；再把手机“安全”页的访问令牌粘贴回来就连上了。中继的手机端口是安装时随机选的（20000–29999，页面上显示实际端口），云服务器要在安全组放行它。手机连不上时运行 `/opt/violet/violet mcp-relay set-port` 换一个随机端口（或 `set-port 端口号` 指定），设备密钥和证书指纹不变，手机上只改中继地址。中继要单独装一次：重装 / 升级 Violet 会保留已经装好的中继，不会自动安装新的；`uninstall --purge` 会把它一起删掉。
+   - 手机 MCP（可选，一行安装命令不会装它）：点“一键安装中继”，弹窗里有进度条（下载、校验、注册服务、放行端口）；装好后页面会列出手机 App 要填的中继地址、设备密钥和证书指纹（都有复制按钮）；再把手机“安全”页的访问令牌粘贴回来就连上了。中继的手机端口是安装时随机选的（20000–29999，页面上显示实际端口），云服务器要在安全组放行它。手机连不上时点“换一个端口”（同样有进度条），设备密钥和证书指纹不变，手机上只改中继地址。网页上的这两个按钮由 root 的 `violet-task` 服务执行，只有 root + systemd 的安装才有；其他安装方式页面上给出命令（`/opt/violet/violet mcp-relay install`、`mcp-relay set-port [端口号]`）。重装 / 升级 Violet 会保留已经装好的中继；彻底卸载会把它一起删掉。
    - 其他 MCP 服务器：添加后给工具分类（只读 / 写入 / 高风险 / 拒绝）、授权给 Agent、点“测试”。
 6. “诊断”页：哪里不正常、为什么、怎么处理；能安全自动修复的有按钮。
 
@@ -79,7 +79,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 
 升级（以及重新运行安装做修复）前做的备份：成功并通过健康检查后**自动删除**，不占硬盘；失败时保留在 `backups/`，用来恢复。自己用 `violet backup` 做的备份不会被自动删除。想在升级后还能退回旧数据，升级前先执行一次 `/opt/violet/violet backup`。
 
-自动更新靠安装时注册的 root 定时任务（`violet-update.timer`），只有 root + systemd 的安装才有（一行命令安装就是这种）。Violet 自己以普通用户 `violet` 运行，它只能“请求更新到官方最新版”，不能指定下载地址。其他安装方式在页面上给出命令：`/opt/violet/violet update`。
+自动更新靠安装时注册的 root 定时任务（`violet-update.timer`），只有 root + systemd 的安装才有（一行命令安装就是这种）。Violet 自己以普通用户 `violet` 运行，它只能“请求更新到官方最新版”，不能指定下载地址。在后台点“立即更新”会弹出进度条（检查、下载校验、备份、安装依赖、重启、健康检查）；升级期间 Violet 会重启一次，弹窗等它回来后显示结果。其他安装方式在页面上给出命令：`/opt/violet/violet update`。
 
 改用自己的分支发布：安装时加 `--update-repo 你的用户名/仓库名`。
 
@@ -98,8 +98,8 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 bash install.sh upgrade       # 或者：在新版本的程序目录里执行
 /opt/violet/violet rollback      # 退回上一个版本的程序（数据不动）
 /opt/violet/violet uninstall     # 删除服务和程序，保留配置、数据和备份
-/opt/violet/violet uninstall --purge --yes   # 全部删除（不可恢复）：数据、备份、/opt/violet、violet 系统账号、放行的防火墙规则
-# 或者不依赖已安装的文件（例如装坏了）：
+/opt/violet/violet uninstall --purge --yes   # 全部删除（不可恢复）：数据、备份、/opt/violet、手机中继、所有 violet 服务、violet 系统账号、带 violet 标记的防火墙规则
+# 或者不依赖已安装的文件（例如装坏了、安装记录丢了）——这一条就够了，不需要再执行别的：
 # curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
 /opt/violet/violet info             # 后台地址（带安全入口）和用户名；密码不能查看
 /opt/violet/violet reset-password   # 生成新密码（只显示一次），所有登录失效

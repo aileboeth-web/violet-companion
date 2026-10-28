@@ -38,6 +38,7 @@ import os
 import platform
 import re
 import secrets
+import shlex
 import shutil
 import socket
 import sqlite3
@@ -610,6 +611,37 @@ def remove_rule(record: dict[str, Any], run: Callable[..., Any] = subprocess.run
                 capture_output=True)
 
 
+def sweep_marked_rules(run: Callable[..., Any] = subprocess.run) -> list[str]:
+    """`uninstall --purge` (0.7.0): every iptables / ip6tables / nftables rule marked "violet", recorded or not (a
+    lost install.json, a port changed by hand). Only our mark is matched -- nothing else is touched."""
+    removed: list[str] = []
+    mark = re.compile(rf'--comment "?{RULE_MARK}"?(\s|$)')
+    for tool in ("iptables", "ip6tables"):
+        for line in (_out(run, [tool, "-S"]) or "").splitlines():
+            if not line.startswith("-A ") or not mark.search(line):
+                continue
+            try:
+                args = shlex.split(line)[1:]
+            except ValueError:
+                continue
+            if run([tool, "-D", *args], capture_output=True).returncode == 0:
+                port = re.search(r"--dport (\d+)", line)
+                removed.append(f"{tool} {port.group(1) if port else ''}".strip())
+    family = table = chain = None
+    for line in (_out(run, ["nft", "-a", "list", "ruleset"]) or "").splitlines():
+        if m := re.match(r"\s*table (\S+) (\S+) \{", line):
+            family, table, chain = m.group(1), m.group(2), None
+        elif m := re.match(r"\s*chain (\S+) \{", line):
+            chain = m.group(1)
+        elif f'comment "{RULE_MARK}"' in line and family and table and chain:
+            handle = re.search(r"# handle (\d+)", line)
+            if handle and run(["nft", "delete", "rule", family, table, chain, "handle", handle.group(1)],
+                              capture_output=True).returncode == 0:
+                port = re.search(r"dport (\d+)", line)
+                removed.append(f"nftables {port.group(1) if port else ''}".strip())
+    return removed
+
+
 def open_port_everywhere(port: int, run: Callable[..., Any] = subprocess.run,
                          detected: dict[str, Any] | None = None) -> tuple[list[dict[str, Any]], str | None]:
     """Open port in every host firewall layer found. (records of what was opened, a note for the user)."""
@@ -941,6 +973,66 @@ def systemd_unit(layout: Layout, user: str | None, user_mode: bool = False) -> s
 
 
 UPDATER_NAME = f"{SERVICE_NAME}-update"
+TASK_NAME = f"{SERVICE_NAME}-task"
+# 0.7.0: what the Control Center may ask the root task service to do (one word in <data>/control/task-request)
+TASK_ACTIONS = {"relay-install": "install", "relay-set-port": "set-port"}
+PROGRESS_STALE_SECONDS = 1800
+
+
+class Progress:
+    """<data>/control/<name>-progress.json: what a root job (an update, a relay install) is doing right now, for the
+    Control Center's progress dialog. Written by root into the service account's folder: never through a link the
+    service account could have planted (O_EXCL temp file + rename), owned by that account so Violet can read it.
+    Never carries secrets. A Progress without a path does nothing."""
+
+    def __init__(self, path: Path | None, user: str | None = None, **base: Any):
+        self.path, self.user, self.base = path, user, base
+        self.started = int(time.time())
+
+    def write(self, **fields: Any) -> None:
+        if self.path is None:
+            return
+        entry = {**self.base, **fields, "started_at": self.started, "at": int(time.time())}
+        tmp = self.path.with_name(self.path.name + ".tmp")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp.unlink(missing_ok=True)
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o640)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                if self.user and hasattr(os, "fchown"):
+                    try:
+                        import pwd
+                        account = pwd.getpwnam(self.user)
+                        os.fchown(fh.fileno(), account.pw_uid, account.pw_gid)
+                    except (ImportError, KeyError, OSError):
+                        pass
+                json.dump(entry, fh, ensure_ascii=False)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+    def __call__(self, percent: int, step: str) -> None:
+        self.write(state="running", percent=max(0, min(99, int(percent))), step=step)
+
+    def done(self, message: str, **extra: Any) -> None:
+        self.write(state="done", percent=100, step=message, message=message, **extra)
+
+    def failed(self, message: str) -> None:
+        self.write(state="failed", step="失败", message=message[:1500])
+
+
+def progress_path(layout: Layout, name: str) -> Path:
+    return layout.data / "control" / f"{name}-progress.json"
+
+
+def env_progress(layout: Layout, state: dict) -> Progress:
+    """The update service hands the release's own install.sh (and so `upgrade`) a progress file through the
+    environment; without it nothing is written."""
+    value = os.environ.get("VIOLET_PROGRESS_FILE") or ""
+    path = Path(value) if value else None
+    if path is not None and path.resolve().parent != (layout.data / "control").resolve():
+        path = None                                         # only Violet's own control folder
+    return Progress(path, state.get("user"), task="update")
 
 
 def updater_units(layout: Layout) -> dict[str, str]:
@@ -952,9 +1044,20 @@ def updater_units(layout: Layout) -> dict[str, str]:
       <UPDATER_NAME>.timer    every 6 hours (plus 20 minutes after boot), randomised by up to 30 minutes
       <UPDATER_NAME>.path     the Control Center's "update now": Violet may create <data>/control/update-request. That
                               is ALL it can do -- the release source comes only from root-owned install.json / the
-                              built-in repository, never from a file the service user can write."""
+                              built-in repository, never from a file the service user can write.
+      <TASK_NAME>.path/.service  0.7.0: the Control Center's buttons for root work ("安装中继", "换一个端口"): Violet
+                              may create <data>/control/task-request holding one word of TASK_ACTIONS; the service
+                              runs `<root>/violet root-task`, which acts only on those words (no paths, no values)."""
     request = layout.data / "control" / "update-request"
+    task = layout.data / "control" / "task-request"
     return {
+        f"{TASK_NAME}.service": "\n".join([
+            "[Unit]", "Description=Violet task requested from the Control Center", "After=network-online.target",
+            "Wants=network-online.target", "", "[Service]", "Type=oneshot",
+            f"ExecStart={layout.root / 'violet'} root-task --json", "TimeoutStartSec=900", ""]),
+        f"{TASK_NAME}.path": "\n".join([
+            "[Unit]", "Description=Violet task requested from the Control Center", "", "[Path]",
+            f"PathExists={task}", f"Unit={TASK_NAME}.service", "", "[Install]", "WantedBy=paths.target", ""]),
         f"{UPDATER_NAME}.service": "\n".join([
             "[Unit]", "Description=Violet automatic update", "After=network-online.target",
             "Wants=network-online.target", "", "[Service]", "Type=oneshot",
@@ -1039,13 +1142,14 @@ class Service:
         for name, text in updater_units(self.layout).items():
             (folder / name).write_text(text, encoding="utf-8")
         self._ctl("daemon-reload")
-        self._ctl("enable", "--now", f"{UPDATER_NAME}.timer", f"{UPDATER_NAME}.path")
+        self._ctl("enable", "--now", f"{UPDATER_NAME}.timer", f"{UPDATER_NAME}.path", f"{TASK_NAME}.path")
         return True
 
     def unregister_updater(self) -> None:
         if self.mode != "systemd":
             return
-        self._ctl("disable", "--now", f"{UPDATER_NAME}.timer", f"{UPDATER_NAME}.path")
+        self._ctl("disable", "--now", f"{UPDATER_NAME}.timer", f"{UPDATER_NAME}.path", f"{TASK_NAME}.path")
+        self._ctl("stop", f"{UPDATER_NAME}.service", f"{TASK_NAME}.service")
         for name in updater_units(self.layout):
             (self.unit_path().parent / name).unlink(missing_ok=True)
         self._ctl("daemon-reload")
@@ -1570,15 +1674,21 @@ def upgrade(opts: Options) -> dict[str, Any]:
     if not state:
         raise InstallError(f"{layout.root} 没有安装 Violet；请用 install")
     service = Service(layout, state.get("service", "supervisor"), state.get("user"))
+    progress = env_progress(layout, state)
     opts.log("  备份配置和数据…")
+    progress(30, "备份配置和数据")
     archive = backup(layout, "before-upgrade")
     old_version = state.get("version")
     if state.get("service") != "none":
+        progress(40, "停止 Violet（升级期间后台暂时打不开）")
         service.stop()
     try:
+        progress(45, "安装新版本的程序")
         install_program(layout, opts.source)
         if opts.reuse_venv is None:
+            progress(55, "安装依赖（可能要一两分钟）")
             ensure_venv(layout, opts.python, offline_wheels=opts.wheels, log=opts.log)
+        progress(80, "初始化")
         done = app_command(layout, "-m", "tools.violet_setup", "init", "--json")
         if done.returncode != 0:
             raise InstallError("升级后初始化失败：\n" + (done.stderr or done.stdout or "")[-1500:])
@@ -1589,11 +1699,14 @@ def upgrade(opts: Options) -> dict[str, Any]:
             state["auto_update_agent"] = "systemd"             # installs from before automatic updates get them now
         write_cli(layout)                                      # the unit's ExecStartPre runs it
         if state.get("service") != "none":
+            progress(88, "启动新版本")
             service.start()
+            progress(93, "等待新版本就绪")
             if not wait_healthy(state["port"], "127.0.0.1", opts.health_timeout, _scheme(layout)):
                 raise InstallError("新版本启动后健康检查没有通过")
     except Exception as exc:
         opts.log(f"  升级失败（{exc}），恢复旧版本…")
+        progress(90, "升级失败，正在恢复旧版本")
         if state.get("service") != "none":
             service.stop()
         _rollback_program(layout)
@@ -1692,7 +1805,7 @@ def _download(url: str, target: Path, limit: int = 1_000_000) -> None:
 
 def update(opts: Options, check_only: bool = False, release: dict | None = None,
            download: Callable[[str, Path], None] = _download, run: Callable[..., Any] = subprocess.run,
-           windows: bool | None = None) -> dict[str, Any]:
+           windows: bool | None = None, progress: Progress | None = None) -> dict[str, Any]:
     """`violet update`: the newest GitHub release over this installation. The release's own install.sh downloads its
     archive, checks the SHA-256 and runs `upgrade` (backup first; a failed upgrade puts the old version back)."""
     layout = Layout(opts.root)
@@ -1710,13 +1823,17 @@ def update(opts: Options, check_only: bool = False, release: dict | None = None,
         raise InstallError(f"Windows 上请下载 {rel['tag']} 的程序，在其目录里运行 python tools/violet_installer.py upgrade")
     if state.get("service") == "systemd" and not _is_root():
         raise InstallError(f"需要 root 权限：以 root 运行 {layout.root / 'violet'} update")
+    progress = progress or Progress(None)
     work = Path(tempfile.mkdtemp(prefix="violet-update-"))
     try:
         script = work / "install.sh"
+        progress(10, f"下载 {rel['version']} 的安装脚本")
         download(rel["install_url"], script)
         opts.log(f"  升级 {current} → {rel['version']}…")
+        progress(15, f"下载并校验 {rel['version']}")
+        env = {**os.environ, "VIOLET_PROGRESS_FILE": str(progress.path)} if progress.path else None
         done = run(["bash", str(script), "upgrade", "--root", str(layout.root), "--json"], capture_output=True,
-                   text=True, encoding="utf-8")
+                   text=True, encoding="utf-8", **({"env": env} if env else {}))
     finally:
         shutil.rmtree(work, ignore_errors=True)
     lines = (done.stdout or "").strip().splitlines()
@@ -1803,31 +1920,81 @@ def auto_update(opts: Options, release: dict | None = None, now: Callable[[], fl
     mode = update_mode(layout)
     if request is None and mode != "auto":
         return {"ok": True, "action": "skipped", "mode": mode}
+    # 0.7.0: the Control Center's progress dialog follows this file (the page loses Violet while it restarts and
+    # reads the outcome here afterwards)
+    progress = Progress(progress_path(layout, "update"), state.get("user"), task="update")
+    progress(5, "检查新版本")
     try:
         rel = release or release_for(state)
     except InstallError as exc:
         record_auto_update(layout, last_result="error", last_message=str(exc), requested=request)
+        progress.failed(str(exc))
         raise
     current = state.get("version") or source_version(layout.app)
     if not is_newer(rel["version"], current):
         record_auto_update(layout, last_result="up_to_date", last_message=f"已经是最新版本 {current}",
                            latest=rel["version"], requested=request)
+        progress.done(f"已经是最新版本 {current}", version=current)
         return {"ok": True, "action": "up_to_date", "mode": mode, "current": current, "latest": rel["version"]}
     previous = state.get("auto_update") or {}
     if request != "manual" and previous.get("failed_version") == rel["version"] and \
             now() - float(previous.get("failed_at") or 0) < FAILED_RETRY_SECONDS:
+        progress.failed(f"{rel['version']} 上次安装失败，24 小时内不再自动重试（点“立即更新”可以马上再试）")
         return {"ok": True, "action": "waiting", "mode": mode, "latest": rel["version"],
                 "note": f"{rel['version']} 上次安装失败，24 小时内不再自动重试"}
     try:
-        result = (do_update or update)(opts, release=rel)
+        result = (do_update or update)(opts, release=rel, progress=progress)
     except InstallError as exc:
         record_auto_update(layout, last_result="failed", last_message=str(exc)[:1000], latest=rel["version"],
                            failed_version=rel["version"], failed_at=int(now()), requested=request)
+        progress.failed(str(exc))
         raise
     record_auto_update(layout, last_result="updated", last_message=f"已从 {current} 升级到 {rel['version']}",
                        latest=rel["version"], updated_from=current, updated_to=rel["version"], failed_version=None,
                        failed_at=None, requested=request)
+    progress.done(f"已从 {current} 升级到 {rel['version']}", version=rel["version"])
     return {"ok": True, "action": "updated", "mode": mode, **result}
+
+
+def take_task_request(layout: Layout) -> str | None:
+    """The word the Control Center left in <data>/control/task-request (removed first, so the path unit does not
+    start again); "" for anything that is not one of TASK_ACTIONS; None when there is no request."""
+    path = layout.data / "control" / "task-request"
+    if not (path.is_symlink() or path.exists()):
+        return None
+    raw = (_read_small(path, 64) or b"").strip().decode("ascii", "replace")
+    try:
+        path.unlink()
+    except OSError:
+        pass
+    return raw if raw in TASK_ACTIONS else ""
+
+
+def root_task(opts: Options, run: Callable[..., Any] = subprocess.run) -> dict[str, Any]:
+    """`violet root-task` (the root task service): do what the Control Center asked for, with progress."""
+    layout = Layout(opts.root)
+    state = load_state(layout)
+    if not state:
+        raise InstallError(f"{layout.root} 没有安装 Violet")
+    task = take_task_request(layout)
+    if task is None:
+        return {"ok": True, "action": "none"}
+    progress = Progress(progress_path(layout, "task"), state.get("user"), task=task or "unknown")
+    if not task:
+        progress.failed("不认识的请求，没有执行")
+        return {"ok": False, "action": "rejected"}
+    progress(2, "开始")
+    try:
+        result = mcp_relay(opts, TASK_ACTIONS[task], run=run, progress=progress)
+    except InstallError as exc:
+        progress.failed(str(exc))
+        raise
+    port = result.get("device_port")
+    message = ("中继已安装" if task == "relay-install" else "手机入口已换到新端口") + (f"，手机入口端口 {port}" if port else "")
+    if result.get("healthy") is False:
+        message += "（但中继还没有通过健康检查，稍后点“刷新”看看）"
+    progress.done(message, device_port=port, notes=[str(n) for n in result.get("notes") or []][:8])
+    return {"ok": True, "action": task, **{k: v for k, v in result.items() if k != "ok"}}
 
 
 def status(opts: Options) -> dict[str, Any]:
@@ -1850,6 +2017,8 @@ def uninstall(opts: Options, purge: bool = False) -> dict[str, Any]:
     layout = Layout(opts.root)
     state = load_state(layout)
     if not state:
+        if purge:                   # 0.7.0: install.json is gone (a half-removed install): still clean up
+            return purge_leftovers(layout)
         raise InstallError(f"{layout.root} 没有安装 Violet")
     service = Service(layout, state.get("service", "supervisor"), state.get("user"))
     if state.get("service") != "none":
@@ -1901,6 +2070,7 @@ def purge_system(layout: Layout, state: dict, run: Callable[..., Any] = subproce
     removed: list[str] = []
     if not (linux_root if linux_root is not None else (os.name != "nt" and _is_root())):
         return removed
+    removed += remove_units(layout, run)     # whatever is still registered (also after a plain `uninstall`)
     try:                                    # the phone relay, when `violet mcp-relay install` set it up (and its rule)
         removed += _relay_module().uninstall(layout, state, run=run, remove_rule=lambda r: remove_rule(r, run))
     except Exception:                       # noqa: BLE001 -- never let it stop the rest of the purge
@@ -1912,6 +2082,9 @@ def purge_system(layout: Layout, state: dict, run: Callable[..., Any] = subproce
         label = f"防火墙规则 {int(rule.get('port') or 0)}/tcp"
         if label not in removed:
             removed.append(label)
+    swept = sweep_marked_rules(run)          # marked "violet" but not recorded
+    if swept:
+        removed.append("其他带 violet 标记的防火墙规则：" + "、".join(swept))
     user = state.get("user")
     if user:
         done = run(["getent", "passwd", user], capture_output=True, text=True)
@@ -1920,6 +2093,60 @@ def purge_system(layout: Layout, state: dict, run: Callable[..., Any] = subproce
             if run(["userdel", user], capture_output=True).returncode == 0:
                 removed.append(f"系统账号 {user}")
     return removed
+
+
+SYSTEM_UNIT_DIR = Path("/etc/systemd/system")
+
+
+def remove_units(layout: Layout, run: Callable[..., Any] = subprocess.run,
+                 unit_dir: Path | None = None) -> list[str]:
+    """Violet's own system units (violet.service, the update and task units) when they belong to this installation
+    (their service runs <root>/...). Nothing when they are already gone."""
+    folder = unit_dir or SYSTEM_UNIT_DIR
+    names = [f"{SERVICE_NAME}.service", *updater_units(layout)]
+    found = [n for n in names if (folder / n).exists()]
+
+    def ours(name: str) -> bool:
+        try:
+            return str(layout.root) in (folder / name).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+    if not found or not any(ours(n) for n in found if n.endswith(".service")):
+        return []
+    run(["systemctl", "disable", "--now", *found], capture_output=True)
+    for name in found:
+        (folder / name).unlink(missing_ok=True)
+    run(["systemctl", "daemon-reload"], capture_output=True)
+    return [f"systemd 单元 {n}" for n in found]
+
+
+def purge_leftovers(layout: Layout, run: Callable[..., Any] = subprocess.run,
+                    linux_root: bool | None = None) -> dict[str, Any]:
+    """`uninstall --purge` without install.json: remove what a Violet installation leaves (units, the relay we
+    installed, marked firewall rules, our system account, Violet's own folders in <root>) -- never anything else."""
+    removed = purge_system(layout, {"user": SERVICE_USER}, run=run, linux_root=linux_root)
+    known = ("app", "app.previous", "app.failed", "app.new", "venv", "config", "data", "backups", "logs", "mcp-relay")
+    if layout.root.exists() and ((layout.root / "app" / "tools" / "violet_installer.py").exists()
+                                 or (layout.root / "config" / "violet.env").exists()
+                                 or (layout.root / "data" / "control").exists()):
+        for name in known:
+            path = layout.root / name
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path, ignore_errors=True)
+                removed.append(name)
+        for name in OWN_ROOT_FILES:
+            target = layout.root / name
+            if target.is_file() or target.is_symlink():
+                target.unlink(missing_ok=True)
+    leftovers = sorted(p.name for p in layout.root.iterdir()) if layout.root.exists() else []
+    if layout.root.exists() and not leftovers:
+        layout.root.rmdir()
+        removed.append(str(layout.root))
+    note = ("没有找到安装记录；已清理残留：" + "、".join(removed) if removed else
+            f"{layout.root} 没有安装 Violet，也没有找到残留")
+    if leftovers:
+        note += f"；{layout.root} 里还有不是 Violet 的文件，没有动：" + "、".join(leftovers)
+    return {"ok": True, "removed": removed, "kept": [], "leftovers": leftovers, "note": note}
 
 
 def _relay_module():
@@ -1933,7 +2160,8 @@ def _relay_module():
 RELAY_ACTIONS = ("install", "export", "status", "uninstall", "set-port")
 
 
-def mcp_relay(opts: Options, action: str, run: Callable[..., Any] = subprocess.run) -> dict[str, Any]:
+def mcp_relay(opts: Options, action: str, run: Callable[..., Any] = subprocess.run,
+              progress: Callable[[int, str], None] | None = None) -> dict[str, Any]:
     """`violet mcp-relay install | export | status | uninstall | set-port` (tools/violet_relay.py). opts.port: the
     device port for install / set-port (else a random free one)."""
     relay = _relay_module()
@@ -1948,12 +2176,14 @@ def mcp_relay(opts: Options, action: str, run: Callable[..., Any] = subprocess.r
     try:
         if action == "install":
             result = relay.install(layout, state, run=run, port_free=port_free, port=opts.port,
-                                   open_port=lambda p: open_port_everywhere(p, run), public_ip=public_ip)
+                                   open_port=lambda p: open_port_everywhere(p, run), public_ip=public_ip,
+                                   progress=progress)
             save_state(layout, state)
         elif action == "set-port":
             result = relay.set_port(layout, state, run=run, port_free=port_free, port=opts.port,
                                     open_port=lambda p: open_port_everywhere(p, run),
-                                    remove_rule=lambda r: remove_rule(r, run), public_ip=public_ip)
+                                    remove_rule=lambda r: remove_rule(r, run), public_ip=public_ip,
+                                    progress=progress)
             save_state(layout, state)
         elif action == "export":            # violet.service runs this before every start: no network lookups
             result = relay.export(layout, state, run=run)
@@ -2099,7 +2329,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", choices=["install", "upgrade", "update", "rollback", "status", "backup", "restore",
                                             "uninstall", "doctor", "start", "stop", "restart", "info",
                                             "reset-password", "reset-entrance", "set-port", "auto-update",
-                                            "firewall-apply", "mcp-relay"])
+                                            "firewall-apply", "mcp-relay", "root-task"])
     parser.add_argument("--update-feed", help=argparse.SUPPRESS)  # install: a release.json instead of GitHub
     parser.add_argument("--update-repo", help="install: GitHub owner/repo to update from (a fork)")
     parser.add_argument("--check", action="store_true", help="update: only report whether a newer release exists")
@@ -2178,6 +2408,8 @@ def main(argv: list[str] | None = None) -> int:
             result = auto_update(opts)
         elif args.command == "firewall-apply":
             result = firewall_apply(Layout(root))
+        elif args.command == "root-task":
+            result = root_task(opts)
         elif args.command == "mcp-relay":
             action = args.archive or "status"
             if args.value is not None:

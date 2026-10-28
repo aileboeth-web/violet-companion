@@ -305,6 +305,20 @@ details.card>summary{cursor:pointer;font-weight:600}
 .kv>.v:first-child{grid-column:1/3}
 .kv-actions{display:flex;gap:6px}
 .kv .note{grid-column:2/-1;margin:0}
+/* 0.7.0: progress dialog (relay install, update) */
+.progress-dialog h3{margin:0}
+.pbar{height:12px;border-radius:999px;background:var(--panel-hover);border:1px solid var(--line);overflow:hidden}
+.pbar-fill{height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,var(--accent),var(--accent-2));
+  transition:width .5s ease}
+.pbar.queued .pbar-fill{opacity:.45;background:repeating-linear-gradient(-45deg,var(--accent) 0 10px,var(--accent-2) 10px 20px);
+  background-size:28px 28px;animation:pbar-stripes 1s linear infinite}
+.pbar.done .pbar-fill{background:var(--ok)}
+.pbar.failed .pbar-fill{background:var(--bad)}
+@keyframes pbar-stripes{to{background-position:28px 0}}
+@media (prefers-reduced-motion:reduce){.pbar-fill{transition:none}.pbar.queued .pbar-fill{animation:none}}
+.pbar-line{display:flex;gap:10px;align-items:baseline;justify-content:space-between}
+.pbar-step{margin:0;font-size:13.5px;overflow-wrap:anywhere}
+.pbar-pct{font-weight:700;font-variant-numeric:tabular-nums;color:var(--accent)}
 /* the channels page: WeChat, QQ and Telegram side by side */
 .platforms{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin:14px 0;align-items:start}
 .platform{display:flex;flex-direction:column;gap:10px}

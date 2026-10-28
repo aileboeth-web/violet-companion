@@ -132,13 +132,32 @@ def unit_text(binary: Path | str, device_port: int, client_port: int) -> str:
         "SystemCallArchitectures=native", "", "[Install]", "WantedBy=multi-user.target", ""])
 
 
-def _fetch(url: str, limit: int, timeout: float = 60.0) -> bytes:
+def _fetch(url: str, limit: int, timeout: float = 60.0,
+           report: Callable[[int, int], None] | None = None) -> bytes:
+    """report(received, total) after every chunk (total 0 when the server did not say)."""
     req = urllib.request.Request(url, headers={"User-Agent": "violet-installer"})
+    chunks, got = [], 0
     with urllib.request.urlopen(req, timeout=timeout) as resp:      # noqa: S310 -- fixed https GitHub URLs
-        data = resp.read(limit + 1)
-    if len(data) > limit:
-        raise RelayError(f"下载的文件太大：{url}")
-    return data
+        try:
+            total = int(resp.headers.get("Content-Length") or 0)
+        except ValueError:
+            total = 0
+        while True:
+            chunk = resp.read(65536)
+            if not chunk:
+                break
+            got += len(chunk)
+            if got > limit:
+                raise RelayError(f"下载的文件太大：{url}")
+            chunks.append(chunk)
+            if report is not None:
+                report(got, total)
+    return b"".join(chunks)
+
+
+def _say(progress: Callable[[int, str], None] | None, percent: int, step: str) -> None:
+    if progress is not None:
+        progress(percent, step)
 
 
 def release_url(name: str, repo: str = RELAY_REPO) -> str:
@@ -200,9 +219,10 @@ def install(layout: Any, state: dict[str, Any], *, run: Callable[..., Any] = sub
             open_port: Callable[[int], tuple[list[dict], str | None]] | None = None,
             unit_path: Path = UNIT_PATH, machine: str | None = None, wait: float = HEALTH_WAIT,
             public_ip: Callable[[], str | None] | None = None, port: int | None = None,
-            rng: random.Random | None = None) -> dict[str, Any]:
+            rng: random.Random | None = None,
+            progress: Callable[[int, str], None] | None = None) -> dict[str, Any]:
     """Returns the result; updates `state` (install.json) -- the caller saves it. `port`: the device port (else a
-    random free one)."""
+    random free one). `progress(percent, step)` for the Control Center's dialog; `fetch(url, limit, report=...)`."""
     if not shutil.which("systemctl") and run is subprocess.run:
         raise RelayError("这台服务器没有 systemd，中继需要手动部署（见 Violet MCP 的 DEPLOY_RELAY.md）")
     notes: list[str] = []
@@ -216,13 +236,26 @@ def install(layout: Any, state: dict[str, Any], *, run: Callable[..., Any] = sub
         arch = relay_arch(machine)
         if not arch:
             raise RelayError(f"不支持这种 CPU：{machine or platform.machine()}（只有 amd64 / arm64 的中继）")
+        _say(progress, 5, "选择空闲端口")
         device_port = _device_port(port, "0.0.0.0", free, set(), rng)       # before downloading: a bad --port stops here
         client_port = _first_free(CLIENT_PORTS, "127.0.0.1", free, {device_port})
+        _say(progress, 10, "下载校验清单（SHA256SUMS.txt）")
         sums = parse_sums(fetch(release_url("SHA256SUMS.txt"), 65536).decode("utf-8", "replace"))
         name, digest = pick_asset(sums, arch)
-        data = fetch(release_url(name), MAX_BINARY)
+        _say(progress, 15, f"下载 {name}")
+        last = [-1]
+
+        def report(got: int, total: int) -> None:      # 15 % -> 80 % while downloading, at most every 2 %
+            percent = 15 + int(65 * got / total) if total else 15
+            if progress is not None and percent >= last[0] + 2:
+                last[0] = percent
+                progress(percent, f"下载 {name}：{got / 1048576:.1f} / {total / 1048576:.1f} MB" if total
+                         else f"下载 {name}：{got / 1048576:.1f} MB")
+        data = fetch(release_url(name), MAX_BINARY, report=report)
+        _say(progress, 82, "校验 SHA-256")
         if hashlib.sha256(data).hexdigest() != digest:
             raise RelayError(f"{name} 的 SHA-256 和发布里的 SHA256SUMS.txt 不一致，没有安装")
+        _say(progress, 85, "注册并启动中继服务")
         folder = layout.root / "mcp-relay"
         folder.mkdir(parents=True, exist_ok=True)
         binary = folder / "violet-mcp-relay"
@@ -241,17 +274,20 @@ def install(layout: Any, state: dict[str, Any], *, run: Callable[..., Any] = sub
                               "installed_at": int(time.time())}
         notes.append(f"已安装 {name}")
         info = parse_unit(unit_path.read_text(encoding="utf-8"))
+    _say(progress, 90, "等待中继就绪")
     ok = _wait_healthy(info["client_port"], wait)
     if not ok:
         notes.append(f"中继 {wait:.0f} 秒内没有响应健康检查：journalctl -u {UNIT_NAME} -n 30")
     if open_port is not None and (state.get("mcp_relay") or {}).get("managed"):
+        _say(progress, 95, f"在本机防火墙放行端口 {info['device_port']}")
         records, note = open_port(info["device_port"])
         old = [r for r in state.get("firewall_rules") or [] if r not in records]
         state["firewall_rules"] = old + records
         if note:
             notes.append(note)
     notes.append(f"云服务器的安全组（防火墙）也要放行 TCP {info['device_port']}，手机才能连上；"
-                 "连不上可以换一个端口：/opt/violet/violet mcp-relay set-port")
+                 "连不上可以在后台“手机 MCP”里点“换一个端口”（或运行 /opt/violet/violet mcp-relay set-port）")
+    _say(progress, 98, "生成配对信息")
     result = export(layout, state, run=run, unit_path=unit_path, public_ip=public_ip)
     return {**result, "ok": True, "healthy": ok, "notes": notes}
 
@@ -261,7 +297,8 @@ def set_port(layout: Any, state: dict[str, Any], *, run: Callable[..., Any] = su
              open_port: Callable[[int], tuple[list[dict], str | None]] | None = None,
              remove_rule: Callable[[dict], None] | None = None, unit_path: Path = UNIT_PATH,
              wait: float = HEALTH_WAIT, public_ip: Callable[[], str | None] | None = None,
-             rng: random.Random | None = None) -> dict[str, Any]:
+             rng: random.Random | None = None,
+             progress: Callable[[int, str], None] | None = None) -> dict[str, Any]:
     """Moves the device port of a relay this module installed (the same binary, data folder, secret and certificate).
     Returns the result; updates `state` -- the caller saves it."""
     if not unit_path.exists():
@@ -273,7 +310,9 @@ def set_port(layout: Any, state: dict[str, Any], *, run: Callable[..., Any] = su
     if port == old:
         return {**export(layout, state, run=run, unit_path=unit_path, public_ip=public_ip), "ok": True,
                 "changed": False, "previous": old, "notes": [f"端口没有变化：{old}"]}
+    _say(progress, 10, "选择新的空闲端口")
     new = _device_port(port, "0.0.0.0", port_free, {old, int(info["client_port"])}, rng)
+    _say(progress, 30, f"把中继改到端口 {new} 并重启")
     unit_path.write_text(unit_text(info["binary"], new, int(info["client_port"])), encoding="utf-8")   # as written
     run(["systemctl", "daemon-reload"], capture_output=True)
     done = run(["systemctl", "restart", f"{UNIT_NAME}.service"], capture_output=True, text=True)
@@ -281,6 +320,7 @@ def set_port(layout: Any, state: dict[str, Any], *, run: Callable[..., Any] = su
         raise RelayError("中继服务重启失败：" + (getattr(done, "stderr", "") or "")[-400:] +
                          f"\n查看原因：journalctl -u {UNIT_NAME} -n 30")
     notes: list[str] = []
+    _say(progress, 60, f"更新防火墙：关闭 {old}，放行 {new}")
     rules = state.get("firewall_rules") or []
     stale = [r for r in rules if int(r.get("port") or 0) == old]
     for rule in stale:
@@ -294,11 +334,13 @@ def set_port(layout: Any, state: dict[str, Any], *, run: Callable[..., Any] = su
             notes.append(note)
     relay_state = state.setdefault("mcp_relay", {"managed": True})
     relay_state["device_port"] = new
+    _say(progress, 80, "等待中继就绪")
     ok = _wait_healthy(int(info["client_port"]), wait)
     if not ok:
         notes.append(f"中继 {wait:.0f} 秒内没有响应健康检查：journalctl -u {UNIT_NAME} -n 30")
     notes += [f"手机入口端口：{old} → {new}。设备密钥和证书指纹没有变，手机上只要改中继地址",
               f"云服务器的安全组（防火墙）要放行 TCP {new}"]
+    _say(progress, 95, "生成配对信息")
     result = export(layout, state, run=run, unit_path=unit_path, public_ip=public_ip)
     return {**result, "ok": True, "changed": True, "previous": old, "healthy": ok, "notes": notes}
 

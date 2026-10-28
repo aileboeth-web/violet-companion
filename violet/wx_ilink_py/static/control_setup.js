@@ -46,15 +46,28 @@
     const last = auto.last_result ? ` 上次自动更新：${when_(auto.last_run_at)} ${RESULTS[auto.last_result] || auto.last_result}` +
       (auto.last_message ? `（${auto.last_message}）` : "") + "。" : "";
     $("#update-auto").textContent = auto.available ? mode + last : mode + " " + (auto.reason || "");
-    $("#update-apply").hidden = !(u.newer && auto.available && !auto.requested);
+    // an update waiting / running (from this page or the automatic mode): the same button shows its progress
+    $("#update-apply").hidden = !(auto.available && (auto.requested || u.newer));
+    $("#update-apply").textContent = auto.requested ? "查看升级进度" : "立即更新";
+    $("#update-apply").dataset.watch = auto.requested ? "1" : "";
     $("#update-command").textContent = u.command;
     $("#update-command-row").hidden = !(u.newer && !auto.available);
   }
   const when_ = (ts) => (ts ? new Date(ts * 1000).toLocaleString() : "");
 
+  // 0.7.0: the progress dialog; Violet restarts during the update, the dialog waits for it and reads the outcome
+  function watchUpdate() {
+    progressDialog({ title: "升级 Violet", url: "/api/control/progress/update", restarts: true, onFinish: (p, extra) => {
+      loadUpdate(false);
+      if (p.state === "done" && p.version) {
+        extra.replaceChildren(h("button", { type: "button", text: "刷新页面（加载新版本）", onclick: () => location.reload() }));
+      }
+    } });
+  }
   $("#update-apply").addEventListener("click", async () => {
+    if ($("#update-apply").dataset.watch) { watchUpdate(); return; }
     if (!(await confirmBox("现在升级到最新版本？会先备份，升级期间 Violet 停止大约一两分钟；新版本起不来会自动退回旧版本。"))) return;
-    try { await api("POST", "/api/control/update/apply", { confirm: true }); toast("已提交，服务器开始升级"); loadUpdate(false); }
+    try { await api("POST", "/api/control/update/apply", { confirm: true }); loadUpdate(false); watchUpdate(); }
     catch (e) { toast("提交失败：" + e.message, false); }
   });
 

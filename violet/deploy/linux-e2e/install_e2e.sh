@@ -161,6 +161,13 @@ if [ "$MODE" = "systemd" ]; then
   curl -fsSk "$SCHEME://127.0.0.1:$PORT/healthz" | grep -q violet || fail "not answering after the automatic update"
   [ ! -e "$ROOT/data/control/update-request" ] || fail "update request left behind"
   ! ls "$ROOT"/backups/*before-upgrade* >/dev/null 2>&1 || fail "backup of a successful update not deleted"
+  # 0.7.0: the progress dialog's file -- written through the whole update, owned by the service account
+  UPDP="$ROOT/data/control/update-progress.json"
+  python3 -c "import json,sys;d=json.load(open('$UPDP'));sys.exit(0 if d['state']=='done' and d['percent']==100 and d.get('version')=='$NEXT' else 1)" \
+    || { cat "$UPDP"; fail "update progress"; }
+  [ "$(stat -c %U "$UPDP")" = "violet" ] || fail "update progress not readable by the service ($(stat -c %U "$UPDP"))"
+  curl -sk -b "$JAR" -H 'Accept: application/json' "$SCHEME://127.0.0.1:$PORT/api/control/progress/update" \
+    | json 'd["data"]["state"]' | grep -qx done || fail "progress API"
   pass "automatic update from the Control Center: $OLD_VERSION -> $NEXT (root update service, healthy)"
 fi
 
@@ -168,7 +175,25 @@ fi
 #     release (checked against its SHA256SUMS.txt), starts it, opens the device port, exports the pairing values for
 #     the Control Center (owned by the service account, 0600) and Violet re-exports them on every start
 if [ "$MODE" = "systemd" ]; then
-  RELAY="$("$ROOT/violet" mcp-relay install --json)" || { echo "$RELAY"; journalctl -u violet-mcp-relay -n 30 --no-pager || true; fail "mcp-relay install"; }
+  # 0.7.0: installed from the Control Center ("一键安装中继"): the page leaves task-request, the root task service
+  # (violet-task.path -> violet-task.service) installs it and writes task-progress.json, which the page polls
+  systemctl is-active --quiet violet-task.path || fail "task path unit not active"
+  CODE="$(code -b "$JAR" -H "Origin: $SCHEME://127.0.0.1:$PORT" -H 'Content-Type: application/json' \
+          --data '{"action":"install","confirm":true}' "$SCHEME://127.0.0.1:$PORT/api/control/phone-mcp/task")"
+  [ "$CODE" = "200" ] || fail "relay install request from the page ($CODE)"
+  TASK_STATE=""; MAX_PCT=0
+  for _ in $(seq 1 120); do
+    TP="$(curl -sk -b "$JAR" -H 'Accept: application/json' "$SCHEME://127.0.0.1:$PORT/api/control/progress/task")"
+    TASK_STATE="$(echo "$TP" | json 'd["data"]["state"]')"
+    PCT="$(echo "$TP" | json 'd["data"].get("percent") or 0')"; [ "$PCT" -gt "$MAX_PCT" ] && MAX_PCT="$PCT"
+    case "$TASK_STATE" in done|failed|stale) break ;; esac
+    sleep 2
+  done
+  [ "$TASK_STATE" = "done" ] || { echo "$TP"; journalctl -u violet-task -n 40 --no-pager || true; fail "relay install from the page: $TASK_STATE"; }
+  [ ! -e "$ROOT/data/control/task-request" ] || fail "task request left behind"
+  RELAY="$("$ROOT/violet" mcp-relay status --json)" || fail "mcp-relay status"
+  echo "$RELAY" | json 'd["installed"] and d["managed"]' | grep -q True || { echo "$RELAY"; fail "relay not installed by the task"; }
+  pass "relay installed from the Control Center through the root task service (progress reached $MAX_PCT% then done)"
   systemctl is-active --quiet violet-mcp-relay || fail "relay service not active"
   DEV_PORT="$(echo "$RELAY" | json 'd["device_port"]')"
   EXP="$ROOT/data/control/mcp-relay.json"
@@ -240,7 +265,8 @@ if [ "$STRICT" = "1" ]; then
 fi
 if [ "$MODE" = "systemd" ]; then
   ! id violet >/dev/null 2>&1 || fail "system account violet left behind"
-  for unit in violet.service violet-update.service violet-update.timer violet-update.path violet-mcp-relay.service; do
+  for unit in violet.service violet-update.service violet-update.timer violet-update.path violet-task.service \
+              violet-task.path violet-mcp-relay.service; do
     [ ! -e "/etc/systemd/system/$unit" ] || fail "$unit left behind"
   done
   [ ! -e /var/lib/private/violet-mcp-relay ] && [ ! -e /var/lib/violet-mcp-relay ] || fail "relay data left behind"

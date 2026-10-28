@@ -67,11 +67,15 @@ def test_units_hand_deployed_and_ours_are_read_alike():
 def _downloads(binary: bytes, digest: str | None = None):
     asked = []
 
-    def fetch(url, limit):
+    def fetch(url, limit, report=None):
         asked.append(url)
         if url.endswith("SHA256SUMS.txt"):
             return f"{digest or hashlib.sha256(binary).hexdigest()} *violet-mcp-relay-1.2.0-linux-amd64\n".encode()
         assert url.endswith("violet-mcp-relay-1.2.0-linux-amd64")
+        if report is not None:                                   # as _fetch does, chunk by chunk
+            half = len(binary) // 2
+            report(half, len(binary))
+            report(len(binary), len(binary))
         return binary
     return fetch, asked
 

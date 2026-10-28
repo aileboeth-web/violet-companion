@@ -77,6 +77,76 @@ async function copyText(text) {
   area.remove();
   toast(done ? "已复制" : "复制失败：请手动选中复制", done);
 }
+// 0.7.0: a dialog with a progress bar for work the server's root helper does (installing the relay, updating Violet).
+// It follows GET `url` ({state: queued | running | done | failed | stale | none, percent, step, message}). With
+// `restarts` (an update) Violet itself goes away for a while: the dialog says so, waits for /healthz and goes on.
+// The dialog can be closed at any time; the work goes on on the server.
+function progressDialog({ title, url, restarts = false, onFinish = null }) {
+  const fill = h("div", { class: "pbar-fill" });
+  const bar = h("div", { class: "pbar queued", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100" }, fill);
+  const pct = h("span", { class: "pbar-pct", text: "" });
+  const step = h("p", { class: "pbar-step", text: "已提交，等待服务器开始…" });
+  const msg = h("p", { class: "note" });
+  const close = h("button", { type: "button", class: "ghost", text: "关闭（任务在服务器上继续）" });
+  const extra = h("div", { class: "row" });
+  const d = h("dialog", { class: "progress-dialog" }, h("div", { class: "stack" },
+    h("h3", { text: title }), bar, h("div", { class: "pbar-line" }, step, pct), msg, extra, h("div", { class: "row" }, close)));
+  document.body.append(d);
+  let stopped = false, finished = false, lostSince = 0;
+  const stop = () => { stopped = true; if (d.open) d.close(); d.remove(); };
+  close.addEventListener("click", stop);
+  d.addEventListener("cancel", (ev) => { ev.preventDefault(); stop(); });
+  d.showModal();
+
+  function show(p) {
+    const percent = Math.max(0, Math.min(100, Number(p.percent) || 0));
+    const wasQueued = bar.classList.contains("queued");
+    bar.className = "pbar " + ({ queued: "queued", running: "", done: "done", failed: "failed", stale: "failed" }[p.state] ?? "queued");
+    // from the full-width "waiting" stripes to the first real value: jump, do not animate backwards
+    if (wasQueued && p.state !== "queued") { fill.style.transition = "none"; void fill.offsetWidth; }
+    fill.style.width = (p.state === "queued" ? 100 : percent) + "%";
+    if (wasQueued && p.state !== "queued") { void fill.offsetWidth; fill.style.transition = ""; }
+    bar.setAttribute("aria-valuenow", String(percent));
+    pct.textContent = p.state === "queued" ? "" : percent + "%";
+    step.textContent = p.step || "";
+    msg.textContent = p.state === "failed" || p.state === "stale" ? (p.message || "失败") : "";
+    if (p.state === "queued" && p.at && Date.now() / 1000 - p.at > 60) {
+      msg.textContent = "服务器一分钟内还没有开始：在服务器上查看 systemctl status violet-task.path violet-update.path";
+    }
+  }
+  async function waitHealthy() {
+    for (;;) {
+      if (stopped) return;
+      try { const r = await fetch("/healthz", { cache: "no-store" }); if (r.ok) return; } catch (_) { /* still down */ }
+      await new Promise((ok) => setTimeout(ok, 2000));
+    }
+  }
+  async function tick() {
+    if (stopped || finished) return;
+    let p;
+    try { p = await api("GET", url); lostSince = 0; }
+    catch (e) {
+      if (restarts) {
+        lostSince = lostSince || Date.now();
+        step.textContent = "Violet 正在重启（升级期间后台暂时打不开），等它回来…";
+        await waitHealthy();
+      } else { step.textContent = "读取进度失败：" + e.message; await new Promise((ok) => setTimeout(ok, 2000)); }
+      return tick();
+    }
+    show(p);
+    if (p.state === "done" || p.state === "failed" || p.state === "stale") {
+      finished = true;
+      close.textContent = "关闭";
+      if (p.state === "done") toast(p.step || "完成");
+      if (onFinish) onFinish(p, extra);
+      return;
+    }
+    setTimeout(tick, 1000);
+  }
+  tick();
+  return { close: stop };
+}
+
 // narrow screens: the sidebar is a top bar with a menu button
 function setMenu(open) {
   $("#side").classList.toggle("open", open);
