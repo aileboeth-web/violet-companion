@@ -410,8 +410,13 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
         from ai.settings import env_bool, env_str
         export = searxng_export()
         url = env_str("VIOLET_WEB_SEARXNG_URL", "")
+        from tools.violet_searxng import CN_ENGINES, ENGINES
         return ok({"installed": export is not None, "url": export and export.get("url"), "available": available(),
                    "engines_text": export and export.get("engines_text"),
+                   "engines": export.get("engines", "default") if export else None,
+                   "ipv4": bool(export and export.get("ipv4")), "last_note": export and export.get("last_note"),
+                   "catalog": [{"name": k, "label": v[0], "region": v[1]} for k, v in ENGINES.items()],
+                   "cn_engines": list(CN_ENGINES),
                    "progress": read_progress("task"), "web_enabled": env_bool("VIOLET_WEB_ENABLED", False),
                    "in_use": bool(export) and url.rstrip("/") == str(export.get("url")).rstrip("/")
                    and env_str("VIOLET_WEB_SEARCH_PROVIDER", "searxng") == "searxng"})
@@ -425,6 +430,28 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
         if body.get("confirm") is not True:
             return bad("需要确认（confirm: true）")
         action = str(body.get("action") or "")
+        if action == "configure":
+            # the page's own choice: engine names from the fixed list only, and IPv4 only or not
+            from ai.root_tasks import control_dir
+            from tools.violet_searxng import ENGINES
+            names = body.get("engines")
+            if names != "default":
+                if not isinstance(names, list) or not names or any(n not in ENGINES for n in names):
+                    return bad("请至少选一个搜索引擎（只能从列表里选）")
+                names = list(dict.fromkeys(names))
+            if searxng_export() is None:
+                return bad("还没有安装联网搜索（SearXNG）", 409)
+            path = control_dir() / "searxng-request.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text(json.dumps({"engines": names, "ipv4": body.get("ipv4") is True}), encoding="utf-8")
+            import os as _os
+            _os.replace(tmp, path)
+            try:
+                return ok(request_task("searxng-configure"))
+            except (PermissionError, RuntimeError) as exc:
+                path.unlink(missing_ok=True)
+                return bad(str(exc), 409)
         if action in ("install", "uninstall", "tune"):
             try:
                 return ok(request_task("searxng-" + action))
@@ -455,8 +482,6 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
         timeout), the engines that did not answer (a SearXNG on this machine), and one public page through the safe
         fetcher (what "网页阅读" uses). Not counted against the daily limits; nothing is stored."""
         import time as _time
-        import urllib.parse
-        import urllib.request
         from ai.settings import env_str
         from ai.web.netguard import SafeFetcher, WebPolicyError
         from ai.web.providers import SearchError, make_provider, provider_name
@@ -471,15 +496,12 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
             out["search"] = {"ok": False, "count": 0, "titles": [], "error": f"{exc.code}：{exc}"}
         out["search"]["latency_ms"] = int((_time.monotonic() - started) * 1000)
         url = env_str("VIOLET_WEB_SEARXNG_URL", "").rstrip("/")
-        if out["provider"] == "searxng" and url.startswith("http://127.0.0.1:"):
-            try:
-                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-                with opener.open(f"{url}/search?" + urllib.parse.urlencode({"q": query, "format": "json"}),
-                                 timeout=25) as resp:
-                    data = json.loads(resp.read(2_000_000).decode("utf-8"))
-                out["dead_engines"] = [str(e[0]) for e in data.get("unresponsive_engines") or [] if e][:12]
-            except (OSError, ValueError):
-                out["dead_engines"] = None
+        if out["provider"] == "searxng" and re.fullmatch(r"http://127\.0\.0\.1:\d{2,5}", url):
+            # SearXNG on this machine: which engine answered how much, and why the others did not (0.7.3)
+            from tools.violet_searxng import test_search
+            direct = test_search(int(url.rsplit(":", 1)[1]), query=query)
+            out["dead_engines"] = direct["dead"][:12] if direct["answered"] else None
+            out["by_engine"] = direct["by_engine"]
         started = _time.monotonic()
         page = "https://www.bing.com/"
         try:

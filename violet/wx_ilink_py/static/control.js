@@ -31,9 +31,13 @@ async function api(method, url, body) {
 }
 const fmt = (v) => (v === null || v === undefined || v === "" ? "—" : String(v));
 const when = (iso) => (iso ? String(iso).replace("T", " ").slice(0, 16) : "—");
-function confirmBox(text) {
+// opts.reason: show the "原因（可选）" box (only where the reason is recorded, e.g. deleting a memory) -- 0.7.3
+function confirmBox(text, opts = {}) {
   return new Promise((resolve) => {
     const d = $("#confirm"); $("#confirm-text").textContent = text; $("#confirm-reason").value = "";
+    $("#confirm-reason").hidden = !opts.reason;
+    $("#confirm-ok").textContent = opts.ok || "确定";
+    $("#confirm-ok").className = opts.danger === false ? "" : "danger";
     d.returnValue = ""; d.showModal();
     d.addEventListener("close", () => resolve(d.returnValue === "ok" ? { reason: $("#confirm-reason").value } : null), { once: true });
   });
@@ -311,7 +315,7 @@ async function deleteMemory(kind, m) {
   const text = kind === "event" ? `删除这条事件记忆？它会被标记为已删除（可在修改记录中看到原文），Violet 不再使用它。` +
       `聊天记录不变：最近的聊天里如果还有这件事的原话，Violet 仍能看到（要连原话一起抹掉，用“遗忘”）。\n\n${m.content}`
     : `删除这条核心记忆？原文会先写进修改记录。\n\n${m.content}`;
-  const ok = await confirmBox(text); if (!ok) return;
+  const ok = await confirmBox(text, { reason: true }); if (!ok) return;
   try { await api("POST", `/api/control/memories/${kind}/${m.id}/delete`, { confirm: true, reason: ok.reason }); toast("已删除"); loadMemories(); }
   catch (e) { toast("删除失败：" + e.message, false); }
 }
@@ -427,10 +431,7 @@ async function loadSearxng(box) {
         try { await searxngAction("enable"); toast("联网搜索已开启"); loaders.tools(); } catch (e) { toast(e.message, false); }
       } }));
     }
-    buttons.append(h("button", { class: "ghost", type: "button", text: "重新选择搜索引擎", onclick: async () => {
-      if (!(await confirmBox("测试一次搜索；没有结果时自动换一组搜索引擎（默认的 / 国内能访问的必应、百度、搜狗、360），选能搜到东西的那组。"))) return;
-      try { await searxngAction("tune"); watchSearxng("重新选择搜索引擎", null); } catch (e) { toast(e.message, false); }
-    } }));
+    buttons.append(h("button", { class: "ghost", type: "button", text: "选择搜索引擎", onclick: () => engineDialog(s) }));
     buttons.append(h("button", { class: "danger", type: "button", text: "卸载联网搜索", onclick: async () => {
       if (!(await confirmBox("卸载这台服务器上的 SearXNG？服务、程序和缓存都会删除，联网搜索随之关闭。以后可以再一键安装。"))) return;
       try { await searxngAction("uninstall"); watchSearxng("卸载联网搜索", "disable"); } catch (e) { toast(e.message, false); }
@@ -448,9 +449,49 @@ async function loadSearxng(box) {
       ev.target.disabled = false;
     } }));
   }
-  const engines = s.engines_text ? h("p", { class: "note", text: `搜索引擎：${s.engines_text}` }) : null;
+  const engines = s.engines_text ? h("p", { class: "note", text: `搜索引擎：${s.engines_text}` +
+    (s.last_note ? `。上次测试：${s.last_note}` : "") }) : null;
   box.replaceChildren(...[head, intro, s.installed && s.url ? h("p", { class: "note", text: `地址 ${s.url}（只有本机能访问）` }) : null,
     engines, buttons, testOut, last].filter(Boolean));                // replaceChildren(null) would insert the text "null"
+}
+// 0.7.3 (user: "做成可以自定义的，点开来可以自己选择搜索引擎"): tick the engines (only names from the server's list),
+// IPv4 only, then "保存并测试" (exactly that choice) or "自动选择" (try the usual choices until one finds results)
+function engineDialog(s) {
+  const chosen = new Set(Array.isArray(s.engines) ? s.engines : []);
+  const boxes = {};
+  const group = (title, region) => h("fieldset", { class: "engine-group" }, h("legend", { text: title }),
+    ...s.catalog.filter((e) => e.region === region).map((e) => {
+      const box = h("input", { type: "checkbox" }); box.checked = chosen.has(e.name); boxes[e.name] = box;
+      return h("label", { class: "check" }, box, ` ${e.label}`);
+    }));
+  const useDefault = h("input", { type: "checkbox" }); useDefault.checked = s.engines === "default";
+  const ipv4 = h("input", { type: "checkbox" }); ipv4.checked = !!s.ipv4;
+  const err = h("p", { class: "err" });
+  const d = h("dialog", { class: "engine-dialog" }, h("div", { class: "stack" },
+    h("h3", { text: "选择搜索引擎" }),
+    h("p", { class: "note", text: "勾选 SearXNG 要用的搜索引擎。服务器在国内时，国外的通常连不上，只勾国内的即可。保存后会重启 SearXNG 并测试一次搜索，下面的“测试联网”可以看到每个引擎为什么失败。" }),
+    group("国内能访问", "cn"), group("国外（国内服务器通常连不上）", "global"),
+    h("label", { class: "check" }, useDefault, " 用 SearXNG 默认的那一组（忽略上面的勾选）"),
+    h("label", { class: "check" }, ipv4, " 只用 IPv4（服务器的 IPv6 配了但不通时，所有搜索引擎都会超时，勾上这个）"),
+    err,
+    h("div", { class: "row" },
+      h("button", { class: "ghost", type: "button", text: "取消", onclick: () => { d.close(); d.remove(); } }),
+      h("button", { class: "ghost", type: "button", text: "自动选择", onclick: async () => {
+        try { await searxngAction("tune"); d.close(); d.remove(); watchSearxng("自动选择搜索引擎", null); }
+        catch (e) { err.textContent = e.message; }
+      } }),
+      h("button", { type: "button", text: "保存并测试", onclick: async () => {
+        const names = Object.keys(boxes).filter((n) => boxes[n].checked);
+        if (!useDefault.checked && !names.length) { err.textContent = "至少选一个搜索引擎"; return; }
+        try {
+          await api("POST", "/api/control/tools/web/searxng",
+            { action: "configure", confirm: true, engines: useDefault.checked ? "default" : names, ipv4: ipv4.checked });
+          d.close(); d.remove(); watchSearxng("更换搜索引擎", null);
+        } catch (e) { err.textContent = e.message; }
+      } }))));
+  document.body.append(d);
+  d.addEventListener("cancel", () => d.remove());
+  d.showModal();
 }
 function showWebTest(box, t, installed) {
   const s = t.search || {}, f = t.fetch || {};
@@ -458,8 +499,10 @@ function showWebTest(box, t, installed) {
     h("div", { class: "row" }, pill(s.ok ? "搜索正常" : "搜索失败", s.ok ? "ok" : "bad"),
       h("span", { class: "note", text: s.ok ? `搜到 ${s.count} 条（${s.latency_ms} 毫秒）` : `${s.error || "没有结果"}（${s.latency_ms} 毫秒）` })),
     s.titles && s.titles.length ? h("ul", { class: "note" }, ...s.titles.map((x) => h("li", { text: x }))) : null,
+    t.by_engine && Object.keys(t.by_engine).length ? h("p", { class: "note", text: "有结果的搜索引擎：" +
+      Object.entries(t.by_engine).map(([k, v]) => `${k} ${v} 条`).join("、") }) : null,
     t.dead_engines && t.dead_engines.length ? h("p", { class: "note", text: "没有响应的搜索引擎：" + t.dead_engines.join("、") }) : null,
-    !s.ok && installed ? h("p", { class: "note", text: "搜不到东西时点“重新选择搜索引擎”：服务器在国内时，默认的谷歌、DuckDuckGo 等通常连不上，会自动换成必应、百度、搜狗、360。" }) : null,
+    !s.ok && installed ? h("p", { class: "note", text: "搜不到东西时点“选择搜索引擎”：只勾国内能访问的；如果每个引擎都是“超时”，再勾上“只用 IPv4”。也可以点“自动选择”。" }) : null,
     h("div", { class: "row" }, pill(f.ok ? "网页阅读正常" : "网页阅读失败", f.ok ? "ok" : "bad"),
       h("span", { class: "note", text: f.ok ? `打开了 ${f.url}（${f.latency_ms} 毫秒）` : `打不开 ${f.url}：${f.error}` })),
   ];

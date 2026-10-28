@@ -19,7 +19,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-TASKS = ("relay-install", "relay-set-port", "searxng-install", "searxng-uninstall", "searxng-tune")
+TASKS = ("relay-install", "relay-set-port", "searxng-install", "searxng-uninstall", "searxng-tune",
+         "searxng-configure")
 NAMES = ("task", "update")
 STALE_SECONDS = 1800           # a running entry this old belongs to a helper that was killed
 

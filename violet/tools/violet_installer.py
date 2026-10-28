@@ -978,7 +978,7 @@ TASK_NAME = f"{SERVICE_NAME}-task"
 # word -> (which tool, its action). 0.7.1: the private SearXNG for web search.
 TASK_ACTIONS = {"relay-install": ("relay", "install"), "relay-set-port": ("relay", "set-port"),
                 "searxng-install": ("searxng", "install"), "searxng-uninstall": ("searxng", "uninstall"),
-                "searxng-tune": ("searxng", "tune")}
+                "searxng-tune": ("searxng", "tune"), "searxng-configure": ("searxng", "configure")}
 PROGRESS_STALE_SECONDS = 1800
 
 
@@ -2001,9 +2001,9 @@ def root_task(opts: Options, run: Callable[..., Any] = subprocess.run) -> dict[s
         message = f"联网搜索已安装：{result.get('url')}"
     elif task == "searxng-uninstall":
         message = "联网搜索（SearXNG）已卸载"
-    elif task == "searxng-tune":
-        message = ("已选好能用的搜索引擎" if result.get("search_ok") else "两组搜索引擎都没有结果") + \
-            f"（{_searxng_module().ENGINE_SETS.get(result.get('engines'), result.get('engines'))}）"
+    elif task in ("searxng-tune", "searxng-configure"):
+        message = (f"现在用：{result.get('engines_text')}，" +
+                   ("测试搜索有结果" if result.get("search_ok") else "但测试搜索没有结果（看下面的原因）"))
     else:
         message = ("中继已安装" if task == "relay-install" else "手机入口已换到新端口") + (f"，手机入口端口 {port}" if port else "")
         if result.get("healthy") is False:
@@ -2227,7 +2227,7 @@ def _searxng_module():
     return violet_searxng
 
 
-SEARXNG_ACTIONS = ("install", "uninstall", "status", "tune")
+SEARXNG_ACTIONS = ("install", "uninstall", "status", "tune", "configure")
 
 
 def searxng_command(opts: Options, action: str, run: Callable[..., Any] = subprocess.run,
@@ -2235,7 +2235,7 @@ def searxng_command(opts: Options, action: str, run: Callable[..., Any] = subpro
     """`violet searxng install | uninstall | status` (tools/violet_searxng.py): the private web-search service."""
     mod = _searxng_module()
     if action not in SEARXNG_ACTIONS:
-        raise InstallError("用法：violet searxng install | uninstall | status | tune")
+        raise InstallError("用法：violet searxng install | uninstall | status | tune | configure")
     layout = Layout(opts.root)
     state = load_state(layout)
     if not state:
@@ -2252,6 +2252,9 @@ def searxng_command(opts: Options, action: str, run: Callable[..., Any] = subpro
             save_state(layout, state)
         elif action == "tune":
             result = mod.tune(layout, state, run=run, progress=progress)
+            save_state(layout, state)
+        elif action == "configure":                  # the page's choice: <data>/control/searxng-request.json
+            result = mod.configure(layout, state, run=run, progress=progress)
             save_state(layout, state)
         else:
             result = mod.status(state)

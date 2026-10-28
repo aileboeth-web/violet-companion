@@ -280,6 +280,16 @@ if [ "$MODE" = "systemd" ]; then
         "$SCHEME://127.0.0.1:$PORT/api/control/tools/web/test")"
   echo "$T" | json 'd["data"]["search"]["ok"] and d["data"]["fetch"]["ok"]' | grep -q True || { echo "$T"; fail "web test button"; }
   pass "cn engine set valid (results, engines: $CNN); engine choice from the page; web test button: search and page reading OK"
+  # 0.7.3: the admin's own choice from the page, with "只用 IPv4" (outgoing.source_ips 0.0.0.0) -- a valid setting
+  CODE="$(code -b "$JAR" -H "Origin: $SCHEME://127.0.0.1:$PORT" -H 'Content-Type: application/json' \
+          --data '{"action":"configure","confirm":true,"engines":["bing","sogou"],"ipv4":true}' "$SXAPI")"
+  [ "$CODE" = "200" ] || fail "own engine choice request ($CODE)"
+  wait_task "own engine choice"
+  grep -q 'source_ips' "$ROOT/searxng/settings.yml" || fail "IPv4 only not written"
+  curl -fs "$SXURL/healthz" >/dev/null || { journalctl -u violet-searxng -n 60 --no-pager || true; fail "SearXNG with IPv4 only did not start"; }
+  OWN="$(curl -fsS --max-time 30 "$SXURL/search?q=weather&format=json" | python3 -c "import json,sys;d=json.load(sys.stdin);print(len(d.get('results') or []), d.get('unresponsive_engines'))")" \
+    || fail "SearXNG JSON search with IPv4 only"
+  pass "own engine choice from the page (bing + sogou, IPv4 only): SearXNG healthy, search: $OWN"
   [ "$(post_sx uninstall)" = "200" ] || fail "web search uninstall request"
   wait_task "SearXNG uninstall"
   [ "$(post_sx disable)" = "200" ] || fail "web search disable"
