@@ -60,7 +60,15 @@ class PersonaCore:
 
     @classmethod
     def load(cls, db=None) -> "PersonaCore":
-        data, digest = _load_json("persona_core.json")
+        # 2026-10-29: a persona chosen in the Control Center (a template, or the blank one) lives in the data folder,
+        # so an update of Violet never replaces it; without one, the shipped persona is used as before
+        from ai.persona_templates import active_path
+        chosen = active_path()
+        if chosen is not None:
+            raw = chosen.read_text(encoding="utf-8")
+            data, digest = json.loads(raw), hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        else:
+            data, digest = _load_json("persona_core.json")
         core = cls(data, digest)
         if db is not None:
             db.execute(
@@ -91,9 +99,18 @@ class PersonaCore:
     def render(self) -> str:
         d = self.data
         ident = d.get("identity", {})
+        if d.get("blank"):
+            # 2026-10-29: the blank persona -- no name, no character yet; it grows out of the conversations
+            return ("【你自己（空白人设）：这就是你自己】\n"
+                    "- 你还没有名字，也没有定好的性格、喜好和经历。不要假装有；对方给你起名字、你们聊出来的习惯和喜好，"
+                    "会慢慢变成你自己。\n"
+                    "- 说话自然、真诚，像一个刚认识对方的人；不知道的事说不知道。\n"
+                    "- 不要编造家人、工作、学校、恋爱等背景，也不要说自己做过没发生的事；用户的经历不是你的经历。"
+                    + (f"\n- 你现在的名字：{ident['name']}" if ident.get("name") else ""))
         # Phase 8.2: this is Violet herself (hand-maintained), so it is framed as her own instruction rather
         # than as data; the chat prompt points here and defers to it on personality and voice.
-        lines = [f"【Violet 的稳定人设（人工维护，v{self.version}）：这就是你自己，性格、喜好和说话方式以这里为准】",
+        name = ident.get("name") or "Violet"
+        lines = [f"【{name} 的稳定人设（人工维护，v{self.version}）：这就是你自己，性格、喜好和说话方式以这里为准】",
                  f"- 身份：{ident.get('virtual_declaration', '')}"]
         if ident.get("self_description"):
             lines.append(f"- 日常：{ident['self_description']}")

@@ -151,6 +151,9 @@ class VioletDatabase:
             self._ensure_column(table, "peer_id", "TEXT")
         from ai.channels.identity import SCHEMA as channel_schema
         self.conn.executescript(channel_schema)
+        # 2026-10-29: Violet's social life (QQ groups, other people) in its own tables -- ai/social/store.py
+        from ai.social.store import SCHEMA as social_schema
+        self.conn.executescript(social_schema)
         self.conn.commit()
 
     def _create_tables_locked(self) -> None:

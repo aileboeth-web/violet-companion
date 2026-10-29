@@ -52,7 +52,7 @@
   function renderCore(p) {
     const d = (p.core && p.core.data) || {};
     $("#pl-core").replaceChildren(
-      h("div", { class: "row" }, h("strong", { text: (d.identity && d.identity.name) || "Violet" }),
+      h("div", { class: "row" }, h("strong", { text: (d.identity && d.identity.name) || (d.blank ? "空白人设（还没有名字）" : "Violet") }),
         pill(`v${fmt(p.core && p.core.version)}`), h("span", { class: "note", text: ((p.core && p.core.sha256) || "").slice(0, 12) })),
       h("p", { text: (d.identity && d.identity.virtual_declaration) || "" }),
       h("div", { class: "pl-grid" }, listBlock("性格", d.personality), listBlock("说话习惯", d.communication_habits),
@@ -125,7 +125,50 @@
       : [empty("没有需要处理的地方")]));
   }
 
+  // 2026-10-29: persona templates -- switching asks whether to keep the memory or start empty (archived first)
+  function switchDialog(t) {
+    return new Promise((resolve) => {
+      const keep = h("input", { type: "radio", name: "pt-mem", value: "keep", checked: true });
+      const clear = h("input", { type: "radio", name: "pt-mem", value: "clear" });
+      const name = h("input", { maxlength: 20, placeholder: "可以不填，以后聊天时再起" });
+      const d = h("dialog", {}, h("form", { method: "dialog", class: "stack" },
+        h("h3", { text: `换成“${t.title}”` }),
+        h("p", { class: "note", text: t.summary }),
+        t.blank ? h("label", {}, "给她起个名字（可选） ", name) : null,
+        h("label", { class: "check" }, keep, " 保留记忆：她记得你、记得以前聊过的事，只是性格和说话方式换了"),
+        h("label", { class: "check" }, clear, " 清除记忆：从零开始（记忆、你的资料、她的生活经历都清空；聊天记录保留；清除前会在服务器上存一份备份）"),
+        h("div", { class: "row" },
+          h("button", { type: "button", class: "ghost", text: "取消", onclick: () => { d.close(); d.remove(); resolve(null); } }),
+          h("button", { type: "button", text: "换人设", onclick: () => {
+            const memory = clear.checked ? "clear" : "keep"; d.close(); d.remove(); resolve({ memory, name: name.value.trim() }); } }))));
+      document.body.append(d); d.showModal();
+    });
+  }
+  async function renderTemplates() {
+    let d;
+    try { d = await api("GET", "/api/persona/templates"); } catch (e) { $("#pl-templates").replaceChildren(h("p", { class: "err", text: e.message })); return; }
+    $("#pl-templates").replaceChildren(...d.templates.map((t) => {
+      const using = d.current.template === t.key;
+      return h("div", { class: "card platform" },
+        h("div", { class: "platform-head" }, h("strong", { text: t.title }), using ? pill("正在使用", "ok") : pill("模板", "")),
+        h("p", { class: "note platform-intro", text: t.summary }),
+        h("div", { class: "platform-body" }, t.personality.length ? h("p", { class: "note", text: "性格：" + t.personality.slice(0, 2).join("；") }) : null),
+        h("div", { class: "row platform-foot" }, using ? h("span", { class: "note", text: d.current.switched_at ? `${when(d.current.switched_at)} 换上` : "默认人设" })
+          : h("button", { type: "button", class: "ghost", text: "用这个人设", onclick: async () => {
+            const choice = await switchDialog(t);
+            if (!choice) return;
+            if (choice.memory === "clear" && !(await confirmBox("确定清除全部记忆？她会忘记你和以前的一切（服务器上会保留一份备份文件）。"))) return;
+            try {
+              const r = await api("POST", "/api/persona/switch", { template: t.key, memory: choice.memory, name: choice.name, confirm: true });
+              toast(r.archive ? `已换人设，记忆已清除（备份：${r.archive}）` : "已换人设，记忆保留");
+              loaders.persona();
+            } catch (e) { toast(e.message, false); }
+          } })));
+    }));
+  }
+
   loaders.persona = async () => {
+    renderTemplates();
     try {
       const [p, l] = await Promise.all([api("GET", "/api/persona"), api("GET", "/api/life")]);
       renderCore(p);

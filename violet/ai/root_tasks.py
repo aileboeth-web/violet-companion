@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 TASKS = ("relay-install", "relay-set-port", "searxng-install", "searxng-uninstall", "searxng-tune",
-         "searxng-configure")
+         "searxng-configure", "napcat-install", "napcat-uninstall", "napcat-restart")
 NAMES = ("task", "update")
 STALE_SECONDS = 1800           # a running entry this old belongs to a helper that was killed
 
@@ -84,6 +84,19 @@ def searxng_export() -> dict[str, Any] | None:
         return None
     url = str(data.get("url") or "") if isinstance(data, dict) else ""
     return data if url.startswith("http://127.0.0.1:") else None
+
+
+def napcat_export() -> dict[str, Any] | None:
+    """What root wrote after installing QQ (NapCat) (<data>/control/napcat.json): local addresses and tokens."""
+    try:
+        data = json.loads((control_dir() / "napcat.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    ok = str(data.get("ws_url") or "").startswith("ws://127.0.0.1:") and \
+        str(data.get("webui_url") or "").startswith("http://127.0.0.1:")
+    return data if ok else None
 
 
 def request_task(task: str) -> dict[str, Any]:

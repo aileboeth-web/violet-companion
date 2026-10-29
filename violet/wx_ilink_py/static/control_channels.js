@@ -18,7 +18,8 @@
   const BOTFATHER_URL = "https://t.me/BotFather";
   const PLATFORMS = [
     { key: "wechat", type: "wechat_ilink", name: "微信", intro: "用要给 Violet 用的微信扫一下码就行，不用申请任何东西。" },
-    { key: "qq", type: "qqbot", name: "QQ", intro: "在 QQ 开放平台免费创建一个机器人，填两项就能用，不需要 NapCat。" },
+    { key: "napcat", type: "napcat", name: "QQ", intro: "用一个 QQ 号（建议小号）扫码登录。私聊和你聊天，还能进群、认识别人。在服务器上一键安装，不用自己装 NapCat。" },
+    { key: "qq", type: "qqbot", name: "QQ（机器人）", intro: "在 QQ 开放平台免费创建一个官方机器人，填两项就能用。只能私聊，不会被封号。" },
     { key: "telegram", type: "telegram", name: "Telegram", intro: "找 @BotFather 创建一个机器人，填一个 Token 就能用。" },
   ];
   let data = null;
@@ -315,21 +316,83 @@
     } }));
   }
 
-  // ---------------------------------------------------------------- "更多设置": other channels, the add form, history
+  // ---------------------------------------------------------------- 2026-10-29: "QQ" = a personal account via NapCat
+  // Not installed: one-click install (root task, progress dialog). Installed: QR login (NapCat's management API through
+  // Violet), then the usual channel parts; the groups and other people are managed below the cards (control_social.js).
+  let ncTimer = null;
+  function napcatCard(p, ch) {
+    const body = h("div", { class: "stack" });
+    const foot = h("div", { class: "row" });
+    const card = platformCard(p, ch, null, [body], [foot]);
+    loadNapcat(body, foot, ch, card);
+    return card;
+  }
+  function watchNapcat(title) {
+    progressDialog({ title, url: "/api/control/progress/task", onFinish: (pr, extra) => {
+      if (pr.notes && pr.notes.length) extra.replaceChildren(h("ul", { class: "note" }, ...pr.notes.map((n) => h("li", { text: n }))));
+      loaders.channels();
+    } });
+  }
+  async function napcatTask(action, title) {
+    try { await api("POST", `/api/control/napcat/${action}`, action === "uninstall" ? { confirm: true } : {}); }
+    catch (e) { toast(e.message, false); return; }
+    watchNapcat(title);
+  }
+  async function loadNapcat(body, foot, ch, card) {
+    clearTimeout(ncTimer);
+    let s;
+    try { s = await api("GET", "/api/control/napcat"); } catch (e) { body.replaceChildren(h("p", { class: "err", text: e.message })); return; }
+    const running = s.progress && (s.progress.state === "queued" || s.progress.state === "running");
+    const again = (ms) => { ncTimer = setTimeout(() => { if (body.isConnected && $("#tab-channels").classList.contains("active") && !document.hidden) loadNapcat(body, foot, ch, card); }, ms); };
+    if (!s.installed) {
+      setIntro(card, true);
+      const failed = s.progress && s.progress.state === "failed" ? h("p", { class: "err", text: "上次安装失败：" + (s.progress.message || "") }) : null;
+      body.replaceChildren(...[failed, h("p", { class: "note", text: "会在服务器上安装 Linux QQ 和 NapCat（几分钟，大约 400 MB），只在本机通信，不开放任何端口。这是非官方的接入方式，QQ 号有被风控的可能，建议用小号。" })].filter(Boolean));
+      foot.replaceChildren(running ? h("button", { type: "button", text: "正在安装…查看进度", onclick: () => watchNapcat("安装 QQ") })
+        : s.available ? h("button", { type: "button", text: "一键安装 QQ", onclick: async () => {
+          if (!(await confirmBox("在服务器上安装 Linux QQ 和 NapCat？大约需要几分钟。"))) return;
+          napcatTask("install", "安装 QQ");
+        } }) : h("code", { text: s.install_command }));
+      if (!s.available) body.append(h("p", { class: "note", text: "这种安装方式不能在网页上安装，请在服务器上运行上面的命令。" }));
+      return;
+    }
+    const login = s.login || {};
+    if (!login.logged_in) {
+      setIntro(card, false);
+      setHead(card, login.starting ? "正在启动" : "等待扫码", "warn");
+      const key = login.qr || "";
+      if (body.dataset.qr !== key || !key) {
+        body.dataset.qr = key;
+        body.replaceChildren(login.qr
+          ? step(1, "用要给 Violet 用的 QQ 扫一扫", h("img", { class: "wx-qr", src: login.qr, alt: "QQ 登录二维码" }),
+            h("p", { class: "note", text: "用手机 QQ 扫码并确认。建议用小号；登录后 Violet 会记住这个号，重启后自动登录。" }))
+          : h("p", { class: "note", text: login.starting ? "QQ 正在启动，几十秒后这里会出现二维码…" : "正在获取二维码…" }),
+          ...(login.error && !login.starting ? [h("p", { class: "err", text: login.error })] : []));
+      }
+      foot.replaceChildren(
+        h("button", { class: "ghost", type: "button", text: "换一个二维码", onclick: async () => {
+          try { await api("POST", "/api/control/napcat/refresh-qr"); body.dataset.qr = ""; loadNapcat(body, foot, ch, card); } catch (e) { toast(e.message, false); }
+        } }),
+        h("button", { class: "ghost", type: "button", text: "重启 QQ", onclick: () => napcatTask("restart", "重启 QQ") }));
+      again(3000);
+      return;
+    }
+    if (!s.channel) { loaders.channels(); return; }        // logged in just now: the channel was created
+    ch = s.channel;
+    setIntro(card, false);
+    const parts = channelParts(ch, "你自己的 QQ");
+    body.replaceChildren(...parts.body.filter(Boolean));
+    foot.replaceChildren(...parts.foot,
+      h("button", { class: "ghost", type: "button", text: "重启 QQ", onclick: () => napcatTask("restart", "重启 QQ") }),
+      h("button", { class: "danger", type: "button", text: "卸载", onclick: async () => {
+        if (!(await confirmBox("卸载 QQ（NapCat）？这个 QQ 号会退出登录，群聊和其他人的聊天记录保留。"))) return;
+        napcatTask("uninstall", "卸载 QQ");
+      } }));
+  }
+
   function extraCard(ch) {
     const parts = channelParts(ch, "你自己的账号");
     return platformCard({ key: ch.id, name: ch.label, intro: "" }, ch, `${ch.label}（${ch.type}）`, parts.body, parts.foot);
-  }
-
-  function renderAddForm() {
-    const type = $("#ch-add-type").value;
-    const spec = (data.types || []).find((t) => t.type === type);
-    if (!spec) return;
-    $("#ch-add-help").textContent = spec.help;
-    $("#ch-add-fields").replaceChildren(
-      ...Object.entries(spec.defaults).map(([k, v]) => fieldInput(k, v, false)),
-      ...spec.secrets.map((s) => h("div", {}, fieldInput(s.name, "", true), h("span", { class: "note",
-        text: s.name === "webhook_secret" ? " 留空会自动生成（只显示一次）" : (s.required ? " 必填" : " 可选") }))));
   }
 
   loaders.channels = async () => {
@@ -337,40 +400,21 @@
     const used = new Set();
     const pick = (p) => { const ch = data.channels.find((c) => c.type === p.type && !used.has(c.id) && (p.key !== "wechat" || c.id === "wechat"));
       if (ch) used.add(ch.id); return ch; };
-    $("#ch-list").replaceChildren(...PLATFORMS.map((p) => { const ch = pick(p); return p.key === "wechat" ? wechatCard(p, ch || { id: "wechat", enabled: true, status: { state: "stopped" } }) : botCard(p, ch); }));
+    $("#ch-list").replaceChildren(...PLATFORMS.map((p) => { const ch = pick(p);
+      if (p.key === "wechat") return wechatCard(p, ch || { id: "wechat", enabled: true, status: { state: "stopped" } });
+      return p.key === "napcat" ? napcatCard(p, ch) : botCard(p, ch); }));
     watchConnecting(data.channels);
-    const extra = data.channels.filter((c) => !used.has(c.id));
-    $("#ch-extra").replaceChildren(...extra.map(extraCard));
-    if (extra.length) $("#ch-more").open = true;
+    // channels added by hand in older versions (OneBot, a second bot) stay usable as cards
+    $("#ch-extra").replaceChildren(...data.channels.filter((c) => !used.has(c.id)).map(extraCard));
     const sel = $("#ch-proactive");
     sel.replaceChildren(h("option", { value: "auto", text: "自动（你最近聊天的渠道）" }),
       ...data.channels.map((c) => h("option", { value: c.id, text: c.label })));
     sel.value = data.proactive_channel || "auto";
-    const typeSel = $("#ch-add-type");
-    if (!typeSel.options.length) {
-      typeSel.replaceChildren(...data.types.map((t) => h("option", { value: t.type, text: t.label })));
-      typeSel.value = data.types.some((t) => t.type === "onebot11") ? "onebot11" : typeSel.value;
-    }
-    renderAddForm();
-    $("#ch-history").replaceChildren(...(data.history || []).map((r) => h("div", { class: "card" },
-      h("span", { text: `${when(new Date(r.at * 1000).toISOString())} · ${r.actor} · ${r.action} · ${r.channel}` }))));
+    if (window.renderSocial) window.renderSocial($("#ch-social"), data.channels.some((c) => c.type === "napcat"));
   };
 
   $("#ch-refresh").addEventListener("click", () => loaders.channels());
-  $("#ch-add-type").addEventListener("change", renderAddForm);
   $("#ch-proactive").addEventListener("change", async (ev) => {
     try { await api("POST", "/api/control/channels/proactive", { channel: ev.target.value }); toast("已保存"); } catch (e) { toast(e.message, false); }
-  });
-  $("#ch-add").addEventListener("submit", async (ev) => {
-    ev.preventDefault(); $("#ch-add-error").textContent = "";
-    const { config, secrets } = collect($("#ch-add-fields"));
-    try {
-      const r = await api("POST", "/api/control/channels", { type: $("#ch-add-type").value, id: $("#ch-add-id").value.trim(),
-        label: $("#ch-add-label").value.trim(), config, secrets });
-      ev.target.reset();
-      if (r.shown_once && r.shown_once.webhook_secret) $("#ch-add-error").textContent = "已添加。签名密钥（只显示这一次，请填到 OneBot 实现里）：" + r.shown_once.webhook_secret;
-      else toast("已添加并启动");
-      loaders.channels();
-    } catch (e) { $("#ch-add-error").textContent = problemsText(e); }
   });
 })();

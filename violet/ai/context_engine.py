@@ -441,7 +441,23 @@ class ContextEngine:
         sections.append(self._life_section(mode, user_message, call_context, LifeStore(self.db)))
         if mode == "chat":
             sections.append(self._web_section(user_message, call_context))
+            sections.append(self._social_section())
         return sections
+
+    def _social_section(self) -> _Section:
+        """2026-10-29: what she said in QQ groups lately (the owner may know her group life; group members never learn
+        the owner's private things -- ai/social never loads them)."""
+        from ai.settings import env_bool
+        if not env_bool("VIOLET_SOCIAL_OWNER_DIGEST", True):
+            return _Section("social", 5, "", [])
+        try:
+            from ai.social.engine import owner_digest
+            text = owner_digest(self.db)
+        except Exception:
+            logger.exception("social digest unavailable")
+            text = ""
+        lines = text.splitlines()
+        return _Section("social", 5, lines[0] if lines else "", lines[1:])
 
     def _web_section(self, user_message: str, call_context: dict[str, Any]) -> _Section:
         """Phase 5B: things Violet found on the web -- external, untrusted, dated; only when relevant."""

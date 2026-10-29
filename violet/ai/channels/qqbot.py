@@ -121,7 +121,7 @@ def parse_c2c(event: dict[str, Any], channel_id: str) -> InboundMessage | None:
 class QQBotChannel(ChannelAdapter):
     channel_type = "qqbot"
     label = "QQ"
-    capabilities = frozenset({"text", "image_in", "voice_text"})
+    capabilities = frozenset({"text", "image_in", "image_out", "voice_text"})
 
     def __init__(self, channel_id: str, config: dict[str, Any] | None = None, secrets: dict[str, str] | None = None,
                  data_dir: str | os.PathLike[str] | None = None, session: requests.Session | None = None,
@@ -370,6 +370,30 @@ class QQBotChannel(ChannelAdapter):
                 raise QQBotError(f"QQ 拒绝了主动消息（对方超过 60 分钟没有发消息，官方机器人只能有限地主动发送）：{exc}",
                                  exc.code, exc.status) from None
             raise
+        finally:
+            self._save_state()
+        return {"ok": True, "message_id": (body or {}).get("id"), "passive": msg_id is not None}
+
+    def send_image(self, peer_id: str, path: str) -> dict[str, Any]:
+        """2026-10-29: a picture = upload it as rich media (POST /v2/users/{openid}/files, file_type 1, the bytes as
+        file_data), then a media message (msg_type 7) with the returned file_info -- QQ's documented two steps."""
+        import base64
+        with open(path, "rb") as fh:
+            data = fh.read()
+        if len(data) > MAX_DOWNLOAD:
+            raise QQBotError("image too large")
+        uploaded = self._api("POST", f"/v2/users/{peer_id}/files",
+                             {"file_type": 1, "file_data": base64.b64encode(data).decode("ascii"), "srv_send_msg": False},
+                             timeout=60) or {}
+        file_info = uploaded.get("file_info") if isinstance(uploaded, dict) else None
+        if not file_info:
+            raise QQBotError("QQ 没有返回图片的 file_info")
+        msg_id, seq = self._reply_ref(peer_id, None)
+        payload: dict[str, Any] = {"content": " ", "msg_type": 7, "media": {"file_info": file_info}, "msg_seq": seq}
+        if msg_id:
+            payload["msg_id"] = msg_id
+        try:
+            body = self._api("POST", f"/v2/users/{peer_id}/messages", payload)
         finally:
             self._save_state()
         return {"ok": True, "message_id": (body or {}).get("id"), "passive": msg_id is not None}

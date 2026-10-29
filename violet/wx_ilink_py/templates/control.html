@@ -98,15 +98,22 @@
   </section>
 
   <section id="tab-chat" class="tab">
-    <div class="filters">
-      <label>日期 <select id="chat-day"><option value="">全部</option></select></label>
-      <label>谁说的 <select id="chat-role"><option value="">全部</option><option value="user">对方</option><option value="assistant">Violet</option></select></label>
-      <label class="grow">搜索 <input id="chat-q" type="search" maxlength="100" placeholder="消息里的文字"></label>
-      <button id="chat-search">查询</button>
+    <div id="hist-chans" class="hist-chans" role="tablist" aria-label="聊天渠道"></div>
+    <div class="hist">
+      <aside class="hist-side"><div id="hist-list" class="hist-list"></div></aside>
+      <div class="hist-main">
+        <div class="hist-head" id="hist-head"></div>
+        <div class="filters">
+          <label>日期 <select id="chat-day"><option value="">全部</option></select></label>
+          <label id="chat-role-wrap">谁说的 <select id="chat-role"><option value="">全部</option><option value="user">对方</option><option value="assistant">Violet</option></select></label>
+          <label class="grow">搜索 <input id="chat-q" type="search" maxlength="100" placeholder="消息里的文字"></label>
+          <button id="chat-search">查询</button>
+        </div>
+        <div class="legend" id="chat-legend"><span class="tag user">对方</span><span class="tag violet">Violet 回复</span><span class="tag proactive">Violet 主动</span><span class="tag reminder">提醒</span><span class="tag system">系统</span></div>
+        <button id="chat-more" class="ghost wide" hidden>更早的消息</button>
+        <div id="chat-list" class="timeline"></div>
+      </div>
     </div>
-    <div class="legend"><span class="tag user">对方</span><span class="tag violet">Violet 回复</span><span class="tag proactive">Violet 主动</span><span class="tag reminder">提醒</span><span class="tag system">系统</span></div>
-    <div id="chat-list" class="timeline"></div>
-    <button id="chat-more" class="ghost wide" hidden>更早的消息</button>
     <details class="export"><summary>导出聊天记录（JSON，只含文字和时间）</summary>
       <div class="filters"><label>从 <input id="exp-from" type="date"></label><label>到 <input id="exp-to" type="date"></label>
         <button id="exp-go">导出</button></div>
@@ -148,29 +155,11 @@
 
   <section id="tab-channels" class="tab">
     <div class="row"><h2>聊天渠道</h2><button class="ghost" id="ch-refresh">刷新状态</button></div>
-    <p class="note">选一个或几个平台和 Violet 聊天，它们共用同一个 Violet（同一份记忆和人设）。只有你自己的账号发来的消息才会被处理，陌生人的消息不回复、不保存。</p>
+    <p class="note">选一个或几个平台和 Violet 聊天，它们共用同一个 Violet（同一份记忆和人设）。私聊里只有你自己的账号发来的消息才进入你们的对话；新的“QQ”还能进群、和别人聊天（在 QQ 卡片里设置）。</p>
+    <label class="inline">主动联系你时发到 <select id="ch-proactive"></select></label>
     <div id="ch-list" class="platforms"></div>
-    <details class="card" id="ch-more"><summary>更多设置（主动消息、其他接入方式、修改记录）</summary>
-      <div class="stack-wide">
-        <label class="inline">主动消息发到 <select id="ch-proactive"></select></label>
-        <div id="ch-extra" class="cards list"></div>
-        <div id="ch-add-box"><h3>其他接入方式</h3>
-        <p class="note">一般用不到：比如用 NapCat（OneBot v11）接入 QQ，或者再加一个 QQ / Telegram 机器人。</p>
-        <form id="ch-add" class="stack" autocomplete="off">
-          <div class="filters">
-            <label>类型 <select id="ch-add-type"></select></label>
-            <label>标识 <input id="ch-add-id" maxlength="31" placeholder="例如 telegram2" required></label>
-            <label class="grow">名称 <input id="ch-add-label" maxlength="30" placeholder="后台显示的名字（可选）"></label>
-          </div>
-          <p class="note" id="ch-add-help"></p>
-          <div id="ch-add-fields" class="stack"></div>
-          <p class="err" id="ch-add-error"></p>
-          <div class="row"><button type="submit">添加并启动</button></div>
-        </form></div>
-        <div id="ch-history-box"><h3>修改记录</h3>
-        <div id="ch-history" class="cards list"></div></div>
-      </div>
-    </details>
+    <div id="ch-extra" class="platforms"></div>
+    <div id="ch-social"></div>
   </section>
 
   <section id="tab-tools" class="tab">
@@ -322,6 +311,8 @@
   <section id="tab-persona" class="tab">
     <div class="row"><h2>人设与生活</h2><button class="ghost" id="pl-refresh" type="button">刷新</button></div>
     <p class="note">Violet 的核心人设、会慢慢变化的部分，以及她的虚拟生活。这里的生活经历都是虚构的；改动会记下原因，可以看历史。</p>
+    <h3>选择人设 <span class="note">（几套模板，也可以用空白人设从零开始）</span></h3>
+    <div id="pl-templates" class="platforms"></div>
     <div class="card" id="pl-core"></div>
     <h3>人设动态 <span class="note">（缓慢变化，需要你批准）</span></h3>
     <div id="pl-dynamics" class="cards list"></div>
@@ -374,6 +365,7 @@
 </form></dialog>
 <script src="/static/control.js"></script>
 <script src="/static/control_schedule.js"></script>
+<script src="/static/control_social.js"></script>
 <script src="/static/control_channels.js"></script>
 <script src="/static/control_setup.js"></script>
 <script src="/static/control_mcp.js"></script>

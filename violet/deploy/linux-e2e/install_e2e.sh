@@ -307,6 +307,32 @@ if [ "$MODE" = "systemd" ]; then
   pass "web search uninstalled from the Control Center (service, files and export gone)"
   "$ROOT/violet" searxng install --json >/dev/null || fail "violet searxng install (CLI)"
   systemctl is-active --quiet violet-searxng || fail "violet-searxng not active after the CLI install"
+
+  # 4f. 2026-10-29: the channel "QQ" -- the page's "一键安装 QQ": the root task service runs NapCat's own installer
+  #     (Shell mode, no Docker) as the violet-qq account, writes local-only configs, starts violet-napcat; the page then
+  #     reads the login state through NapCat's management API. No QQ account can scan here: the QR code is reported.
+  NCAPI="$SCHEME://127.0.0.1:$PORT/api/control/napcat"
+  CODE="$(code -b "$JAR" -H "Origin: $SCHEME://127.0.0.1:$PORT" -H 'Content-Type: application/json' --data '{}' "$NCAPI/install")"
+  [ "$CODE" = "200" ] || fail "QQ install request ($CODE)"
+  wait_task "QQ (NapCat) install"; MAXP="$WT_MAX"
+  systemctl is-active --quiet violet-napcat || { journalctl -u violet-napcat -n 80 --no-pager || true; fail "violet-napcat not active"; }
+  id violet-qq >/dev/null 2>&1 || fail "account violet-qq missing"
+  NCEXP="$ROOT/data/control/napcat.json"
+  [ -f "$NCEXP" ] || fail "napcat export missing"
+  WSPORT="$(python3 -c "import json;print(json.load(open('$NCEXP'))['ws_url'].rsplit(':',1)[1])")"
+  WEBPORT="$(python3 -c "import json;print(json.load(open('$NCEXP'))['webui_url'].rsplit(':',1)[1])")"
+  NCSTATE=""
+  for _ in $(seq 1 60); do
+    NCSTATE="$(curl -sk -b "$JAR" -H 'Accept: application/json' "$NCAPI")"
+    echo "$NCSTATE" | json 'bool(d["data"].get("login", {}).get("qr")) or bool(d["data"].get("login", {}).get("logged_in"))' \
+      | grep -q True && break
+    sleep 5
+  done
+  for p in "$WSPORT" "$WEBPORT"; do
+    ! ss -ltnH "( sport = :$p )" | grep -v '127.0.0.1' | grep -q . || fail "NapCat listens beyond loopback on $p"
+  done
+  QR="$(echo "$NCSTATE" | json 'str(bool(d["data"].get("login", {}).get("qr"))) + " " + str(d["data"].get("login", {}).get("error"))')"
+  pass "QQ (NapCat) installed from the Control Center (progress $MAXP%), violet-napcat active as violet-qq, local only; login QR from the page: $QR"
 fi
 
 # 5. repair keeps port and password; backup; status
@@ -344,9 +370,11 @@ fi
 if [ "$MODE" = "systemd" ]; then
   ! id violet >/dev/null 2>&1 || fail "system account violet left behind"
   for unit in violet.service violet-update.service violet-update.timer violet-update.path violet-task.service \
-              violet-task.path violet-mcp-relay.service violet-searxng.service; do
+              violet-task.path violet-mcp-relay.service violet-searxng.service violet-napcat.service; do
     [ ! -e "/etc/systemd/system/$unit" ] || fail "$unit left behind"
   done
+  ! id violet-qq >/dev/null 2>&1 || fail "system account violet-qq left behind"
+  ! systemctl is-active --quiet violet-napcat || fail "NapCat still running after purge"
   [ ! -e /var/lib/private/violet-mcp-relay ] && [ ! -e /var/lib/violet-mcp-relay ] || fail "relay data left behind"
   [ ! -e /var/cache/private/violet-searxng ] && [ ! -e /var/cache/violet-searxng ] || fail "SearXNG cache left behind"
   ! systemctl is-active --quiet violet-searxng || fail "SearXNG still running after purge"

@@ -52,6 +52,25 @@ def register_persona_routes(app: Flask, violetdb) -> None:
     def persona_core_write():
         return bad(CORE_EDIT_NOTE, 405)
 
+    # -- 2026-10-29: persona templates (incl. the blank one); the memory is kept or cleared (archived first) -------------
+    @app.get("/api/persona/templates")
+    def persona_templates():
+        from ai import persona_templates as pt
+        return ok({"templates": pt.templates(), "current": pt.current()})
+
+    @app.post("/api/persona/switch")
+    def persona_switch():
+        from ai import persona_templates as pt
+        data = body()
+        if data.get("confirm") is not True:
+            return bad("换人设需要确认（confirm: true）")
+        try:
+            result = pt.switch(violetdb, str(data.get("template") or ""), str(data.get("memory") or ""),
+                               str(data.get("name") or "") or None)
+        except ValueError as exc:
+            return bad(str(exc))
+        return ok(result)
+
     @app.post("/api/persona/dynamics/<int:entry_id>/decide")
     def persona_decide(entry_id: int):
         approve = body().get("approve")

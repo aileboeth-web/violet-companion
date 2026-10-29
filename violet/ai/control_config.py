@@ -150,6 +150,18 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_WEB_EXPLORER", "允许自主探索", "features", "bool", "now",
             "允许 Violet 在空闲时自己上网看看感兴趣的东西（会用模型、计入联网次数）；打开后还要在“联网与探索”页开启", False),
     Setting("VIOLET_WEB_EXPLORER_LLM_MODEL", "自主探索用的模型", "features", "model", "now", "留空 = 不探索", optional=True),
+    # 2026-10-29: Violet's social life on the channel "QQ" (ai/social): groups are chosen per group on the channels page
+    Setting("VIOLET_SOCIAL_PRIVATE", "别人私聊她", "social", "choice", "now",
+            "不是你的人私聊 Violet 时：不理 / 只回群里认识的人 / 谁都回（她仍然自己决定说不说）", "known",
+            choices=(("off", "不理"), ("known", "只回群里认识的人"), ("all", "谁都回"))),
+    Setting("VIOLET_SOCIAL_MODEL", "群聊用的模型", "social", "model", "now",
+            "决定在群里说不说、说什么用的模型；留空 = 和 Chat 一样。群消息多时可以换便宜一点的模型", optional=True),
+    Setting("VIOLET_SOCIAL_QUIET_SECONDS", "等群里安静几秒再决定", "social", "float", "now",
+            "有人一直在说时先等一等，攒在一起看一次（被 @ 或私聊时只等 3 秒）；越短越及时，模型调用也越多", 15.0, 3, 600),
+    Setting("VIOLET_SOCIAL_CONTEXT_MESSAGES", "每次看多少条聊天记录", "social", "int", "now",
+            "决定时给模型看最近多少条消息（包括已经看过的）", 30, 10, 200),
+    Setting("VIOLET_SOCIAL_OWNER_DIGEST", "把群里的事告诉你", "social", "bool", "now",
+            "和你聊天时，她知道自己最近在群里说过什么（反过来，你私聊的内容永远不会带到群里）", True),
     Setting("VIOLET_IMAGE_ENABLED", "图片功能", "images", "bool", "now",
             "关闭时收到的图片只用下面的识图模型看一眼，聊天里没有生成 / 编辑图片的工具", False),
     Setting("VISION_LLM_MODEL", "识图模型", "images", "model", "now",
@@ -247,7 +259,7 @@ SETTINGS: list[Setting] = [
 BY_KEY = {s.key: s for s in SETTINGS}
 GROUPS = {"api": "接口", "models": "模型与 Agent", "prompts": "提示词版本", "messages": "消息发送", "proactive": "主动联系",
           "life": "生活引擎", "behavior": "聊天行为", "memory": "记忆与提醒", "guard": "回复检查", "features": "功能开关",
-          "images": "图片", "mcp": "MCP 工具调用", "system": "系统", "logs": "日志与排查", "updates": "版本更新"}
+          "images": "图片", "social": "QQ 群聊与其他人", "mcp": "MCP 工具调用", "system": "系统", "logs": "日志与排查", "updates": "版本更新"}
 TEXT_MAX = 200
 
 

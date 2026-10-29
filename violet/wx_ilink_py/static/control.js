@@ -237,36 +237,94 @@ $("#ov-refresh").addEventListener("click", () => loaders.overview());
 
 // ---------------------------------------------------------------- chat
 const KIND = { user: "对方", violet: "Violet 回复", proactive: "Violet 主动", reminder: "提醒", system: "系统" };
-let chatBefore = null;
+// 2026-10-29: channel -> conversations (left) -> messages (right). "你" is the owner's chat on that channel; groups
+// and other people are Violet's own conversations (each message shows who said it).
+const hist = { channel: null, conv: "owner", before: null, channels: [], items: [] };
+const KIND_ICON = { owner: "★", group: "群", private: "人" };
+function convName(item) { return item ? item.title : ""; }
+function renderChannels() {
+  $("#hist-chans").replaceChildren(...(hist.channels.length ? hist.channels.map((c) => h("button", {
+    type: "button", role: "tab", class: "chip" + (c.id === hist.channel ? " active" : ""), "aria-selected": String(c.id === hist.channel),
+    text: c.label + (c.conversations ? `（${c.conversations + (c.owner_messages ? 1 : 0)}）` : ""),
+    onclick: () => { hist.channel = c.id; hist.conv = "owner"; loadHistoryList(); } }))
+    : [h("p", { class: "note", text: "还没有聊天记录" })]));
+}
+async function loadHistoryList() {
+  renderChannels();
+  if (!hist.channel) { $("#hist-list").replaceChildren(); $("#chat-list").replaceChildren(); return; }
+  try {
+    const d = await api("GET", `/api/control/history/${encodeURIComponent(hist.channel)}`);
+    hist.items = d.items;
+    if (!hist.items.some((i) => i.key === hist.conv)) hist.conv = hist.items.length ? hist.items[0].key : "owner";
+    renderList();
+    await loadDays();
+    loadChat(false);
+  } catch (e) { toast("聊天记录读取失败：" + e.message, false); }
+}
+function renderList() {
+  $("#hist-list").replaceChildren(...(hist.items.length ? hist.items.map((i) => h("button", {
+    type: "button", class: "hist-item" + (i.key === hist.conv ? " active" : ""),
+    onclick: () => { hist.conv = i.key; renderList(); loadDays().then(() => loadChat(false)); } },
+    h("span", { class: "hist-avatar " + i.kind, text: KIND_ICON[i.kind] || "·" }),
+    h("span", { class: "hist-text" },
+      h("span", { class: "hist-title" }, h("strong", { text: i.title }), h("span", { class: "note", text: i.last_at ? when(i.last_at) : "" })),
+      h("span", { class: "note hist-last", text: i.last_text || i.subtitle || "" }))))
+    : [h("p", { class: "note", text: "这个渠道还没有聊天" })]));
+  const cur = hist.items.find((i) => i.key === hist.conv);
+  $("#hist-head").replaceChildren(...(cur ? [h("strong", { text: convName(cur) }), h("span", { class: "note", text: " " + (cur.subtitle || "") })] : []));
+  const owner = hist.conv === "owner";
+  $("#chat-role-wrap").hidden = !owner; $("#chat-legend").hidden = !owner;
+}
+async function loadDays() {
+  const sel = $("#chat-day");
+  if (hist.conv !== "owner") { sel.replaceChildren(h("option", { value: "", text: "全部" })); return; }
+  try {
+    const days = await api("GET", "/api/control/messages/days?" + new URLSearchParams({ channel: hist.channel }));
+    const keep = sel.value;
+    sel.replaceChildren(h("option", { value: "", text: "全部" }), ...days.map((d) => h("option", { value: d.day, text: `${d.day}（${d.n}）` })));
+    sel.value = days.some((d) => d.day === keep) ? keep : "";
+  } catch (_) { /* the list reports */ }
+}
 async function loadChat(append) {
+  if (!hist.channel) return;
   const params = new URLSearchParams({ limit: "100" });
   if ($("#chat-day").value) params.set("date", $("#chat-day").value);
-  if ($("#chat-role").value) params.set("role", $("#chat-role").value);
   if ($("#chat-q").value.trim()) params.set("q", $("#chat-q").value.trim());
-  if (append && chatBefore) params.set("before_id", chatBefore);
+  if (append && hist.before) params.set("before_id", hist.before);
+  const owner = hist.conv === "owner";
+  if (owner) { params.set("channel", hist.channel); if ($("#chat-role").value) params.set("role", $("#chat-role").value); }
   try {
-    const d = await api("GET", "/api/control/messages?" + params);
+    const d = owner ? await api("GET", "/api/control/messages?" + params)
+      : await api("GET", `/api/control/history/${encodeURIComponent(hist.channel)}/${hist.conv}?` + params);
     const list = $("#chat-list"); const nodes = []; let day = null;
     for (const m of d.messages) {
       const dd = (m.created_at || "").slice(0, 10);
       if (dd !== day) { nodes.push(h("div", { class: "day", text: dd })); day = dd; }
-      nodes.push(h("div", { class: "msg " + (m.role === "user" ? "user" : "mine") },
-        h("div", { class: "meta" }, h("span", { class: "tag " + m.kind, text: KIND[m.kind] || m.kind }), h("span", { text: when(m.created_at) }),
-          m.message_type !== "text" ? h("span", { text: "[" + m.message_type + "]" }) : null),
+      const mine = owner ? m.role !== "user" : !!m.is_self;
+      const tag = owner ? h("span", { class: "tag " + m.kind, text: KIND[m.kind] || m.kind })
+        : h("span", { class: "tag " + (mine ? "violet" : "user"), text: mine ? "Violet" : (m.sender_name || m.sender_id || "对方") });
+      nodes.push(h("div", { class: "msg " + (mine ? "mine" : "user") },
+        h("div", { class: "meta" }, tag, h("span", { text: when(m.created_at) }),
+          !owner && !mine && m.sender_id ? h("span", { class: "note", text: m.sender_id }) : null,
+          m.message_type && m.message_type !== "text" ? h("span", { text: "[" + m.message_type + "]" }) : null,
+          m.mentions_self ? h("span", { class: "note", text: "@她" }) : null),
         h("div", { text: m.content || "" })));
     }
     if (append) list.prepend(...nodes); else list.replaceChildren(...(nodes.length ? nodes : [h("p", { class: "note", text: "没有符合条件的消息" })]));
-    chatBefore = d.next_before_id; $("#chat-more").hidden = !chatBefore;
+    hist.before = d.next_before_id; $("#chat-more").hidden = !hist.before;
+    if (!append) list.scrollTop = list.scrollHeight;
   } catch (e) { toast("聊天记录读取失败：" + e.message, false); }
 }
 loaders.chat = async () => {
   try {
-    const days = await api("GET", "/api/control/messages/days");
-    const sel = $("#chat-day"); const keep = sel.value;
-    sel.replaceChildren(h("option", { value: "", text: "全部" }), ...days.map((d) => h("option", { value: d.day, text: `${d.day}（${d.n}）` })));
-    sel.value = keep;
-  } catch (_) { /* the list below reports */ }
-  loadChat(false);
+    const d = await api("GET", "/api/control/history");
+    hist.channels = d.channels.filter((c) => c.owner_messages || c.conversations);
+    if (!hist.channels.some((c) => c.id === hist.channel)) {
+      const latest = [...hist.channels].sort((a, b) => String(b.last_at || "").localeCompare(String(a.last_at || "")))[0];
+      hist.channel = latest ? latest.id : null;
+    }
+  } catch (e) { toast("聊天记录读取失败：" + e.message, false); }
+  loadHistoryList();
 };
 $("#chat-search").addEventListener("click", () => loadChat(false));
 $("#chat-more").addEventListener("click", () => loadChat(true));

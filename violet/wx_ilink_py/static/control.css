@@ -154,6 +154,43 @@ code{background:var(--panel-hover);border:1px solid var(--line);border-radius:7p
 .msg .meta{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:11px;margin-bottom:3px}
 .day{align-self:center;color:var(--muted);font-size:12px;margin:10px 0;padding:2px 12px;border-radius:999px;background:var(--panel)}
 .export{margin-top:16px}
+[hidden]{display:none!important}
+/* 2026-10-29: QQ groups and other people */
+.social .social-conv{margin:10px 0;box-shadow:none}
+.social .social-conv.off{opacity:.72}
+.social .social-conv .grow{flex:1}
+.social .social-conv select{width:auto;min-width:170px}
+.social input.limit{width:110px}
+.social .decision{border-left:3px solid var(--line-strong);padding:4px 0 4px 10px;margin:6px 0}
+.social .person{border-bottom:1px solid var(--line);padding:6px 0}
+#ch-extra:empty,#ch-social:empty{display:none}
+#tab-channels > label.inline{margin:6px 0 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#tab-channels > label.inline select{width:auto;min-width:220px;max-width:100%}
+/* 2026-10-29: chat history per channel -- channel chips, conversations on the left, messages on the right */
+.hist-chans{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.chip{background:var(--panel);border:1px solid var(--line-strong);color:var(--text);box-shadow:none;font-weight:500;border-radius:999px;
+  padding:7px 16px}
+.chip.active{background:var(--grad);color:#fff;border-color:transparent;box-shadow:0 6px 16px -8px var(--accent)}
+.hist{display:grid;grid-template-columns:minmax(220px,300px) minmax(0,1fr);gap:16px;align-items:start}
+.hist-side{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:6px;position:sticky;top:12px;
+  max-height:calc(100vh - 120px);overflow-y:auto}
+.hist-list{display:flex;flex-direction:column;gap:2px}
+.hist-item{display:flex;gap:10px;align-items:center;width:100%;text-align:left;background:none;border:0;box-shadow:none;color:var(--text);
+  padding:9px 10px;border-radius:12px;font-weight:400;white-space:normal}
+.hist-item:hover{background:var(--panel-hover);filter:none;box-shadow:none}
+.hist-item.active{background:var(--accent-soft)}
+.hist-avatar{flex:none;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:700;color:#fff;
+  background:#64748b}
+.hist-avatar.owner{background:var(--grad)}.hist-avatar.group{background:#0e7490}.hist-avatar.private{background:#475569}
+.hist-text{display:flex;flex-direction:column;min-width:0;flex:1}
+.hist-title{display:flex;justify-content:space-between;gap:8px;min-width:0}
+.hist-title strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hist-title .note{flex:none;font-size:11px}
+.hist-last{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hist-main{min-width:0}
+.hist-head{display:flex;align-items:baseline;gap:6px;margin-bottom:10px;font-size:16px}
+.hist-main #chat-more{margin-bottom:10px}
+@media (max-width:820px){.hist{grid-template-columns:1fr}.hist-side{position:static;max-height:260px}}
 
 /* settings */
 .set-group{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:6px 20px 8px;margin-bottom:16px;

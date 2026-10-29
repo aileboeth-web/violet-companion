@@ -261,6 +261,18 @@ VIOLET_WEB_TOOL_TIMEOUT_SECONDS=30
 VIOLET_WEB_EXPLORER=0
 VIOLET_WEB_EXPLORER_LLM_MODEL=
 
+# ── QQ 群聊与其他人（渠道“QQ”，NapCat；后台“设置 → QQ 群聊与其他人”）────────────────
+# 别人私聊她：off 不理 / known 只回群里认识的人 / all 谁都回
+VIOLET_SOCIAL_PRIVATE=known
+# 决定在群里说不说用的模型；留空 = 和 Chat 一样
+VIOLET_SOCIAL_MODEL=
+# 等群里安静几秒再决定（被 @ 或私聊时只等 3 秒）
+VIOLET_SOCIAL_QUIET_SECONDS=15
+# 每次决定给模型看最近多少条消息
+VIOLET_SOCIAL_CONTEXT_MESSAGES=30
+# 和你聊天时，她知道自己最近在群里说过什么
+VIOLET_SOCIAL_OWNER_DIGEST=1
+
 # ── 图片系统（第六阶段）──────────────────────────────────────────────────────
 # 总开关。关闭时（默认）收图沿用旧的 ai/vision.py，聊天里没有任何图片工具。
 VIOLET_IMAGE_ENABLED=0

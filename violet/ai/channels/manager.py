@@ -84,6 +84,15 @@ def _bool_field(value: Any) -> Any:
     return value
 
 
+def _ws_field(value: Any) -> Any:
+    """A NapCat set up by hand: ws://127.0.0.1:<port> (local only; empty = the one Violet installed)."""
+    if value in (None, ""):
+        return ""
+    if not isinstance(value, str) or not re.match(r"^ws://(127\.0\.0\.1|localhost|\[::1\]):\d{1,5}/?$", value.strip()):
+        raise ValueError("地址形如 ws://127.0.0.1:3001（只能是本机）")
+    return value.strip().rstrip("/")
+
+
 def _url_field(allow_private_http: bool) -> Callable[[Any], Any]:
     def check(value: Any) -> Any:
         problem = _url_problem(value, allow_private_http)
@@ -119,12 +128,22 @@ def _app_id_field(value: Any) -> Any:
 
 
 def channel_types() -> dict[str, dict[str, Any]]:
+    from ai.channels.napcat import NapCatChannel
     from ai.channels.onebot11 import OneBotChannel
     from ai.channels.qqbot import QQBotChannel
     from ai.channels.telegram import TOKEN_RE, TelegramChannel
     return {
+        # 2026-10-29: a personal QQ account through NapCat, installed from the channels page (tools/violet_napcat.py);
+        # needs no fields -- the installer leaves the local address and token in <data>/control/napcat.json
+        "napcat": {
+            "class": NapCatChannel, "label": "QQ",
+            "config": {"ws_url": _ws_field},
+            "defaults": {"ws_url": ""},
+            "secrets": {"ws_token": (False, _token_field(None, "访问令牌不能为空、不能有空格"))},
+            "help": "用你给 Violet 准备的 QQ 号（建议小号）扫码登录。私聊和你绑定后照常聊天；群聊在渠道卡片的“群聊”里选择要参与的群。",
+        },
         "qqbot": {
-            "class": QQBotChannel, "label": "QQ 官方机器人",
+            "class": QQBotChannel, "label": "QQ（机器人）",
             "config": {"app_id": _app_id_field, "sandbox": _bool_field},
             "defaults": {"app_id": "", "sandbox": False},
             "required_config": ["app_id"],
@@ -425,6 +444,8 @@ class ChannelManager:
         factory = self._factory_overrides.get(kind) or channel_types()[kind]["class"]
         adapter = factory(channel_id, entry.get("config") or {}, self.store.secrets(channel_id), data_dir=self.data_dir)
         adapter.label = entry.get("label") or adapter.label
+        if hasattr(adapter, "runtime"):         # 2026-10-29: QQ (NapCat) hands groups / other people to ai/social
+            adapter.runtime = self.runtime
         return adapter
 
     def get(self, channel_id: str) -> ChannelAdapter | None:
@@ -521,7 +542,10 @@ class ChannelManager:
         stored = self.store.secrets(channel_id)
         from ai.channels.identity import IdentityStore
         identities = IdentityStore(self.runtime.db).list(channel_id) if channel_id != WECHAT else []
-        return {"id": channel_id, "type": entry.get("type"), "label": entry.get("label"),
+        label = entry.get("label")
+        if entry.get("type") == "qqbot" and label in (None, "", "QQ", "QQ 官方机器人"):
+            label = "QQ（机器人）"                   # 2026-10-29: "QQ" is now the personal-account channel
+        return {"id": channel_id, "type": entry.get("type"), "label": label,
                 "enabled": entry.get("enabled", True) is not False, "accept": self.accept_policy(channel_id),
                 "config": dict(entry.get("config") or {}), "status": status,
                 "secrets": [{"name": n, "is_set": bool(stored.get(n)), "fingerprint": _fingerprint(stored.get(n))}

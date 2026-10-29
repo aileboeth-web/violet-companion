@@ -340,10 +340,11 @@ def test_start_page_items_link_to_the_exact_place(made):
 def test_pages_are_reorganised_and_build_no_html():
     html = (ROOT / "wx_ilink_py" / "templates" / "control.html").read_text(encoding="utf-8")
     for needle in ('data-tab="model"', 'id="tab-model"', 'id="model-fetch"', 'id="set-jump"', 'id="ch-list"',
-                   'id="tools-jump"', 'id="phone-mcp"', 'id="ch-add-box"', 'id="ch-more"', 'id="mcp-add-box"',
+                   'id="tools-jump"', 'id="phone-mcp"', 'id="ch-proactive"', 'id="ch-social"', 'id="mcp-add-box"',
                    '<script src="/static/control_model.js"></script>', '<script src="/static/control_phone.js"></script>'):
         assert needle in html, needle
     assert 'id="setup-api"' not in html and "初始化向导" not in html                 # moved to the model page
+    assert 'id="ch-more"' not in html and 'id="ch-add-box"' not in html        # 2026-10-29: "更多设置" removed (user)
     assert html.index('data-tab="model"') < html.index('data-tab="settings"')
     for name in ("control_model.js", "control_phone.js", "control_setup.js", "control.js", "control_channels.js"):
         js = (ROOT / "wx_ilink_py" / "static" / name).read_text(encoding="utf-8")

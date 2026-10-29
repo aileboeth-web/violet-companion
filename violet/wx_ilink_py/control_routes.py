@@ -204,8 +204,10 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
 
     @app.get("/api/control/messages/days")
     def control_message_days():
+        channel = (request.args.get("channel") or "").strip()[:64]
         rows = violetdb.fetch_all("SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS n FROM messages "
-                               "GROUP BY day ORDER BY day DESC LIMIT 400")
+                                  + ("WHERE COALESCE(channel, 'wechat') = ? " if channel else "")
+                                  + "GROUP BY day ORDER BY day DESC LIMIT 400", (channel,) if channel else ())
         return ok(rows)
 
     @app.get("/api/control/messages")
@@ -233,6 +235,10 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
         if before:
             where.append("id < ?")
             params.append(before)
+        channel = (request.args.get("channel") or "").strip()[:64]
+        if channel:                                     # 2026-10-29: the owner's chat on one channel (NULL = WeChat)
+            where.append("COALESCE(channel, 'wechat') = ?")
+            params.append(channel)
         sql = ("SELECT id, role, direction, message_type, content, created_at FROM messages"
                + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id DESC LIMIT ?")
         rows = violetdb.fetch_all(sql, (*params, limit))
@@ -245,6 +251,77 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
                 r["kind"] = _kind(r, outbound)
         rows.reverse()
         return ok({"messages": rows, "next_before_id": rows[0]["id"] if len(rows) == limit else None})
+
+    # ------------------------------------------------------------------ 2026-10-29: chat history per channel
+    # The owner's chat ("你", table messages, split by channel) and Violet's other conversations (groups, other
+    # people: ai/social) are listed per channel; the page shows channel -> conversations on the left -> messages.
+    def _channel_labels() -> dict[str, dict[str, str]]:
+        labels: dict[str, dict[str, str]] = {}
+        manager = getattr(runtime, "channels", None) if runtime is not None else None
+        if manager is not None:
+            try:
+                for c in manager.describe():
+                    labels[c["id"]] = {"label": c.get("label") or c["id"], "type": c.get("type") or ""}
+            except Exception:
+                pass
+        labels.setdefault("wechat", {"label": "微信", "type": "wechat_ilink"})
+        return labels
+
+    @app.get("/api/control/history")
+    def control_history():
+        from ai.social.store import SocialStore
+        labels = _channel_labels()
+        owner = {r["ch"]: r for r in violetdb.fetch_all(
+            "SELECT COALESCE(channel, 'wechat') AS ch, COUNT(*) AS n, MAX(created_at) AS last_at FROM messages GROUP BY ch")}
+        social: dict[str, list[dict[str, Any]]] = {}
+        for c in SocialStore(violetdb).conversations():
+            social.setdefault(c["channel"], []).append(c)
+        out = []
+        for ch in [*labels, *[c for c in [*owner, *social] if c not in labels]]:
+            if ch in [o["id"] for o in out]:
+                continue
+            own, others = owner.get(ch), social.get(ch, [])
+            if not own and not others and ch not in labels:
+                continue
+            last = max([x for x in [own and own["last_at"], *[c.get("last_message_at") for c in others]] if x], default=None)
+            out.append({"id": ch, "label": labels.get(ch, {}).get("label", ch), "type": labels.get(ch, {}).get("type", ""),
+                        "owner_messages": own["n"] if own else 0, "conversations": len(others), "last_at": last})
+        return ok({"channels": out})
+
+    @app.get("/api/control/history/<channel>")
+    def control_history_channel(channel: str):
+        from ai.social.store import MODE_TEXT, SocialStore
+        own = violetdb.fetch_one("SELECT COUNT(*) AS n, MAX(created_at) AS last_at FROM messages "
+                                 "WHERE COALESCE(channel, 'wechat') = ?", (channel,))
+        last = violetdb.fetch_one("SELECT content FROM messages WHERE COALESCE(channel, 'wechat') = ? "
+                                  "ORDER BY id DESC LIMIT 1", (channel,))
+        items = []
+        if own and own["n"]:
+            items.append({"key": "owner", "kind": "owner", "title": "你", "subtitle": "和你的聊天",
+                          "last_text": (last or {}).get("content"), "last_at": own["last_at"], "count": own["n"]})
+        for c in SocialStore(violetdb).conversations(channel=channel):
+            items.append({"key": str(c["id"]), "kind": c["kind"], "title": c.get("title") or c["peer_id"],
+                          "subtitle": ("群 " + c["peer_id"] + " · " + MODE_TEXT.get(c["mode"], c["mode"]))
+                          if c["kind"] == "group" else ("QQ " + c["peer_id"]),
+                          "last_text": c.get("last_text"), "last_at": c.get("last_message_at"), "count": c["message_count"]})
+        items.sort(key=lambda i: i.get("last_at") or "", reverse=True)
+        return ok({"channel": channel, "items": items})
+
+    @app.get("/api/control/history/<channel>/<int:conversation_id>")
+    def control_history_social(channel: str, conversation_id: int):
+        from ai.social.store import SocialStore
+        social = SocialStore(violetdb)
+        conv = social.get(conversation_id)
+        if conv is None or conv["channel"] != channel:
+            return bad("没有这个会话", 404)
+        day = request.args.get("date") or ""
+        if day and not DATE_RE.match(day):
+            return bad("date 的格式是 YYYY-MM-DD")
+        limit = _int(request.args.get("limit"), 100, 1, MAX_PAGE)
+        rows = social.messages(conversation_id, before_id=_int(request.args.get("before_id"), 0, 0, 2**62), limit=limit,
+                               query=(request.args.get("q") or "").strip()[:100], day=day)
+        return ok({"conversation": conv, "messages": rows,
+                   "next_before_id": rows[0]["id"] if len(rows) == limit else None})
 
     @app.get("/api/control/messages/export")
     def control_messages_export():
