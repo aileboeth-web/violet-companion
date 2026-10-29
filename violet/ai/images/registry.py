@@ -36,7 +36,7 @@ CAPABILITIES = ("vision", "image_generation", "image_edit", "image_variation", "
 STATES = ("verified", "declared", "unsupported")
 TASK_CAPABILITY = {"vision_analyze": "vision", "image_generate": "image_generation", "image_edit": "image_edit",
                    "image_variation": "image_variation"}
-KNOWN_ADAPTERS = ("mock", "openai_images", "chat_completions", "gemini_native", "zhipu_native", "http_custom")
+KNOWN_ADAPTERS = ("mock", "openai_images", "chat_completions", "responses", "gemini_native", "zhipu_native", "http_custom")
 
 
 def providers_path() -> Path:
@@ -62,7 +62,7 @@ def panel_providers() -> list[dict[str, Any]]:
         limit = max(1, int(env_str("VIOLET_IMAGE_DAILY_LIMIT", "10") or 10))
     except ValueError:
         limit = 10
-    return [{"provider_id": PANEL, "adapter_type": protocol if protocol in ("openai_images", "chat_completions")
+    return [{"provider_id": PANEL, "adapter_type": protocol if protocol in ("openai_images", "chat_completions", "responses")
              else "openai_images",
              "base_url": env_str("VIOLET_IMAGE_API_URL", "") or env_str("LLM_API_URL", ""),
              "api_key_env": "VIOLET_IMAGE_API_KEY" if env_str("VIOLET_IMAGE_API_KEY", "") else "LLM_API_KEY",

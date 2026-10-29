@@ -199,7 +199,10 @@ loaders.overview = async () => {
     const totals = d.message_totals ? `收 ${d.message_totals.received} · 发 ${d.message_totals.sent}` : messageCount(d.messages);
     const cards = $("#ov-cards"); cards.replaceChildren(
       channelsStat(d),
-      stat("收消息线程", s.poll_thread_alive ? "运行中" : "未运行", alive(s.poll_thread_alive)),
+      // 0.7.6: this thread is WeChat's -- not red when WeChat is switched off and another channel is used
+      (d.channels || []).some((c) => c.type === "wechat_ilink" && c.state === "disabled")
+        ? stat("微信收消息线程", "微信未使用")
+        : stat("微信收消息线程", s.poll_thread_alive ? "运行中" : "未运行", alive(s.poll_thread_alive)),
       stat("回复线程", s.worker_thread_alive ? "运行中" : "未运行", alive(s.worker_thread_alive)),
       stat("记忆线程", s.memory_worker_alive ? "运行中" : "未运行", alive(s.memory_worker_alive)),
       stat("排队中的对话", s.queued_turns ?? 0),
@@ -217,8 +220,19 @@ loaders.overview = async () => {
         : [h("tr", {}, h("td", { colspan: 4, text: "没有记录到失败" }))]));
     const aux = (d.aux_calls_24h || []).map((r) => `${r.status} ${r.n} 次`).join("，") || "无";
     $("#ov-note").textContent = `辅助模型最近 24 小时：${aux}。${d.notes ? d.notes.model_calls : ""}`;
+    watchOverview(d.channels || []);
   } catch (e) { toast("概览读取失败：" + e.message, false); }
 };
+// 0.7.6: while a channel is still connecting (just after a start or an update), look again every few seconds
+let ovPending = null, ovTries = 0;
+function watchOverview(channels) {
+  clearTimeout(ovPending);
+  if (!channels.some((c) => ["starting", "reconnecting"].includes(c.state))) { ovTries = 0; return; }
+  if (ovTries++ > 40) return;
+  ovPending = setTimeout(() => {
+    if ($("#tab-overview").classList.contains("active") && !document.hidden) loaders.overview();
+  }, 3000);
+}
 $("#ov-refresh").addEventListener("click", () => loaders.overview());
 
 // ---------------------------------------------------------------- chat

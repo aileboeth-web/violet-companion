@@ -108,7 +108,12 @@ class HttpAdapterBase:
         self.entry = entry
 
     def _headers(self, request: AdapterRequest) -> dict[str, str]:
-        headers = {"Accept": "application/json"}
+        # 0.7.6: the same User-Agent as the chat agents' OpenAI SDK -- some relays answer "python-httpx" with 403
+        try:
+            from openai import __version__ as sdk_version
+        except ImportError:
+            sdk_version = "1"
+        headers = {"Accept": "application/json", "User-Agent": f"OpenAI/Python {sdk_version}"}
         key = os.environ.get(self.entry.api_key_env, "") if self.entry.api_key_env else ""
         if key:
             headers["Authorization"] = f"Bearer {key}"          # read at call time, never stored
@@ -121,8 +126,10 @@ class HttpAdapterBase:
         if not self.entry.base_url.lower().startswith(("https://", "http://")):
             raise AdapterError("config", "provider base_url is not http(s)")
         timeout = httpx.Timeout(self.entry.timeout, connect=min(10.0, self.entry.timeout))
+        from ai.agents.base_agent import _local_address
         try:
-            with httpx.Client(timeout=timeout, follow_redirects=False, trust_env=False,
+            # 0.7.6: the system proxy is used like the chat agents use it (not for an address on this machine / LAN)
+            with httpx.Client(timeout=timeout, follow_redirects=False, trust_env=not _local_address(self.entry.base_url),
                               transport=_TRANSPORT_FACTORY(self.entry)) as client:
                 response = client.post(self.entry.base_url.rstrip("/") + path, headers=self._headers(request),
                                        json=json_body, data=data, files=files)
@@ -134,14 +141,21 @@ class HttpAdapterBase:
             raise AdapterError("transport", f"connection dropped ({exc.__class__.__name__})", "unknown") from None
         if response.status_code in (301, 302, 303, 307, 308):
             raise AdapterError("redirect", "provider endpoint redirected; not followed", "no")
-        try:
-            payload = response.json()
-        except ValueError:
-            payload = None
+        if response.status_code == 200 and "event-stream" in response.headers.get("content-type", ""):
+            payload = _sse_payload(response.text)
+        else:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
         if response.status_code != 200:
             message = ""
             if isinstance(payload, dict) and isinstance(payload.get("error"), dict):
                 message = str(payload["error"].get("message") or payload["error"].get("code") or "")[:200]
+            elif isinstance(payload, dict) and payload.get("error"):
+                message = str(payload["error"])[:200]
+            elif payload is None and response.text.strip():     # a relay / firewall page: its first words
+                message = " ".join(re.sub(r"<[^>]+>", " ", response.text).split())[:200]
             accepted = "no" if response.status_code in SAFE_STATUS else "unknown"
             raise AdapterError(f"http_{response.status_code}", message or f"provider returned {response.status_code}",
                                accepted, response.status_code in RETRYABLE_STATUS)
@@ -282,6 +296,77 @@ def extract_chat_images(message: dict[str, Any]) -> list[RawImage]:
     return found
 
 
+def _sse_payload(text: str) -> dict[str, Any] | None:
+    """A streamed Responses answer: the response of "response.completed", else the finished output items."""
+    items: list[Any] = []
+    for line in text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        try:
+            event = json.loads(line[5:].strip())
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") in ("response.completed", "response.done") and isinstance(event.get("response"), dict):
+            done = event["response"]
+            if not done.get("output") and items:
+                done = {**done, "output": items}
+            return done
+        if event.get("type") == "response.output_item.done" and isinstance(event.get("item"), dict):
+            items.append(event["item"])
+        if event.get("type") in ("error", "response.failed"):
+            err = event.get("error") or (event.get("response") or {}).get("error") or {"message": "stream error"}
+            return {"error": err if isinstance(err, dict) else {"message": str(err)}}
+    return {"output": items} if items else None
+
+
+class ResponsesImageAdapter(HttpAdapterBase):
+    """0.7.6: POST {base}/responses with the hosted tool {"type": "image_generation"} -- how chat models such as
+    gpt-5.x (Codex) draw. The image comes back as an output item {"type": "image_generation_call", "result": <base64>}.
+    Asked without streaming first; a service that only streams (400 mentioning "stream") is asked once more streamed."""
+
+    def run(self, request: AdapterRequest) -> AdapterOutput:
+        if request.kind not in ("image_generate", "image_edit"):
+            raise AdapterError("capability_not_supported", f"responses adapter cannot do {request.kind}")
+        prompt = f"请调用 image_generation 工具画出这张图，不要只用文字回答：{request.prompt}"
+        content: list[dict[str, Any]] = [{"type": "input_text", "text": prompt}]
+        extra = (request.inputs if request.kind == "image_edit" else []) + request.references
+        content += [{"type": "input_image", "image_url": _data_url(img)} for img in extra]
+        tool: dict[str, Any] = {"type": "image_generation"}
+        if request.size:
+            tool["size"] = request.size
+        if request.quality:
+            tool["quality"] = request.quality
+        if request.transparent:
+            tool["background"] = "transparent"
+        body: dict[str, Any] = {"model": self.entry.model_id, "input": [{"role": "user", "content": content}],
+                                "tools": [tool], "stream": False}
+        try:
+            payload = self._post("/responses", request, json_body=body)
+        except AdapterError as exc:
+            if exc.code != "http_400" or "stream" not in str(exc).lower():
+                raise
+            payload = self._post("/responses", request, json_body={**body, "stream": True})
+        if payload is None:
+            raise AdapterError("unknown_response", "empty streamed response", "yes")
+        images, texts = [], []
+        for item in payload.get("output") or []:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "image_generation_call" and isinstance(item.get("result"), str) and item["result"]:
+                fmt = str(item.get("output_format") or "png").lower()
+                images.append(RawImage("b64", item["result"], f"image/{'jpeg' if fmt == 'jpg' else fmt}"))
+            elif item.get("type") == "message":
+                texts += [str(p.get("text") or "") for p in item.get("content") or [] if isinstance(p, dict)]
+        usage, cost = _usage(payload)
+        text = " ".join(" ".join(texts).split())
+        if not images:
+            raise AdapterError("unknown_response", "模型没有调用画图工具（这个模型或中转可能不支持 image_generation）"
+                               + (f"；模型说：{text[:120]}" if text else ""), "yes")
+        return AdapterOutput(images=images, text=text or None, usage=usage, provider_cost=cost)
+
+
 class NativeMultimodalAdapter:
     """Extension point for vendor-native protocols (Gemini, Zhipu, local inference ...).
 
@@ -368,7 +453,7 @@ class MockImageAdapter:
 
 ADAPTERS: dict[str, Any] = {
     "mock": MockImageAdapter, "openai_images": OpenAIImagesAdapter, "chat_completions": ChatCompletionsAdapter,
-    "gemini_native": GeminiNativeAdapter, "zhipu_native": ZhipuNativeAdapter, "http_custom": CustomHttpAdapter,
+    "responses": ResponsesImageAdapter, "gemini_native": GeminiNativeAdapter, "zhipu_native": ZhipuNativeAdapter, "http_custom": CustomHttpAdapter,
 }
 
 

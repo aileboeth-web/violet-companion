@@ -20,9 +20,18 @@
     }));
   }
 
-  loaders.setup = async () => {
-    try { renderChecklist(await api("GET", "/api/control/setup")); } catch (e) { toast(e.message, false); }
-    loadUpdate(false);
+  // 0.7.6: while a channel is still connecting, look again every few seconds
+  let pending = null, tries = 0;
+  loaders.setup = async (again) => {
+    clearTimeout(pending);
+    try {
+      const data = await api("GET", "/api/control/setup");
+      renderChecklist(data);
+      if (data.items.some((i) => i.connecting) && tries++ < 40) {
+        pending = setTimeout(() => { if ($("#tab-setup").classList.contains("active") && !document.hidden) loaders.setup(true); }, 3000);
+      } else tries = 0;
+    } catch (e) { toast(e.message, false); }
+    if (again !== true) loadUpdate(false);
   };
 
   // version & updates: the server asks GitHub (cached 6 h). Violet stage 3: a root + systemd install updates itself

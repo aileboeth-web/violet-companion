@@ -133,6 +133,9 @@ class ChannelAdapter(ABC):
         while not self._stop.is_set():
             try:
                 self.prepare()
+                # 0.7.6: logged in = connected now, not after the first receive returns (QQ: the next heartbeat, ~40 s;
+                # Telegram: one long poll) -- the Control Center showed "正在连接" in red until then
+                self._ok()
                 while not self._stop.is_set():
                     handled = self.receive_once()
                     self._ok()

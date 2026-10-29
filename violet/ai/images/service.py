@@ -324,6 +324,8 @@ class ImageService:
                          size=(entry.limits.get("sizes") or [None])[0])
         result = self.submit(task)
         passed, detail = result.ok, result.error_code or "ok"
+        if not result.ok and result.message:                  # 0.7.6: the service's own words, not only "http_403"
+            detail = f"{detail}：{result.message[:240]}"
         if result.ok and capability == "multiple_output_images":
             passed = len(result.asset_ids) >= 2
         if result.ok and capability == "transparent_background":

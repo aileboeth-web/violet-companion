@@ -167,8 +167,11 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_IMAGE_GEN_MODEL", "画图模型", "images", "model", "now",
             "留空 = 不画图。改了以后要在“图片”页重新测试一次才会用", optional=True),
     Setting("VIOLET_IMAGE_GEN_PROTOCOL", "画图接口方式", "images", "choice", "now",
-            "大多数画图模型（gpt-image-1、dall-e-3 等）用图片接口；有些模型通过对话接口返回图片", "openai_images",
-            choices=(("openai_images", "图片接口（/images/generations）"), ("chat_completions", "对话接口返回图片"))),
+            "gpt-image-1、dall-e-3 等画图模型用图片接口；gpt-5.x（Codex）这类对话模型用 Responses 画图工具；"
+            "有些模型通过对话接口返回图片", "openai_images",
+            choices=(("openai_images", "图片接口（/images/generations）"),
+                     ("responses", "Responses 画图工具（/responses，gpt-5.x / Codex）"),
+                     ("chat_completions", "对话接口返回图片"))),
     Setting("VIOLET_IMAGE_DAILY_LIMIT", "每天最多画几张", "images", "int", "now",
             "画图通常按张收费：这是每天的上限（包括测试）", 10, 1, 200),
     Setting("VIOLET_IMAGE_API_URL", "画图用的 API 地址", "images", "url", "now", "留空 = 和“模型服务”一样",

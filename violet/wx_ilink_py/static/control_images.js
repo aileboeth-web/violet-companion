@@ -92,7 +92,8 @@
     const g = st.gen;
     const pick = modelPicker(g ? g.model : "", "画图模型，例如 gpt-image-1、dall-e-3", "不画图");
     const model = pick.input;
-    const protocol = h("select", {}, h("option", { value: "openai_images", text: "图片接口（/images/generations）" }),
+    const protocol = h("select", {}, h("option", { value: "openai_images", text: "图片接口（/images/generations）：gpt-image-1、dall-e-3 等" }),
+      h("option", { value: "responses", text: "Responses 画图工具（/responses）：gpt-5.x / Codex 这类对话模型" }),
       h("option", { value: "chat_completions", text: "对话接口返回图片" }));
     protocol.value = (byKey("VIOLET_IMAGE_GEN_PROTOCOL") || {}).value || "openai_images";
     const limit = h("input", { type: "number", min: 1, max: 200, step: 1 });
@@ -140,7 +141,8 @@
             const r = await api("POST", "/api/images/panel/test-generate", { confirm_paid: true });
             const ids = (r.task && r.task.asset_ids) || [];
             out.replaceChildren(h("div", { class: "row" }, pill(r.passed ? "测试通过" : "测试失败", r.passed ? "ok" : "bad"),
-              h("span", { class: "note", text: r.passed ? "这个模型可以用了" : `原因：${(r.task && r.task.error_code) || "未知"}` })),
+              h("span", { class: "note", text: r.passed ? "这个模型可以用了"
+                : `原因：${[(r.task && r.task.error_code) || "未知", r.task && r.task.message].filter(Boolean).join("：")}` })),
               ...ids.slice(0, 1).map((id) => h("img", { class: "img-thumb big", src: `/api/images/assets/${id}/file`, alt: "测试画的图" })));
             if (r.passed) setTimeout(load, 1500);
           } catch (e) { out.replaceChildren(h("p", { class: "err", text: e.message })); }
@@ -176,12 +178,12 @@
   async function load() {
     const root = $("#img-root");
     try {
-      const [st, s] = await Promise.all([api("GET", "/api/images/panel"), api("GET", "/api/control/settings")]);
+      // first visit: the model list is fetched together with the page, so the page is drawn once (no flash)
+      const [st, s] = await Promise.all([api("GET", "/api/images/panel"), api("GET", "/api/control/settings"),
+        !models.length && !fetchNote ? fetchModels(null) : null]);
       const byKey = (k) => (s.settings || []).find((x) => x.key === k);
       root.replaceChildren(switchCard(st), visionCard(st, s.settings), genCard(st, byKey), galleryCard(st.assets || []),
         moreCard(s.settings || []));
-      // first visit: fetch the list once, then draw the pickers again (a failure shows its reason under the picker)
-      if (!models.length && !fetchNote) { await fetchModels(null); load(); }
     } catch (e) { root.replaceChildren(h("p", { class: "err", text: e.message })); }
   }
 

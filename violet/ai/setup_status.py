@@ -196,6 +196,10 @@ def checklist(*, admin_store=None, agents=None, runtime=None, data_dir=None, vio
             # the channel's own card shows "最后一步：绑定你的账号" with the binding code button
             items.append(_item("channels", "聊天渠道", "todo", "渠道已连接，但还没有绑定你的账号（生成绑定码）",
                                "channels", True, "ch-card-" + live[0]["id"]))
+        elif connecting := [c["label"] for c in rows if c["status"].get("state") in ("starting", "reconnecting")]:
+            # 0.7.6: just started / reconnecting -- not "nothing set up"; the page looks again in a few seconds
+            items.append({**_item("channels", "聊天渠道", "warn", "正在连接：" + "、".join(connecting) + "（几秒后自动刷新）",
+                                  "channels", True, "ch-list"), "connecting": True})
         else:
             needs = [c["label"] for c in rows if c["status"].get("state") == "needs_login"]
             detail = ("扫码登录：" + "、".join(needs)) if needs else "还没有可用的聊天渠道（微信、QQ、Telegram 连上任意一个就行）"
