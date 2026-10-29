@@ -35,6 +35,7 @@ def register_image_routes(app: Flask, violetdb) -> None:
     def _panel_state() -> dict:
         from ai.images.registry import panel_entry_id
         from ai.settings import env_bool, env_str
+        from ai.vision import vision_model
         registry = ImageProviderRegistry(violetdb)
         entry_id = panel_entry_id()
         entry = registry.get(entry_id) if entry_id else None
@@ -56,7 +57,7 @@ def register_image_routes(app: Flask, violetdb) -> None:
                     "verified": entry.state("image_generation") == "verified",
                     "daily_limit": entry.limits.get("max_images_per_day"), "usage_today": budget.usage(entry_id),
                     "last_check": last},
-                "vision": {"model": env_str("VISION_LLM_MODEL", "vision"),
+                "vision": {"model": env_str("VISION_LLM_MODEL", ""), "effective": vision_model(),
                            "legacy": env_bool("VIOLET_IMAGE_LEGACY_VISION", True)}}
 
     @app.get("/api/images/panel")
@@ -89,14 +90,14 @@ def register_image_routes(app: Flask, violetdb) -> None:
         import time as _time
         from pathlib import Path as _Path
         from ai.images.adapters import make_png
-        from ai.vision import VisionError, describe_image
+        from ai.vision import VisionError, describe_image, vision_model
         started = _time.monotonic()
         with tempfile.TemporaryDirectory(prefix="violet-vision-") as folder:
             path = _Path(folder) / "probe.png"
             path.write_bytes(make_png(64, 64, (220, 40, 40)))
             try:
                 text = describe_image(path)
-                return ok({"ok": True, "text": text[:300], "latency_ms": int((_time.monotonic() - started) * 1000)})
+                return ok({"ok": True, "text": text[:300], "model": vision_model(), "latency_ms": int((_time.monotonic() - started) * 1000)})
             except VisionError as exc:
                 return ok({"ok": False, "error": str(exc)[:300],
                            "latency_ms": int((_time.monotonic() - started) * 1000)})

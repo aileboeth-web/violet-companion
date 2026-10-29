@@ -7,7 +7,9 @@
   const KIND = { inbound: "收到的", generated: "画的", reference: "参考图", outbound: "发出的" };
   const MAIN = ["VIOLET_IMAGE_ENABLED", "VISION_LLM_MODEL", "VIOLET_IMAGE_GEN_MODEL", "VIOLET_IMAGE_GEN_PROTOCOL",
     "VIOLET_IMAGE_DAILY_LIMIT", "VIOLET_IMAGE_API_URL", "VIOLET_IMAGE_API_KEY"];
-  let models = [];
+  const MANUAL = "__manual__";
+  let models = [];                 // from the API (GET /models of the model service), once per page visit
+  let fetchNote = "";
   const more = {};
 
   async function save(changes, reason) {
@@ -19,10 +21,35 @@
       return false;
     }
   }
-  function modelInput(value, placeholder) {
-    const input = h("input", { list: "img-model-list", maxlength: 120, autocomplete: "off", placeholder });
+  // 0.7.6: like the model page -- the upstream list (+ "手动输入…"), or only a text box while there is no list.
+  // picker.input always holds the chosen name ("" = emptyText).
+  function modelPicker(value, placeholder, emptyText) {
+    const input = h("input", { maxlength: 120, autocomplete: "off", placeholder });
     input.value = value || "";
-    return input;
+    const fetchBtn = h("button", { class: "ghost", type: "button", text: models.length ? "重新获取模型" : "从上游获取模型",
+      onclick: () => fetchModels(fetchBtn) });
+    if (!models.length) return { node: h("span", { class: "row" }, input, fetchBtn), input };
+    const sel = h("select", {}, h("option", { value: "", text: emptyText }),
+      ...models.map((m) => h("option", { value: m, text: m })), h("option", { value: MANUAL, text: "手动输入…" }));
+    const listed = !value || models.includes(value);
+    sel.value = listed ? (value || "") : MANUAL;
+    input.hidden = listed;
+    sel.addEventListener("change", () => {
+      input.hidden = sel.value !== MANUAL;
+      if (sel.value === MANUAL) input.focus(); else input.value = sel.value;
+    });
+    return { node: h("span", { class: "row" }, h("span", { class: "picker" }, sel, input), fetchBtn), input };
+  }
+
+  async function fetchModels(btn) {
+    if (btn) { btn.disabled = true; btn.textContent = "正在获取…"; }
+    try {
+      const r = await api("POST", "/api/control/setup/models", {});
+      if (r.ok && r.models.length) { models = r.models; fetchNote = ""; }
+      else fetchNote = "没能从上游获取模型：" + (r.message || "列表是空的") + "。可以直接手动填写模型名。";
+    } catch (e) { fetchNote = "没能从上游获取模型：" + e.message + "。可以直接手动填写模型名。"; }
+    if (btn) load();
+    return models.length > 0;
   }
   const card = (title, ...body) => h("div", { class: "card" }, h("div", { class: "row" }, h("h3", { text: title })), ...body);
 
@@ -35,13 +62,17 @@
   }
 
   function visionCard(st, settings) {
-    const input = modelInput(st.vision.model, "识图模型，例如 gpt-4o-mini");
+    const chosen = st.vision.model === "vision" ? "" : st.vision.model;     // the old placeholder = not chosen
+    const pick = modelPicker(chosen, "留空 = 和 Chat 用同一个模型", "和 Chat 用同一个模型");
+    const input = pick.input;
     const out = h("div", { class: "stack" });
     return card("看图（识别你发来的图片）",
-      h("div", { class: "stack" }, h("label", {}, "识图模型 ", input)),
+      h("div", { class: "stack" }, h("label", {}, "识图模型 ", pick.node),
+        fetchNote ? h("p", { class: "err", text: fetchNote }) : null,
+        !chosen ? h("p", { class: "note", text: st.vision.effective ? `现在用 Chat 的模型：${st.vision.effective}` : "还没有设置 Chat 模型" }) : null),
       h("div", { class: "row" },
         h("button", { type: "button", text: "保存", onclick: async () => {
-          if (await save({ VISION_LLM_MODEL: input.value.trim() || null }, "图片页：识图模型")) load();
+          if (await save({ VISION_LLM_MODEL: input.value.trim() }, "图片页：识图模型")) load();
         } }),
         h("button", { class: "ghost", type: "button", text: "测试识图", onclick: async (ev) => {
           ev.target.disabled = true;
@@ -49,7 +80,7 @@
           try {
             const r = await api("POST", "/api/images/panel/test-vision", {});
             out.replaceChildren(h("div", { class: "row" }, pill(r.ok ? "识图正常" : "识图失败", r.ok ? "ok" : "bad"),
-              h("span", { class: "note", text: (r.ok ? `模型说：${r.text}` : r.error) + `（${r.latency_ms} 毫秒）` })));
+              h("span", { class: "note", text: (r.ok ? `${r.model} 说：${r.text}` : r.error) + `（${r.latency_ms} 毫秒）` })));
           } catch (e) { out.replaceChildren(h("p", { class: "err", text: e.message })); }
           ev.target.disabled = false;
         } })),
@@ -59,7 +90,8 @@
 
   function genCard(st, byKey) {
     const g = st.gen;
-    const model = modelInput(g ? g.model : "", "画图模型，例如 gpt-image-1、dall-e-3");
+    const pick = modelPicker(g ? g.model : "", "画图模型，例如 gpt-image-1、dall-e-3", "不画图");
+    const model = pick.input;
     const protocol = h("select", {}, h("option", { value: "openai_images", text: "图片接口（/images/generations）" }),
       h("option", { value: "chat_completions", text: "对话接口返回图片" }));
     protocol.value = (byKey("VIOLET_IMAGE_GEN_PROTOCOL") || {}).value || "openai_images";
@@ -81,7 +113,7 @@
       h("div", { class: "row" }, status, g ? h("span", { class: "note", text: `今天画了 ${g.usage_today.images} 张 / 上限 ${g.daily_limit}` }) : null),
       g && g.last_check && g.last_check.current && !g.last_check.passed ? h("p", { class: "err", text: "上次测试：" + g.last_check.detail }) : null,
       h("div", { class: "stack" },
-        h("label", {}, "画图模型 ", model),
+        h("label", {}, "画图模型 ", pick.node),
         h("label", {}, "接口方式 ", protocol),
         h("label", {}, "每天最多画几张（包括测试） ", limit),
         h("details", {}, h("summary", { text: "单独的 API 地址和 Key（一般不用填）" }),
@@ -146,14 +178,10 @@
     try {
       const [st, s] = await Promise.all([api("GET", "/api/images/panel"), api("GET", "/api/control/settings")]);
       const byKey = (k) => (s.settings || []).find((x) => x.key === k);
-      const list = h("datalist", { id: "img-model-list" }, ...models.map((m) => h("option", { value: m })));
-      root.replaceChildren(list, switchCard(st), visionCard(st, s.settings), genCard(st, byKey), galleryCard(st.assets || []),
+      root.replaceChildren(switchCard(st), visionCard(st, s.settings), genCard(st, byKey), galleryCard(st.assets || []),
         moreCard(s.settings || []));
-      if (!models.length) {
-        api("POST", "/api/control/setup/models", {}).then((r) => {
-          if (r.ok && r.models.length) { models = r.models; list.replaceChildren(...models.map((m) => h("option", { value: m }))); }
-        }).catch(() => {});
-      }
+      // first visit: fetch the list once, then draw the pickers again (a failure shows its reason under the picker)
+      if (!models.length && !fetchNote) { await fetchModels(null); load(); }
     } catch (e) { root.replaceChildren(h("p", { class: "err", text: e.message })); }
   }
 

@@ -70,8 +70,8 @@ LLM_TOTAL_TIMEOUT_SECONDS=180
 # 可选备用模型：主模型重试失败后各尝试一次，例如 CHAT_LLM_FALLBACK_MODEL=gpt-5-mini
 CHAT_LLM_FALLBACK_MODEL=
 INTENT_LLM_FALLBACK_MODEL=
-# 识图模型别名与超时（与原来一致，默认 "vision"）。
-VISION_LLM_MODEL=vision
+# 识图模型与超时。识图模型留空 = 和 Chat 用同一个模型（要支持图片输入）。
+VISION_LLM_MODEL=
 VISION_TIMEOUT_SECONDS=60
 
 # ── MCP ───────────────────────────────────────────────────────────────────────
