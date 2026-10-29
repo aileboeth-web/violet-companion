@@ -145,12 +145,18 @@
     <h3>生活引擎</h3>
     <div class="row"><span id="life-mode" class="pill"></span>
       <button class="ghost" data-life="pause">暂停</button><button class="ghost" data-life="resume">恢复</button></div>
+    <h3>清除数据</h3>
+    <div class="card danger-zone">
+      <p class="note">清除她的全部记忆、把全部配置恢复默认，可以只选一项，也可以两项都选。聊天记录不会删除。</p>
+      <button class="danger" id="set-reset" type="button">清除记忆 / 配置…</button>
+    </div>
   </section>
 
   <section id="tab-images" class="tab">
     <div class="row"><h2>图片</h2><button class="ghost" id="img-refresh" type="button">刷新</button></div>
     <p class="note">看图：Violet 看懂你发来的图片。画图：Violet 在聊天里按你的要求画图、偶尔分享自己的“照片”（明确是 AI 画的）。两者都用“模型服务”里的接口，也可以给画图单独设置。</p>
     <div id="img-root" class="stack-wide"></div>
+    <div id="stk-root" class="set-group"></div>
   </section>
 
   <section id="tab-channels" class="tab">
@@ -375,5 +381,6 @@
 <script src="/static/control_model.js"></script>
 <script src="/static/control_phone.js"></script>
 <script src="/static/control_images.js"></script>
+<script src="/static/control_stickers.js"></script>
 </body>
 </html>

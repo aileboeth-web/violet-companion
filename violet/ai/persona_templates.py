@@ -44,12 +44,34 @@ def templates() -> list[dict[str, Any]]:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        ident = data.get("identity") or {}
-        out.append({"key": path.stem, "title": data.get("_title") or ident.get("name") or path.stem,
-                    "summary": data.get("_summary") or "", "blank": bool(data.get("blank")),
-                    "name": ident.get("name") or "", "personality": data.get("personality") or [],
-                    "order": data.get("_order", 50)})
+        out.append({"key": path.stem, **preview(data), "order": data.get("_order", 50)})
     return sorted(out, key=lambda t: (t["order"], t["key"]))
+
+
+def _labels(items: Any) -> list[str]:
+    return [str(i.get("label") if isinstance(i, dict) else i) for i in (items or []) if i]
+
+
+def preview(data: dict[str, Any]) -> dict[str, Any]:
+    """What the page shows of a persona (0.7.9: the whole thing on hover, so one can compare before switching)."""
+    ident = data.get("identity") or {}
+    return {"title": data.get("_title") or ident.get("name") or "人设", "summary": data.get("_summary") or "",
+            "blank": bool(data.get("blank")), "name": ident.get("name") or "",
+            "self_description": ident.get("self_description") or "",
+            "personality": _labels(data.get("personality")), "habits": _labels(data.get("communication_habits")),
+            "interests": _labels(data.get("long_term_interests")), "values": _labels(data.get("values")),
+            "flaws": _labels(data.get("flaws"))}
+
+
+def custom_preview() -> dict[str, Any] | None:
+    """The admin's own persona, when one is in use."""
+    path = active_path()
+    if path is None or current()["template"] != "custom":
+        return None
+    try:
+        return preview(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return None
 
 
 def current() -> dict[str, Any]:

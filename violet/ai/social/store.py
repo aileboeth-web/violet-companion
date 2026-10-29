@@ -66,6 +66,31 @@ CREATE TABLE IF NOT EXISTS social_decisions (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_social_decisions_conv ON social_decisions(conversation_id, id);
+-- 0.7.9: pictures in social messages (stickers she may look at and keep)
+CREATE TABLE IF NOT EXISTS social_media (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    file_key TEXT,
+    url TEXT,
+    description TEXT,
+    sticker_id INTEGER,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_social_media_message ON social_media(message_id);
+CREATE INDEX IF NOT EXISTS idx_social_media_key ON social_media(file_key);
+-- 0.7.9: her QQ 空间 posts (ai/social/qzone.py)
+CREATE TABLE IF NOT EXISTS social_posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel TEXT NOT NULL,
+    content TEXT NOT NULL,
+    status TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    tid TEXT,
+    reason TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL
+);
 """
 
 GROUP_MODES = ("off", "observe", "mention", "auto")      # 关闭 / 只看不说 / 被 @ 才说 / 自己决定
@@ -172,6 +197,44 @@ class SocialStore:
     def advance(self, conversation_id: int, upto_id: int) -> None:
         self.db.execute("UPDATE social_conversations SET watermark = MAX(watermark, ?), updated_at = ? WHERE id = ?",
                         (int(upto_id), self.db.now(), int(conversation_id)))
+
+    # -- pictures (0.7.9) -----------------------------------------------------------------------------------------
+    def add_media(self, message_id: int, *, kind: str, file_key: str | None, url: str | None,
+                  description: str | None = None, sticker_id: int | None = None) -> int:
+        cursor = self.db.execute("INSERT INTO social_media (message_id, kind, file_key, url, description, sticker_id, "
+                                 "created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                 (int(message_id), kind, (file_key or "")[:120] or None, (url or "")[:2000] or None,
+                                  description, sticker_id, self.db.now()))
+        return int(cursor.lastrowid)
+
+    def media(self, message_ids: list[int], kind: str | None = None, undescribed: bool = False) -> list[dict[str, Any]]:
+        if not message_ids:
+            return []
+        sql = ("SELECT * FROM social_media WHERE message_id IN (" + ",".join("?" * len(message_ids)) + ")"
+               + (" AND kind = ?" if kind else "") + (" AND description IS NULL" if undescribed else "") + " ORDER BY id")
+        return self.db.fetch_all(sql, [int(i) for i in message_ids] + ([kind] if kind else []))
+
+    def known_description(self, file_key: str | None) -> str | None:
+        """What she saw in this picture before (the same sticker comes back again and again)."""
+        if not file_key:
+            return None
+        row = self.db.fetch_one("SELECT description FROM stickers WHERE file_key = ? AND description IS NOT NULL LIMIT 1",
+                                (file_key[:120],)) or self.db.fetch_one(
+            "SELECT description FROM social_media WHERE file_key = ? AND description IS NOT NULL ORDER BY id DESC LIMIT 1",
+            (file_key[:120],))
+        return (row or {}).get("description")
+
+    def describe_media(self, media_id: int, description: str) -> None:
+        """Remember what the picture shows and put it into the message text the model reads."""
+        row = self.db.fetch_one("SELECT * FROM social_media WHERE id = ?", (int(media_id),))
+        if row is None:
+            return
+        self.db.execute("UPDATE social_media SET description = ? WHERE id = ?", (description, int(media_id)))
+        msg = self.db.fetch_one("SELECT content FROM social_messages WHERE id = ?", (row["message_id"],))
+        label = "[表情包]" if row["kind"] == "sticker" else "[图片]"
+        if msg and label in (msg["content"] or ""):
+            new = msg["content"].replace(label, f"{label[:-1]}：{description}]", 1)
+            self.db.execute("UPDATE social_messages SET content = ? WHERE id = ?", (new, row["message_id"]))
 
     # -- people ---------------------------------------------------------------------------------------------------
     def person(self, channel: str, user_id: str, nickname: str | None = None, seen: bool = False) -> dict[str, Any]:

@@ -9,6 +9,14 @@
   POST /api/control/social/group              {group_id, mode}: a group from NapCat's list (created on first use)
   GET  /api/control/social/conversation/<id>/decisions   her last decisions there (why she spoke / stayed silent)
   GET  /api/control/social/people             the people she knows; POST .../people/<id> {impression}
+  0.7.9:
+  GET  /api/control/stickers                  her sticker collection; GET .../<id>/file the picture
+  POST /api/control/stickers                  {data: base64 picture, description}: upload one
+  POST /api/control/stickers/import-qq        the QQ account's own favourite stickers
+  POST /api/control/stickers/<id>             {description, enabled}; DELETE .../<id>
+  GET  /api/control/qzone                     her QQ 空间 posts, whether she may post now
+  POST /api/control/qzone/draft               let her write one (not posted)
+  POST /api/control/qzone/publish             {text, confirm: true}: post it now
 """
 
 from __future__ import annotations
@@ -200,3 +208,138 @@ def register_napcat_routes(app: Flask, violetdb, runtime) -> None:
         if body.get("forget") is True:
             violetdb.execute("UPDATE social_people SET impression = NULL WHERE id = ?", (person_id,))
         return ok(violetdb.fetch_one("SELECT * FROM social_people WHERE id = ?", (person_id,)))
+
+    # ------------------------------------------------------------------ 0.7.9: stickers
+    def sticker_public(row: dict[str, Any]) -> dict[str, Any]:
+        from ai.stickers import SOURCES
+        return {"id": row["id"], "description": row.get("description") or "", "source": row["source"],
+                "source_text": SOURCES.get(row["source"], row["source"]), "source_detail": row.get("source_detail"),
+                "enabled": bool(row["enabled"]), "use_count": row["use_count"], "last_used_at": row.get("last_used_at"),
+                "created_at": row["created_at"], "mime_type": row["mime_type"], "size": row["size"]}
+
+    @app.get("/api/control/stickers")
+    def control_stickers():
+        from ai import stickers
+        from ai.settings import env_bool
+        return ok({"stickers": [sticker_public(r) for r in stickers.listing(violetdb)], "enabled": stickers.enabled(),
+                   "auto_collect": env_bool("VIOLET_STICKER_AUTO_COLLECT", True),
+                   "look": env_bool("VIOLET_STICKER_LOOK", True),
+                   "qq_connected": bool(adapter() is not None and adapter().is_running())})
+
+    @app.get("/api/control/stickers/<int:sticker_id>/file")
+    def control_sticker_file(sticker_id: int):
+        from flask import send_file
+        from ai import stickers
+        row = stickers.get(violetdb, sticker_id)
+        if row is None or not stickers.path_of(row).is_file():
+            return bad("没有这个表情包", 404)
+        response = send_file(stickers.path_of(row), mimetype=row["mime_type"])
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Content-Security-Policy"] = "default-src 'none'; img-src 'self'"
+        response.headers["Cache-Control"] = "private, max-age=3600"
+        return response
+
+    @app.post("/api/control/stickers")
+    def control_sticker_upload():
+        import base64
+        import binascii
+        from ai import stickers
+        body = request.get_json(silent=True) or {}
+        raw = str(body.get("data") or "")
+        if raw.startswith("data:") and "," in raw:
+            raw = raw.split(",", 1)[1]
+        try:
+            data = base64.b64decode(raw, validate=True)
+        except (binascii.Error, ValueError):
+            return bad("图片数据不对")
+        description = str(body.get("description") or "").strip() or None
+        try:
+            row = stickers.add_bytes(violetdb, data, source="upload", description=description)
+        except stickers.StickerError as exc:
+            return bad(str(exc))
+        if not row.get("description"):
+            described = stickers.describe(stickers.path_of(row))
+            if described:
+                row = stickers.update(violetdb, row["id"], description=described) or row
+        return ok(sticker_public(row))
+
+    @app.post("/api/control/stickers/import-qq")
+    def control_sticker_import():
+        from ai import stickers
+        from ai.channels.base import Part
+        a = adapter()
+        if a is None or not a.is_running():
+            return bad("QQ 没有连接")
+        try:
+            urls = a.favourite_stickers()
+        except Exception as exc:                     # noqa: BLE001
+            return bad(f"读不到 QQ 收藏的表情：{exc}")
+        added, failed, described = 0, 0, 0
+        for url in urls[:48]:
+            try:
+                before = violetdb.fetch_one("SELECT COUNT(*) AS n FROM stickers")["n"]
+                row = stickers.add_file(violetdb, a.download(Part("image", "", {"url": url})), source="qq")
+                if violetdb.fetch_one("SELECT COUNT(*) AS n FROM stickers")["n"] > before:
+                    added += 1
+                if not row.get("description") and described < 8:      # the rest: "看一眼" on the page
+                    text = stickers.describe(stickers.path_of(row))
+                    if text:
+                        stickers.update(violetdb, row["id"], description=text)
+                        described += 1
+            except Exception:                        # noqa: BLE001 -- one bad picture does not stop the rest
+                failed += 1
+        return ok({"found": len(urls), "added": added, "failed": failed, "described": described})
+
+    @app.post("/api/control/stickers/<int:sticker_id>")
+    def control_sticker_update(sticker_id: int):
+        from ai import stickers
+        if stickers.get(violetdb, sticker_id) is None:
+            return bad("没有这个表情包", 404)
+        body = request.get_json(silent=True) or {}
+        if body.get("describe") is True:
+            text = stickers.describe(stickers.path_of(stickers.get(violetdb, sticker_id)))
+            if not text:
+                return bad("识图没有成功：看看“图片”页的识图测试")
+            body["description"] = text
+        row = stickers.update(violetdb, sticker_id, description=body.get("description"),
+                              enabled_flag=body.get("enabled") if "enabled" in body else None)
+        return ok(sticker_public(row))
+
+    @app.delete("/api/control/stickers/<int:sticker_id>")
+    def control_sticker_delete(sticker_id: int):
+        from ai import stickers
+        if not stickers.delete(violetdb, sticker_id):
+            return bad("没有这个表情包", 404)
+        return ok({"deleted": sticker_id})
+
+    # ------------------------------------------------------------------ 0.7.9: QQ 空间
+    @app.get("/api/control/qzone")
+    def control_qzone():
+        from ai.settings import env_int
+        from ai.social import qzone
+        posts = violetdb.fetch_all("SELECT * FROM social_posts ORDER BY id DESC LIMIT 30")
+        return ok({"enabled": qzone.enabled(), "daily": env_int("VIOLET_QZONE_DAILY", 1), "posts": posts,
+                   "waiting": qzone.due(violetdb), "qq_connected": bool(adapter() is not None and adapter().is_running())})
+
+    @app.post("/api/control/qzone/draft")
+    def control_qzone_draft():
+        from ai.social import qzone
+        try:
+            idea = qzone.compose(violetdb)
+        except qzone.QzoneError as exc:
+            return bad(str(exc))
+        return ok(idea)
+
+    @app.post("/api/control/qzone/publish")
+    def control_qzone_publish():
+        from ai.social import qzone
+        body = request.get_json(silent=True) or {}
+        if body.get("confirm") is not True:
+            return bad("发动态需要确认（confirm: true）")
+        text = " ".join(str(body.get("text") or "").split())[:1000]
+        if not text:
+            return bad("动态内容是空的")
+        try:
+            return ok(qzone.post_now(runtime, text, origin="manual"))
+        except qzone.QzoneError as exc:
+            return bad(str(exc))

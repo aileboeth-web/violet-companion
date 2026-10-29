@@ -136,6 +136,8 @@ _TABLES = (
     "schedule_courses", "schedule_periods", "schedule_imports", "schedule_terms",
     # phase 10: the owner's bound chat accounts
     "channel_pairing_codes", "channel_identities",
+    # 0.7.9: stickers, pictures in social messages, QQ 空间 posts
+    "stickers", "social_media", "social_posts",
 )
 
 

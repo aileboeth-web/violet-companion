@@ -13,12 +13,14 @@ a core memory is deleted only after its content was written to memory_revisions.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from flask import Flask, Response, jsonify, render_template, request
 
+logger = logging.getLogger("violet.control")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MAX_PAGE = 200
 EXPORT_LIMIT = 20_000
@@ -816,3 +818,36 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
             return bad(str(exc), 500)
         except Exception as exc:
             return bad(f"恢复失败，已恢复原来的设置（{exc.__class__.__name__}）", 500)
+
+    @app.post("/api/control/reset")
+    def control_reset():
+        """0.7.9 (user: "清除所有记忆和清除所有配置，二选一或都选"). memory: what she remembers (archived first, like a
+        persona switch); config: the dashboard's settings back to default (the model service stays) and every QQ group
+        / private chat back to its starting mode. Chat history, channels, the persona and the login stay."""
+        body = request.get_json(silent=True) or {}
+        memory, config = body.get("memory") is True, body.get("config") is True
+        if not memory and not config:
+            return bad("请至少选一项")
+        if body.get("confirm") is not True:
+            return bad("清除需要确认（confirm: true）")
+        out: dict[str, Any] = {}
+        if memory:
+            from ai.persona_templates import clear_memory
+            try:
+                archive, counts = clear_memory(violetdb)
+            except Exception as exc:
+                logger.exception("clearing the memory failed")
+                return bad(f"清除记忆失败（{exc.__class__.__name__}），什么都没有删")
+            out["memory"] = {"archive": archive, "removed": counts}
+        if config:
+            try:
+                result = store().reset(actor(), apply=apply_now)
+            except StoreError as exc:
+                return bad(str(exc), 500, **out)
+            except Exception as exc:
+                return bad(f"清除配置失败，已恢复原来的设置（{exc.__class__.__name__}）", 500, **out)
+            violetdb.execute("UPDATE social_conversations SET mode = CASE kind WHEN 'group' THEN 'off' ELSE 'auto' END, "
+                             "daily_message_limit = 0, daily_decision_limit = 0, next_wake_at = NULL")
+            out["config"] = result
+        logger.warning("dashboard reset by %s: memory=%s config=%s", actor(), memory, config)
+        return ok(out)

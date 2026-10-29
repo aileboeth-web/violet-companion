@@ -162,6 +162,18 @@ SETTINGS: list[Setting] = [
             "决定时给模型看最近多少条消息（包括已经看过的）", 30, 10, 200),
     Setting("VIOLET_SOCIAL_OWNER_DIGEST", "把群里的事告诉你", "social", "bool", "now",
             "和你聊天时，她知道自己最近在群里说过什么（反过来，你私聊的内容永远不会带到群里）", True),
+    # 0.7.9 (user: "他不会发表情包，也不能收藏表情包，也不可以发动态"): ai/stickers.py, ai/social/qzone.py
+    Setting("VIOLET_STICKERS", "表情包", "social", "bool", "now",
+            "她可以从自己收藏的表情包里挑一个发（和你聊天、在群里都可以）；收藏在“图片”页管理", True),
+    Setting("VIOLET_STICKER_AUTO_COLLECT", "收藏你发的表情包", "social", "bool", "now",
+            "你在 QQ 上发给她的表情包自动存进她的收藏（用识图结果当说明）", True),
+    Setting("VIOLET_STICKER_LOOK", "看别人发的表情包", "social", "bool", "now",
+            "群里或别人私聊发来没见过的表情包时，用识图模型看一眼（同一个表情包只看一次；会用识图模型）", True),
+    Setting("VIOLET_QZONE_ENABLED", "发 QQ 动态", "social", "bool", "now",
+            "她偶尔在 QQ 空间发一条说说（9:00–23:00，两条至少隔 4 小时，只写她自己的生活，不写你的事）；"
+            "发过的动态在“聊天渠道 → QQ”下面能看到", False),
+    Setting("VIOLET_QZONE_DAILY", "每天最多自己发几条动态", "social", "int", "now",
+            "0 = 不限（仍然至少隔 4 小时）；你在后台手动发的不算", 1, 0, 20),
     Setting("VIOLET_IMAGE_ENABLED", "图片功能", "images", "bool", "now",
             "关闭时收到的图片只用下面的识图模型看一眼，聊天里没有生成 / 编辑图片的工具", False),
     Setting("VISION_LLM_MODEL", "识图模型", "images", "model", "now",
@@ -259,8 +271,9 @@ SETTINGS: list[Setting] = [
 BY_KEY = {s.key: s for s in SETTINGS}
 GROUPS = {"api": "接口", "models": "模型与 Agent", "prompts": "提示词版本", "messages": "消息发送", "proactive": "主动联系",
           "life": "生活引擎", "behavior": "聊天行为", "memory": "记忆与提醒", "guard": "回复检查", "features": "功能开关",
-          "images": "图片", "social": "QQ 群聊与其他人", "mcp": "MCP 工具调用", "system": "系统", "logs": "日志与排查", "updates": "版本更新"}
+          "images": "图片", "social": "QQ 群聊、表情包与动态", "mcp": "MCP 工具调用", "system": "系统", "logs": "日志与排查", "updates": "版本更新"}
 TEXT_MAX = 200
+RESET_KEEPS = ("api", "models")          # "清除所有配置" keeps the model service
 
 
 def prompt_versions(kind: str) -> list[str]:
@@ -547,6 +560,15 @@ class ControlStore:
             raise ValidationError(problems)
         snapshot = {k: v for k, v in snapshot.items() if v is not None}
         return self.save({}, actor, f"回滚到第 {revision} 次修改", apply=apply, snapshot=snapshot)
+
+    def reset(self, actor: str, keep_groups: tuple[str, ...] = RESET_KEEPS,
+              apply: Callable[[], None] | None = None) -> dict:
+        """0.7.9 (设置 → 清除数据 → 配置): every setting saved on the dashboard back to its default, except the model
+        service (address, key, models) so Violet can still talk. Recorded like any save: it can be rolled back."""
+        values = self.values()
+        snapshot = {k: v for k, v in values.items() if k in BY_KEY and BY_KEY[k].group in keep_groups}
+        result = self.save({}, actor, "清除所有配置（恢复默认）", apply=apply, snapshot=snapshot)
+        return {**result, "reset": sorted(k for k in values if k not in snapshot)}
 
     def restore_previous_secret(self, key: str, actor: str, apply: Callable[[], None] | None = None) -> dict:
         """The value before the last replacement. If the dashboard replaced a key that came from .env (no earlier

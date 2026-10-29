@@ -56,7 +56,7 @@ def register_persona_routes(app: Flask, violetdb) -> None:
     @app.get("/api/persona/templates")
     def persona_templates():
         from ai import persona_templates as pt
-        return ok({"templates": pt.templates(), "current": pt.current()})
+        return ok({"templates": pt.templates(), "current": pt.current(), "custom": pt.custom_preview()})
 
     @app.post("/api/persona/custom")
     def persona_custom():

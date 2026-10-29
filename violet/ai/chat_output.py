@@ -10,6 +10,9 @@ from typing import Any
 NO_REPLY_TOKEN = "[NO_REPLY]"
 # Phase 6: an image produced by an image tool in this turn, placed on its own line.
 IMAGE_MARKER_RE = re.compile(r"\[\[图片[:：]\s*(\d+)\]\]")
+# 0.7.9: a sticker of her collection (ai/stickers.py); the outbox looks the number up, nothing else is trusted
+STICKER_MARKER_RE = re.compile(r"\[\[表情[:：]\s*(\d+)\]\]")
+MEDIA_MARKER_RE = re.compile(r"\[\[(图片|表情)[:：]\s*(\d+)\]\]")
 MARKDOWN_EMPHASIS_RE = re.compile(r"(\*\*|__)(\S(?:.*?\S)?)\1")
 
 
@@ -58,13 +61,19 @@ def normalize_chat_output(raw_content: str) -> dict[str, Any]:
         return {"should_send": False, "messages": [], "declined": NO_REPLY_TOKEN in text.upper()}
 
     messages = []
+    stickers = 0
     for line in lines:
         pos = 0
-        for match in IMAGE_MARKER_RE.finditer(line):
+        for match in MEDIA_MARKER_RE.finditer(line):
             before = line[pos:match.start()].strip()
             if before:
                 messages.append({"type": "text", "content": before, "media_id": None})
-            messages.append({"type": "image", "asset_id": int(match.group(1)), "content": None, "media_id": None})
+            if match.group(1) == "图片":
+                messages.append({"type": "image", "asset_id": int(match.group(2)), "content": None, "media_id": None})
+            elif stickers < 1:                               # one sticker per reply
+                messages.append({"type": "sticker", "sticker_id": int(match.group(2)), "content": None,
+                                 "media_id": None})
+                stickers += 1
             pos = match.end()
         rest = line[pos:].strip()
         if rest:

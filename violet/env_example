@@ -272,6 +272,16 @@ VIOLET_SOCIAL_QUIET_SECONDS=15
 VIOLET_SOCIAL_CONTEXT_MESSAGES=30
 # 和你聊天时，她知道自己最近在群里说过什么
 VIOLET_SOCIAL_OWNER_DIGEST=1
+# 表情包：她可以从自己的收藏里挑一个发（收藏在后台“图片”页管理）
+VIOLET_STICKERS=1
+# 你在 QQ 上发给她的表情包自动收藏
+VIOLET_STICKER_AUTO_COLLECT=1
+# 群里 / 别人私聊发来没见过的表情包时用识图模型看一眼（同一个只看一次）
+VIOLET_STICKER_LOOK=1
+# 发 QQ 动态（QQ 空间说说）：9:00–23:00，两条至少隔 4 小时，只写她自己的生活
+VIOLET_QZONE_ENABLED=0
+# 每天最多自己发几条动态；0 = 不限（后台手动发的不算）
+VIOLET_QZONE_DAILY=1
 
 # ── 图片系统（第六阶段）──────────────────────────────────────────────────────
 # 总开关。关闭时（默认）收图沿用旧的 ai/vision.py，聊天里没有任何图片工具。

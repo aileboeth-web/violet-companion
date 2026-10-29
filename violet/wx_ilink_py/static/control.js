@@ -716,6 +716,38 @@ async function restartViolet() {
   toast("两分钟内没有等到 Violet 重新启动，请到服务器上查看", false);
 }
 $("#set-restart").addEventListener("click", restartViolet);
+// 0.7.9: clear her memory and / or every setting (user: "二选一或都选")
+function resetDialog() {
+  const mem = h("input", { type: "checkbox" }), cfg = h("input", { type: "checkbox" });
+  const err = h("p", { class: "err" });
+  const d = h("dialog", {}, h("form", { method: "dialog", class: "stack" },
+    h("h3", { text: "清除数据" }),
+    h("label", { class: "check" }, mem, h("span", {}, h("strong", { text: " 清除所有记忆" }),
+      h("span", { class: "note", text: "：她记得的关于你的事、你的资料、约定和提醒、她的生活经历和人设变化、对群友的印象。清除前会在服务器上存一份备份。" }))),
+    h("label", { class: "check" }, cfg, h("span", {}, h("strong", { text: " 清除所有配置" }),
+      h("span", { class: "note", text: "：设置页和图片页改过的设置全部恢复默认，QQ 群全部回到“关闭”。模型服务（API 地址、Key、模型）保留，不然她就没法说话了；可以在“修改记录”里回滚。" }))),
+    h("p", { class: "note", text: "聊天记录、聊天渠道的绑定、人设和登录账号都不会动。" }),
+    err,
+    h("div", { class: "row" },
+      h("button", { type: "button", class: "ghost", text: "取消", onclick: () => { d.close(); d.remove(); } }),
+      h("button", { type: "button", class: "danger", text: "清除", onclick: async () => {
+        err.textContent = "";
+        if (!mem.checked && !cfg.checked) { err.textContent = "请至少选一项"; return; }
+        const what = [mem.checked ? "全部记忆" : null, cfg.checked ? "全部配置" : null].filter(Boolean).join("和");
+        d.close();
+        if (!(await confirmBox(`确定清除${what}？这一步不能在页面上撤销。`))) { d.remove(); return; }
+        d.remove();
+        try {
+          const r = await api("POST", "/api/control/reset", { memory: mem.checked, config: cfg.checked, confirm: true });
+          const parts = [];
+          if (r.memory) parts.push(`记忆已清除（备份：${r.memory.archive}）`);
+          if (r.config) parts.push(`${r.config.reset.length} 项设置已恢复默认`);
+          toast(parts.join("；")); loaders.settings();
+        } catch (e) { toast("清除失败：" + e.message, false); }
+      } }))));
+  document.body.append(d); d.showModal();
+}
+$("#set-reset").addEventListener("click", resetDialog);
 $("#set-save").addEventListener("click", async () => {
   document.querySelectorAll("[data-err]").forEach((e) => (e.textContent = ""));
   try {

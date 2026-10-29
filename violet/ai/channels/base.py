@@ -182,6 +182,10 @@ class ChannelAdapter(ABC):
     def send_image(self, peer_id: str, path: str) -> dict[str, Any]:
         raise UnsupportedOperation(f"{self.label} 不支持发送图片")
 
+    def send_sticker(self, peer_id: str, path: str) -> dict[str, Any]:
+        """A sticker of her collection; platforms without stickers get it as a picture."""
+        return self.send_image(peer_id, path)
+
     def send_typing(self, peer_id: str, on: bool) -> None:
         """Cosmetic; platforms without a typing indicator ignore it."""
 
@@ -247,6 +251,15 @@ class PeerTransport:
     def send_image(self, image_path: str, **_ignored) -> dict[str, Any]:
         try:
             result = self.adapter.send_image(self.peer_id, str(image_path))
+        except Exception:
+            self.adapter.status_info.send_failures += 1
+            raise
+        self.adapter.status_info.sent += 1
+        return result
+
+    def send_sticker(self, path: str, **_ignored) -> dict[str, Any]:
+        try:
+            result = self.adapter.send_sticker(self.peer_id, str(path))
         except Exception:
             self.adapter.status_info.send_failures += 1
             raise

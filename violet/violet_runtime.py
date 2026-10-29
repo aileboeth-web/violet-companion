@@ -23,6 +23,7 @@ import json
 import logging
 import queue
 import random
+import re
 import threading
 import time
 import uuid
@@ -354,6 +355,11 @@ class MessageSender:
                 if error is not None and stop_reason is None:
                     stop_reason = f"previous message failed: {error}"[:300]
                 continue
+            if msg_type == "sticker":
+                # 0.7.9: a sticker is decoration -- if it cannot go out, the words after it still do
+                self._send_sticker_message(msg, client_id, origin, turn_id, proactive_event_id, record_history,
+                                           stop_reason, report)
+                continue
             if msg_type != "text" or not content:
                 self.db.add_outbound_message(client_id, origin, str(msg_type or "unknown"), content,
                                              turn_id, proactive_event_id, status="skipped", channel=self.channel,
@@ -441,6 +447,37 @@ class MessageSender:
             report.sent.append({**msg, "content": label, "life_event_id": shared_event})
             return None
         return last_error
+
+    def _send_sticker_message(self, msg: dict[str, Any], client_id: str, origin: str, turn_id: str | None,
+                              proactive_event_id: int | None, record_history: bool, stop_reason: str | None,
+                              report: "SendReport") -> None:
+        """0.7.9: one sticker of her collection (ai/stickers.py), looked up by number only."""
+        from ai import stickers
+        sticker, problem = stickers.sendable(self.db, msg.get("sticker_id"))
+        label = f"[表情包：{(sticker or {}).get('description') or '表情'}]"
+        outbound_id = self.db.add_outbound_message(client_id, origin, "sticker", label, turn_id, proactive_event_id,
+                                                   channel=self.channel, peer_id=self.peer_id)
+        if stop_reason is not None or problem:
+            self.db.update_outbound_message(outbound_id, status="cancelled" if stop_reason else "skipped",
+                                            error=(stop_reason or problem)[:300])
+            report.skipped.append({**msg, "error": stop_reason or problem})
+            return
+        send = getattr(self.client, "send_sticker", None) or self.client.send_image
+        try:
+            self.db.update_outbound_message(outbound_id, status="sending", increment_attempts=True)
+            rejected = _response_error(send(str(stickers.path_of(sticker))))
+            if rejected:
+                raise SendRejected(rejected)
+        except Exception as exc:
+            error = f"{exc.__class__.__name__}: {exc}"[:300]
+            logger.warning("sticker %s not sent: %s", sticker["id"], error)
+            self.db.update_outbound_message(outbound_id, status="failed", error=error)
+            report.skipped.append({**msg, "error": error})      # not a failed reply: no fallback text for it
+            return
+        message_id = self.db.add_assistant_message("text", label, channel=self.channel) if record_history else None
+        self.db.update_outbound_message(outbound_id, status="sent", message_id=message_id)
+        stickers.mark_used(self.db, sticker["id"])
+        report.sent.append({**msg, "content": label})
 
     def _mark_life_event_shown(self, asset: dict[str, Any]) -> int | None:
         """Phase 7 (D5): a picture of a life event that actually reached WeChat counts as telling it.
@@ -960,7 +997,39 @@ class VioletRuntime:
         if conversation[0] == "wechat":
             return self._describe_image_item(inbound_id, part.data.get("item") or {})
         adapter = self.adapter_for(conversation[0])
-        return self._describe_image_item(inbound_id, part, download=(adapter.download if adapter else None))
+        if adapter is None or not (part.data or {}).get("sticker"):
+            return self._describe_image_item(inbound_id, part, download=(adapter.download if adapter else None))
+        paths: list[Any] = []
+
+        def download(item):
+            path = adapter.download(item)
+            paths.append(path)
+            return path
+        text = self._describe_image_item(inbound_id, part, download=download)
+        return self._collect_owner_sticker(inbound_id, part, paths[0], text) if paths else text
+
+    def _collect_owner_sticker(self, inbound_id: int, part, path, text: str) -> str:
+        """0.7.9: a sticker the owner sends goes into her collection (VIOLET_STICKER_AUTO_COLLECT); the chat sees
+        that it was a sticker. Never raises."""
+        from ai import stickers
+        text = text.replace("[用户发来一张图片]", "[用户发来一个表情包]", 1)
+        if not stickers.enabled() or not env_bool("VIOLET_STICKER_AUTO_COLLECT", True):
+            return text
+        match = re.search(r"图片内容[^：\n]*：(.+)", text)
+        description = match.group(1).strip()[:60] if match else None
+        try:
+            row = stickers.add_file(self.db, path, source="owner", description=description,
+                                    file_key=str((part.data or {}).get("file") or "") or None)
+        except Exception as exc:                             # noqa: BLE001
+            logger.info("owner sticker not collected (inbound #%s): %s", inbound_id, exc)
+            return text
+        if not row.get("description"):
+            described = stickers.describe(path)
+            if described:
+                row = stickers.update(self.db, row["id"], description=described) or row
+        text += f"\n（这个表情包已经存进你的收藏，编号 {row['id']}）"
+        self.db.update_inbound_messages([inbound_id], content=text)
+        return text
 
     def _describe_image_item(self, inbound_id: int, item: Any, download: Callable | None = None) -> str:
         try:

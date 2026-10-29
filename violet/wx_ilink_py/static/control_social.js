@@ -73,12 +73,49 @@
     } catch (e) { box.replaceChildren(h("p", { class: "err", text: e.message })); }
   }
 
+  // 0.7.9: QQ 空间 -- what she posted, why she is waiting, and "let her write one" (shown first, posted on confirm)
+  async function qzoneBox(box) {
+    let d;
+    try { d = await api("GET", "/api/control/qzone"); } catch (e) { box.replaceChildren(h("p", { class: "err", text: e.message })); return; }
+    const STATUS = { sent: ["已发", "ok"], failed: ["没发出去", "bad"] };
+    const draft = h("textarea", { class: "qz-draft", maxlength: 1000, placeholder: "点“让她写一条”，或者自己写；发之前可以改" });
+    const note = h("p", { class: "note" });
+    const writeBtn = h("button", { type: "button", class: "ghost", text: "让她写一条", onclick: async () => {
+      writeBtn.disabled = true; note.textContent = "她在想……";
+      try {
+        const r = await api("POST", "/api/control/qzone/draft", {});
+        draft.value = r.text || "";
+        note.textContent = r.post ? `她写好了（理由：${r.reason || "—"}），可以改了再发。` : `她觉得现在没什么想发的（${r.reason || "—"}）。`;
+      } catch (e) { note.textContent = ""; toast(e.message, false); }
+      writeBtn.disabled = false;
+    } });
+    const sendBtn = h("button", { type: "button", text: "发到 QQ 空间", onclick: async () => {
+      const text = draft.value.trim();
+      if (!text) { toast("动态内容是空的", false); return; }
+      if (!(await confirmBox(`用小号在 QQ 空间发这条动态？\n\n${text}`, { danger: false, ok: "发出去" }))) return;
+      try { await api("POST", "/api/control/qzone/publish", { text, confirm: true }); toast("已发出"); qzoneBox(box); }
+      catch (e) { toast(e.message, false); qzoneBox(box); }
+    } });
+    sendBtn.disabled = !d.qq_connected;
+    box.replaceChildren(
+      h("p", { class: "note", text: (d.enabled ? `自己发动态：已打开（每天最多 ${d.daily || "不限"} 条）` : "自己发动态：没有打开（在“设置 → QQ 群聊、表情包与动态”里打开）")
+        + (d.enabled && d.waiting ? ` · 现在不会发：${d.waiting}` : "") + (d.qq_connected ? "" : " · QQ 没有连接") }),
+      draft, note, h("div", { class: "row" }, writeBtn, sendBtn),
+      ...(d.posts.length ? d.posts.map((p) => {
+        const [t, k] = STATUS[p.status] || [p.status, ""];
+        return h("div", { class: "qz-post" }, h("div", { class: "row" }, pill(t, k),
+          h("span", { class: "note", text: `${when(p.created_at)} · ${p.origin === "auto" ? "她自己发的" : "后台发的"}` })),
+          h("div", { text: p.content }), p.reason ? h("p", { class: "note", text: "理由：" + p.reason }) : null,
+          p.error ? h("p", { class: "err", text: p.error }) : null);
+      }) : [h("p", { class: "note", text: "还没有发过动态。" })]));
+  }
+
   window.renderSocial = async (root, used) => {
     if (!used) { root.replaceChildren(); return; }
     let d;
     try { d = await api("GET", "/api/control/social"); } catch (e) { root.replaceChildren(h("p", { class: "err", text: e.message })); return; }
     modes = d.modes;
-    const people = h("div", { class: "stack" });
+    const people = h("div", { class: "stack" }), qzone = h("div", { class: "stack" });
     const groups = [...d.groups].sort((a, b) => (b.mode !== "off") - (a.mode !== "off") || String(a.title).localeCompare(String(b.title)));
     const PRIV = { off: "不理", known: "只回群里认识的人", all: "谁都回" };
     root.replaceChildren(h("div", { class: "set-group social" },
@@ -87,9 +124,12 @@
       d.error ? h("p", { class: "note", text: d.error }) : null,
       ...(groups.length ? groups.map((g) => convCard(g, true)) : [h("p", { class: "note", text: "还没有群。把这个 QQ 号拉进群后点“刷新状态”。" })]),
       h("h3", { text: "别人私聊她" }),
-      h("p", { class: "note", text: `现在的设置：${PRIV[d.settings.private] || d.settings.private}（在“设置 → QQ 群聊与其他人”里改）。你自己的私聊不在这里，照常进你们的对话。` }),
+      h("p", { class: "note", text: `现在的设置：${PRIV[d.settings.private] || d.settings.private}（在“设置 → QQ 群聊、表情包与动态”里改）。你自己的私聊不在这里，照常进你们的对话。` }),
       ...(d.privates.length ? d.privates.map((c) => convCard(c, false)) : [h("p", { class: "note", text: "还没有别人私聊过她。" })]),
+      h("h3", { text: "QQ 动态" }),
+      qzone,
       h("details", { ontoggle: (ev) => { if (ev.target.open) peopleBox(people); } },
         h("summary", { text: "她认识的人（对每个人的印象）" }), people)));
+    qzoneBox(qzone);
   };
 })();

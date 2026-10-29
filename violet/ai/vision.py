@@ -85,8 +85,9 @@ def _reason(exc: Exception) -> str:
     return f"{exc.__class__.__name__}：{message}" if message else exc.__class__.__name__
 
 
-def describe_image(file_path: str | os.PathLike[str]) -> str:
-    """Return a short Chinese description of the image. Raises VisionError."""
+def describe_image(file_path: str | os.PathLike[str], prompt: str | None = None) -> str:
+    """Return a short Chinese description of the image (prompt: another question, e.g. for a sticker).
+    Raises VisionError."""
     file_path = os.fspath(file_path)
     if not os.path.exists(file_path):
         raise VisionError(f"图片文件不见了：{os.path.basename(file_path)}")
@@ -104,7 +105,7 @@ def describe_image(file_path: str | os.PathLike[str]) -> str:
     with open(file_path, "rb") as f:
         data = f.read()
     url = f"data:{_mime(file_path, data)};base64,{base64.b64encode(data).decode('ascii')}"
-    messages = [{"role": "user", "content": [{"type": "text", "text": VISION_PROMPT},
+    messages = [{"role": "user", "content": [{"type": "text", "text": prompt or VISION_PROMPT},
                                              {"type": "image_url", "image_url": {"url": url}}]}]
 
     from openai import BadRequestError

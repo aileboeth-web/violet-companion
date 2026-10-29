@@ -289,12 +289,28 @@ class NapCatChannel(ChannelAdapter):
                          timeout=60)
         return {"ok": True, "message_id": (data or {}).get("message_id")}
 
-    def send_to(self, kind: str, peer_id: str, text: str, reply_to: str | None = None) -> str | None:
-        """The social engine's send: a group or someone's private chat, optionally quoting a message."""
+    @staticmethod
+    def _sticker_segment(path: str) -> dict[str, Any]:
+        """A picture QQ shows as a sticker (small, no preview frame), like one sent from the favourites."""
+        encoded = base64.b64encode(Path(path).read_bytes()).decode("ascii")
+        return {"type": "image", "data": {"file": f"base64://{encoded}", "sub_type": 1, "summary": "[动画表情]"}}
+
+    def send_sticker(self, peer_id: str, path: str) -> dict[str, Any]:
+        data = self.call("send_private_msg", {"user_id": int(peer_id), "message": [self._sticker_segment(path)]},
+                         timeout=60)
+        return {"ok": True, "message_id": (data or {}).get("message_id")}
+
+    def send_to(self, kind: str, peer_id: str, text: str | None, reply_to: str | None = None,
+                sticker_path: str | None = None) -> str | None:
+        """The social engine's send: a group or someone's private chat, optionally quoting a message; text or one
+        sticker of her collection."""
         message: list[dict[str, Any]] = []
         if reply_to:
             message.append({"type": "reply", "data": {"id": str(reply_to)}})
-        message.append({"type": "text", "data": {"text": text}})
+        if sticker_path:
+            message.append(self._sticker_segment(sticker_path))
+        else:
+            message.append({"type": "text", "data": {"text": text or ""}})
         if kind == "group":
             data = self.call("send_group_msg", {"group_id": int(peer_id), "message": message})
         else:
@@ -306,6 +322,25 @@ class NapCatChannel(ChannelAdapter):
         rows = self.call("get_group_list", {}) or []
         return [{"group_id": str(g.get("group_id")), "group_name": clean_text(str(g.get("group_name") or ""), 60),
                  "member_count": g.get("member_count")} for g in rows if isinstance(g, dict) and g.get("group_id")]
+
+    def favourite_stickers(self, count: int = 48) -> list[str]:
+        """The addresses of the account's own favourite stickers (QQ's 收藏的表情)."""
+        rows = self.call("fetch_custom_face", {"count": int(count)}, timeout=30) or []
+        if isinstance(rows, dict):
+            rows = rows.get("urls") or rows.get("data") or []
+        return [str(u) for u in rows if isinstance(u, str) and re.match(r"^https?://", u)]
+
+    def cookies(self, domain: str) -> dict[str, str]:
+        """Web cookies of the logged-in account (for QQ 空间); never logged or shown."""
+        data = self.call("get_cookies", {"domain": domain}) or {}
+        out: dict[str, str] = {}
+        for item in str(data.get("cookies") or "").split(";"):
+            if "=" in item:
+                key, value = item.split("=", 1)
+                out[key.strip()] = value.strip()
+        if data.get("bkn"):
+            out.setdefault("_bkn", str(data["bkn"]))
+        return out
 
     def download(self, part: Part) -> Path:
         url = str(part.data.get("url") or "")

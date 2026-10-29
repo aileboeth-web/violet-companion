@@ -74,16 +74,19 @@ def fixed_text(text: str) -> list[dict[str, Any]]:
 
 @dataclass(frozen=True)
 class OutboundMessage:
-    kind: str                     # text | image
+    kind: str                     # text | image | sticker
     text: str | None = None
     asset_id: int | None = None
     turn_key: str | None = None
+    sticker_id: int | None = None
 
     def send_dict(self) -> dict[str, Any]:
         """The dict MessageSender has always taken."""
         if self.kind == "image":
             return {"type": "image", "asset_id": self.asset_id, "content": None, "media_id": None,
                     "turn_key": self.turn_key}
+        if self.kind == "sticker":
+            return {"type": "sticker", "sticker_id": self.sticker_id, "content": None, "media_id": None}
         return {"type": "text", "content": self.text, "media_id": None}
 
 
@@ -102,6 +105,9 @@ class ReplyEnvelope:
     def to_public(self) -> dict[str, Any]:
         out = []
         for m in self.messages:
+            if m.kind == "sticker":
+                out.append({"type": "sticker", "sticker_id": m.sticker_id})
+                continue
             out.append({"type": "image", "asset_id": m.asset_id} if m.kind == "image" else {"type": "text", "text": m.text})
         return {"schema": REPLY_SCHEMA, "should_send": self.should_send, "declined": self.declined, "messages": out}
 
@@ -111,6 +117,8 @@ def envelope_from_payload(payload: dict[str, Any]) -> ReplyEnvelope:
     for m in payload.get("messages") or []:
         if m.get("type") == "image":
             messages.append(OutboundMessage("image", asset_id=m.get("asset_id"), turn_key=m.get("turn_key")))
+        elif m.get("type") == "sticker" and isinstance(m.get("sticker_id"), int):
+            messages.append(OutboundMessage("sticker", sticker_id=m["sticker_id"]))
         elif m.get("type") == "text" and isinstance(m.get("content"), str) and m["content"].strip():
             messages.append(OutboundMessage("text", text=m["content"]))
     return ReplyEnvelope(tuple(messages), declined=bool(payload.get("declined")))

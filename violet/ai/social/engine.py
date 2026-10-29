@@ -20,8 +20,9 @@ import threading
 from datetime import datetime, timedelta
 from typing import Any
 
-from ai import trace
-from ai.settings import env_float, env_int, env_str
+from ai import stickers, trace
+from ai.channels.onebot11 import is_sticker
+from ai.settings import env_bool, env_float, env_int, env_str
 from ai.social.store import SocialStore
 
 logger = logging.getLogger("violet.social")
@@ -46,6 +47,7 @@ def engine_for(runtime) -> "SocialEngine":
         if engine is None:
             engine = _ENGINES[id(runtime)] = SocialEngine(runtime)
             engine.resume_wakeups()
+            engine.start_posting()
         return engine
 
 
@@ -59,6 +61,25 @@ class SocialEngine:
         self._locks: dict[int, threading.Lock] = {}
         self._lock = threading.Lock()
         self._timer_factory = timer_factory
+        self._post_timer = None
+
+    def start_posting(self, interval: float = 1500.0) -> None:
+        """0.7.9: every ~25 minutes she may post on QQ 空间 (ai/social/qzone.py decides whether)."""
+        import random
+
+        def run():
+            from ai.social import qzone
+            self._post_timer = None
+            try:
+                qzone.tick(self.runtime)
+            finally:
+                self.start_posting(interval)
+        if self._post_timer is not None:
+            return
+        timer = self._timer_factory(interval + random.uniform(0, 300), run)
+        timer.daemon = True
+        self._post_timer = timer
+        timer.start()
 
     # -- receiving --------------------------------------------------------------------------------------------------
     def receive(self, adapter, *, kind: str, peer_id: str, sender_id: str, sender_name: str | None, text: str,
@@ -78,8 +99,14 @@ class SocialEngine:
             return None                                  # a group she does not take part in: nothing is stored
         self.store.person(channel, sender_id, sender_name, seen=True)
         content = text or ""
-        if images:
-            content = (content + " " if content else "") + "[图片]" * min(len(images), 3)
+        media = []
+        for data in (images or [])[:3]:
+            kind = "sticker" if is_sticker(data) else "image"
+            key = str(data.get("file") or "") or None
+            known = self.store.known_description(key)
+            label = "表情包" if kind == "sticker" else "图片"
+            media.append({"kind": kind, "file_key": key, "url": str(data.get("url") or "") or None, "description": known})
+            content = (content + " " if content else "") + (f"[{label}：{known}]" if known else f"[{label}]")
         if reply_to:
             quoted = self.store.find_message(conv["id"], reply_to)
             if quoted is not None and quoted["is_self"]:
@@ -89,6 +116,8 @@ class SocialEngine:
                                         mentions_self=mentioned)
         if row_id is None:
             return None
+        for item in media:
+            self.store.add_media(row_id, **item)
         trace.step("社交消息", 渠道=channel, 会话=f"{kind}:{peer_id}", 发送者=sender_name or sender_id,
                    提到她=mentioned or None, 内容=trace.text(content))
         if conv["mode"] != "observe":
@@ -171,6 +200,7 @@ class SocialEngine:
             return None
         adapter = self._adapter(conv["channel"])
         owner_ids = adapter.owner_ids() if adapter is not None and hasattr(adapter, "owner_ids") else set()
+        self._look_at_stickers(unread, adapter)
         history = self.store.messages(conversation_id, limit=max(10, env_int("VIOLET_SOCIAL_CONTEXT_MESSAGES", 30)))
         speakers = sorted({m["sender_id"] for m in history if m.get("sender_id") and not m["is_self"]})
         people = self.store.people(conv["channel"], speakers) if speakers else []
@@ -180,7 +210,7 @@ class SocialEngine:
         system = prompts.system_prompt(_persona_text(self.db), conv["kind"])
         user = prompts.user_prompt(conv, history=history, unread_from=int(conv["watermark"] or 0), people=people,
                                    owner_ids=owner_ids, today=today, last_said_at=(said or {}).get("at"),
-                                   now=self.db.now(), trigger=trigger)
+                                   now=self.db.now(), trigger=trigger, sticker_lines=stickers.prompt_lines(self.db))
         try:
             decision, model, latency = llm.decide(system, user)
         except llm.SocialLLMError as exc:
@@ -207,7 +237,10 @@ class SocialEngine:
         check_back = max(0.0, min(check_back, 24 * 60))
         reason = str(decision.get("reason") or "")[:300]
         error = None
-        if action in ("say", "reply") and not texts:
+        sticker = None
+        if str(decision.get("sticker") or "").strip().lstrip("#").isdigit():
+            sticker, _ = stickers.sendable(self.db, str(decision["sticker"]).strip().lstrip("#"))
+        if action in ("say", "reply") and not texts and sticker is None:
             action = "silent"
         if action in ("say", "reply") and conv["daily_message_limit"] and today["messages"] >= conv["daily_message_limit"]:
             action, error = "silent", "今天说话的次数到上限了"
@@ -227,6 +260,23 @@ class SocialEngine:
                         break
                     self.store.add_message(conv["id"], content=text, is_self=True, platform_msg_id=msg_id)
                     sent += 1
+                if sticker is not None and error is None and not (
+                        conv["daily_message_limit"] and today["messages"] + sent >= conv["daily_message_limit"]):
+                    try:
+                        msg_id = adapter.send_to(conv["kind"], conv["peer_id"], None,
+                                                 reply_to=reply_to if action == "reply" and not sent else None,
+                                                 sticker_path=str(stickers.path_of(sticker)))
+                        label = f"[表情包：{sticker.get('description') or '表情'}]"
+                        self.store.add_message(conv["id"], content=label, is_self=True, platform_msg_id=msg_id,
+                                               message_type="sticker")
+                        stickers.mark_used(self.db, sticker["id"])
+                        texts.append(label)
+                        sent += 1
+                    except Exception as exc:          # noqa: BLE001
+                        error = f"表情包没发出去：{exc}"[:300]
+        collected = self._collect(conv, decision.get("collect"), adapter)
+        if collected:
+            reason = (reason + f"（收藏了表情包 {collected}）").strip()
         self.store.advance(conv["id"], max([newest] + [m["id"] for m in self.store.messages(conv["id"], limit=1)]))
         if action == "wait" and not check_back:
             check_back = 10.0
@@ -243,6 +293,69 @@ class SocialEngine:
                    过会儿再看=f"{check_back:g} 分钟" if check_back else None, 理由=trace.text(reason), 错误=error,
                    模型=model, 耗时毫秒=latency)
         return {"action": action, "sent": sent, "check_back": check_back, "error": error}
+
+    # -- stickers (0.7.9) ---------------------------------------------------------------------------------------
+    def _download(self, adapter, url: str | None):
+        from ai.channels.base import Part
+        if adapter is None or not url or not hasattr(adapter, "download"):
+            return None
+        try:
+            return adapter.download(Part("image", "", {"url": url}))
+        except Exception as exc:                          # noqa: BLE001 -- an expired address, a network error
+            logger.info("social picture download failed: %s", exc)
+            return None
+
+    def _look_at_stickers(self, unread: list[dict[str, Any]], adapter, limit: int = 3) -> None:
+        """New stickers she has not seen before: one line each from the picture-recognition model, remembered by
+        the picture's QQ file name so the same sticker is never looked at twice (VIOLET_STICKER_LOOK)."""
+        if not unread or not stickers.enabled() or not env_bool("VIOLET_STICKER_LOOK", True):
+            return
+        for row in self.store.media([m["id"] for m in unread], kind="sticker", undescribed=True)[:limit]:
+            known = self.store.known_description(row["file_key"])
+            description = known
+            if not description:
+                path = self._download(adapter, row["url"])
+                description = stickers.describe(path) if path is not None else None
+            if description:
+                self.store.describe_media(row["id"], description)
+                trace.step("看表情包", 消息=row["message_id"], 内容=description)
+
+    def _collect(self, conv: dict[str, Any], collect: Any, adapter) -> int | None:
+        """She keeps a sticker (or a funny picture) someone sent: the decision's "collect" names the message."""
+        if not collect or not stickers.enabled():
+            return None
+        meaning = None
+        if isinstance(collect, dict):
+            meaning = collect.get("meaning") or collect.get("note")
+            collect = collect.get("message") or collect.get("id")
+        ref = str(collect or "").strip().lstrip("#")
+        if not ref.isdigit():
+            return None
+        message = self.store.find_message(conv["id"], ref)
+        if message is None:
+            row = self.db.fetch_one("SELECT * FROM social_messages WHERE id = ? AND conversation_id = ?",
+                                    (int(ref), conv["id"]))
+            message = row
+        if message is None or message["is_self"]:
+            return None
+        media = self.store.media([message["id"]])
+        if not media:
+            return None
+        item = next((m for m in media if m["kind"] == "sticker"), media[0])
+        path = self._download(adapter, item["url"])
+        if path is None:
+            return None
+        description = item.get("description") or (str(meaning).strip()[:60] if meaning else None) or stickers.describe(path)
+        try:
+            row = stickers.add_file(self.db, path, source="group" if conv["kind"] == "group" else "private",
+                                    description=description, file_key=item.get("file_key"),
+                                    source_detail=conv.get("title") or conv["peer_id"])
+        except Exception as exc:                          # noqa: BLE001
+            logger.info("sticker not collected: %s", exc)
+            return None
+        self.db.execute("UPDATE social_media SET sticker_id = ? WHERE id = ?", (row["id"], item["id"]))
+        trace.step("收藏表情包", 编号=row["id"], 内容=row.get("description"))
+        return int(row["id"])
 
     def _remember(self, conv: dict[str, Any], remember: Any) -> None:
         if not isinstance(remember, dict):
@@ -277,8 +390,11 @@ def owner_digest(db, hours: float = 24.0, limit: int = 6) -> str:
     rows = db.fetch_all("SELECT c.title, c.peer_id, m.content, m.created_at FROM social_messages m "
                         "JOIN social_conversations c ON c.id = m.conversation_id WHERE m.is_self = 1 AND c.kind = 'group' "
                         "AND m.created_at >= ? ORDER BY m.id DESC LIMIT ?", (since, limit))
-    if not rows:
+    posts = db.fetch_all("SELECT content, created_at FROM social_posts WHERE status = 'sent' AND created_at >= ? "
+                         "ORDER BY id DESC LIMIT 3", (since,))
+    if not rows and not posts:
         return ""
     lines = [f"- {str(r['created_at'])[5:16]} 在「{r['title'] or r['peer_id']}」说：{(r['content'] or '')[:80]}"
              for r in reversed(rows)]
+    lines += [f"- {str(p['created_at'])[5:16]} 你在 QQ 空间发了动态：{(p['content'] or '')[:80]}" for p in reversed(posts)]
     return "【你最近在 QQ 群里说过的话（你的主人可以知道；别人私下说的不要转述细节）】\n" + "\n".join(lines)

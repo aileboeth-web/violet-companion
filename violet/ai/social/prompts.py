@@ -40,10 +40,13 @@ OUTPUT_FORMAT = """【你的回答】只输出一个 JSON 对象，不要输出�
   "reply_to": "要引用的消息编号（只有 action 是 reply 时填，例如 \\"1023\\"）",
   "messages": ["要发的话，1 到 3 条，每条一两句"],
   "check_back_minutes": 0,
+  "sticker": "（可选）配一个你收藏的表情包：填它的编号；messages 可以为空，只发表情包",
+  "collect": {"message": "（可选）想收藏的表情包所在的消息编号", "meaning": "这个表情包适合什么时候用，20 字以内"},
   "reason": "一句话：为什么这样决定（只给管理员看）",
   "remember": {"group": "（可选）更新后的对这个群的印象，60 字以内", "people": {"QQ号": "（可选）对这个人的新印象，40 字以内"}}
 }
 - silent：这次不说话。say：说话。reply：引用某条消息说话。wait：先不说，过一会儿再来看（check_back_minutes 填几分钟）。
+- 表情包：像真人一样偶尔用，一次最多一个，只用“你收藏的表情包”里有的编号；别人发了你喜欢的表情包，可以用 collect 收藏（不用每个都收）。
 - 说完话想过一会儿看看大家的反应，也可以在 say / reply 时填 check_back_minutes。
 - remember 只在你对群或某个人有了新的、值得记住的认识时才写，写你自己的印象，不要抄聊天原文。"""
 
@@ -58,7 +61,7 @@ def system_prompt(persona_text: str, kind: str) -> str:
 
 def user_prompt(conv: dict[str, Any], *, history: list[dict[str, Any]], unread_from: int, people: list[dict[str, Any]],
                 owner_ids: set[str], today: dict[str, int], last_said_at: str | None, now: str, trigger: str,
-                self_name: str = "你") -> str:
+                self_name: str = "你", sticker_lines: list[str] | None = None) -> str:
     lines: list[str] = []
     if conv["kind"] == "group":
         lines.append(f"【群】{conv.get('title') or conv['peer_id']}（群号 {conv['peer_id']}）")
@@ -77,6 +80,8 @@ def user_prompt(conv: dict[str, Any], *, history: list[dict[str, Any]], unread_f
         cards.append(f"- {p.get('nickname') or '某人'}（QQ {p['user_id']}）{mark}：{impression}")
     if cards:
         lines += ["", "【这里的人】", *cards]
+    if sticker_lines:
+        lines += ["", "【你收藏的表情包】（编号：画面和用法）", *sticker_lines]
     lines += ["", "【聊天记录】（编号 时间 名字(QQ号)：内容；“你”是你自己说的）"]
     marked = False
     for m in history:

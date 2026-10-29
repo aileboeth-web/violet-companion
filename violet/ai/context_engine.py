@@ -442,7 +442,19 @@ class ContextEngine:
         if mode == "chat":
             sections.append(self._web_section(user_message, call_context))
             sections.append(self._social_section())
+            sections.append(self._sticker_section())
         return sections
+
+    def _sticker_section(self) -> _Section:
+        """0.7.9: her sticker collection and how to send one (ai/stickers.py)."""
+        try:
+            from ai.stickers import chat_section
+            text = chat_section(self.db)
+        except Exception:
+            logger.exception("sticker list unavailable")
+            text = ""
+        lines = text.splitlines()
+        return _Section("stickers", 6, lines[0] if lines else "", lines[1:])
 
     def _social_section(self) -> _Section:
         """2026-10-29: what she said in QQ groups lately (the owner may know her group life; group members never learn

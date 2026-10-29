@@ -66,6 +66,12 @@ def parse_cq_string(message: str) -> list[dict[str, Any]]:
     return segments
 
 
+def is_sticker(data: dict[str, Any]) -> bool:
+    """QQ marks a sticker picture with sub_type 1 (NapCat) or the summary [动画表情]."""
+    return str(data.get("sub_type") if data.get("sub_type") is not None else data.get("subType") or "") == "1" \
+        or "动画表情" in str(data.get("summary") or "")
+
+
 def segment_parts(segments: list[dict[str, Any]]) -> list[Part]:
     parts: list[Part] = []
     for seg in segments or []:
@@ -81,7 +87,8 @@ def segment_parts(segments: list[dict[str, Any]]) -> list[Part]:
             parts.append(Part("sticker", str(data.get("summary") or "").strip("[]")))
         elif kind == "image":
             # a "summary" of [动画表情] marks a sticker picture; it is still a picture Violet can look at
-            parts.append(Part("image", "", {"url": str(data.get("url") or ""), "file": str(data.get("file") or "")}))
+            parts.append(Part("image", "", {"url": str(data.get("url") or ""), "file": str(data.get("file") or ""),
+                                            "sticker": is_sticker(data)}))
         elif kind == "record":
             parts.append(Part("voice", ""))
         elif kind == "video":

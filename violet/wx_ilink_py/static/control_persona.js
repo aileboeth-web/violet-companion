@@ -187,6 +187,28 @@
     document.body.append(d); d.showModal();
   }
 
+  // 0.7.9: the whole persona on hover (or "预览" on a phone), to compare before switching
+  function previewBox(t) {
+    const block = (title, items) => (items && items.length ? h("div", { class: "pt-block" }, h("div", { class: "k", text: title }),
+      h("ul", {}, ...items.map((i) => h("li", { text: i })))) : null);
+    return h("div", { class: "pt-preview", role: "tooltip" },
+      h("strong", { text: t.blank ? "空白人设" + (t.name ? `（${t.name}）` : "") : (t.name || t.title) }),
+      t.self_description ? h("p", { class: "note", text: t.self_description }) : null,
+      t.blank ? h("p", { class: "note", text: "没有名字、性格和经历，什么都从和你聊天开始慢慢长出来。" }) : null,
+      block("性格", t.personality), block("说话习惯", t.habits), block("兴趣", t.interests),
+      block("看重", t.values), block("小缺点", t.flaws));
+  }
+  function withPreview(card, t) {
+    if (!t) return card;
+    card.classList.add("pt-card");
+    card.tabIndex = 0;
+    const toggle = h("button", { type: "button", class: "ghost pt-toggle", text: "预览", onclick: (ev) => {
+      ev.stopPropagation(); card.classList.toggle("pt-open"); } });
+    card.querySelector(".platform-head").append(toggle);
+    card.append(previewBox(t));
+    return card;
+  }
+
   async function renderTemplates() {
     let d;
     try { d = await api("GET", "/api/persona/templates"); } catch (e) { $("#pl-templates").replaceChildren(h("p", { class: "err", text: e.message })); return; }
@@ -196,9 +218,10 @@
       h("div", { class: "platform-body" }),
       h("div", { class: "row platform-foot" }, h("button", { type: "button", class: "ghost",
         text: d.current.template === "custom" ? "修改" : "自己写一个", onclick: customDialog })));
+    withPreview(own, d.custom);
     $("#pl-templates").replaceChildren(...d.templates.map((t) => {
       const using = d.current.template === t.key;
-      return h("div", { class: "card platform" },
+      return withPreview(h("div", { class: "card platform" },
         h("div", { class: "platform-head" }, h("strong", { text: t.title }), using ? pill("正在使用", "ok") : pill("模板", "")),
         h("p", { class: "note platform-intro", text: t.summary }),
         h("div", { class: "platform-body" }, t.personality.length ? h("p", { class: "note", text: "性格：" + t.personality.slice(0, 2).join("；") }) : null),
@@ -212,7 +235,7 @@
               toast(r.archive ? `已换人设，记忆已清除（备份：${r.archive}）` : "已换人设，记忆保留");
               loaders.persona();
             } catch (e) { toast(e.message, false); }
-          } })));
+          } }))), t);
     }), own);
   }
 
