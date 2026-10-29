@@ -318,20 +318,29 @@ def test_napcat_install_and_uninstall_with_fakes(tmp_path):
 
     def run(cmd, **kw):
         ran.append(cmd)
-        return SimpleNamespace(returncode=0 if cmd[0] != "getent" else 2, stdout="", stderr="")
+        # apt has a candidate for libglib2.0-0t64 only (like Ubuntu 24.04); getent: no violet-qq account yet
+        stdout = "  Candidate: 2.80\n" if cmd[:2] == ["apt-cache", "policy"] and cmd[2] == "libglib2.0-0t64" else \
+            "  Candidate: (none)\n"
+        return SimpleNamespace(returncode=0 if cmd[0] != "getent" else 2, stdout=stdout, stderr="")
     script = b"#!/bin/bash\n# NapCat installer --docker\n"
+    streamed = []
 
     def stream(cmd, on_line, env, cwd):
+        streamed.append(cmd)
+        if cmd[0] == "apt-get":
+            return 0, "ok"
         qq = nc.qq_dir(Path(env["HOME"])) / "qq"
         qq.parent.mkdir(parents=True, exist_ok=True)
         qq.write_text("")
         on_line("安装 LinuxQQ")
-        assert cmd[-4:] == ["--docker", "n", "--cli", "n"] and env["DEBIAN_FRONTEND"] == "noninteractive"
+        assert cmd[-5:] == ["--docker", "n", "--cli", "n", "--skip-deps"] and env["DEBIAN_FRONTEND"] == "noninteractive"
         return 0, "ok"
     state: dict = {"user": None}
     result = nc.install(layout, state, port_free=lambda p, h: True, run=run, fetch=lambda url, limit: script,
                         stream=stream, unit_path=unit, wait=0, check_webui=lambda port: True)
     assert result["started"] and state["napcat"]["ws_port"] == 3001 and state["napcat"]["webui_port"] == 6099
+    apt = next(c for c in streamed if c[:2] == ["apt-get", "install"])
+    assert "libglib2.0-0t64" in apt and "libatk1.0-0" in apt and "libatk1.0-0t64" not in apt
     config = nc.napcat_dir(nc.folder(layout)) / "config"
     ob = json.loads((config / "onebot11.json").read_text(encoding="utf-8"))
     server = ob["network"]["websocketServers"][0]

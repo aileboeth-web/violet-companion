@@ -178,6 +178,38 @@ def _ensure_account(base: Path, run: Callable[..., Any]) -> None:
         raise NapcatError("创建系统账号 violet-qq 失败：" + (getattr(done, "stderr", "") or "")[-300:])
 
 
+APT_STATIC = ("zip", "unzip", "jq", "curl", "xvfb", "screen", "xauth", "procps", "rpm2cpio", "cpio", "libnss3",
+              "libgbm1", "libgssapi-krb5-2")
+APT_T64 = ("libglib2.0-0", "libatk1.0-0", "libatspi2.0-0", "libgtk-3-0", "libasound2")
+
+
+def _apt_installable(name: str, run: Callable[..., Any]) -> bool:
+    """A package apt can really install (a candidate version), not only a name some package mentions."""
+    done = run(["apt-cache", "policy", name], capture_output=True, text=True)
+    for line in (getattr(done, "stdout", "") or "").splitlines():
+        if line.strip().startswith("Candidate:"):
+            return line.split(":", 1)[1].strip() not in ("", "(none)")
+    return False
+
+
+def install_apt_dependencies(run: Callable[..., Any], stream: Callable[..., tuple[int, str]],
+                             on_line: Callable[[str], None], env: dict) -> bool:
+    """Debian / Ubuntu: the libraries QQ needs, installed by Violet. NapCat's script decides "<lib>t64" by
+    `apt-cache show`, which also answers for a name that is only mentioned -- on Ubuntu 22.04 it then asks for
+    libglib2.0-0t64 and apt fails (install-linux 2026-10-29). Here a "t64" name is used only when apt has a candidate
+    for it. False when this is not an apt system (the script installs the dependencies itself)."""
+    if not shutil.which("apt-get") and run is subprocess.run:
+        return False
+    code, tail = stream(["apt-get", "update", "-y", "-qq"], on_line, env, None)
+    if code != 0:
+        raise NapcatError("apt-get update 失败（检查软件源）：\n" + tail[-800:])
+    packages = list(APT_STATIC) + [f"{p}t64" if _apt_installable(f"{p}t64", run) else p for p in APT_T64]
+    code, tail = stream(["apt-get", "install", "-y", "-qq", *packages], on_line, env, None)
+    if code != 0:
+        raise NapcatError("安装 QQ 需要的系统库失败（检查软件源）：\n" + tail[-800:])
+    return True
+
+
 def install(layout: Any, state: dict[str, Any], *, port_free: Callable[[int, str], bool],
             run: Callable[..., Any] = subprocess.run, fetch: Callable[..., bytes] = _fetch,
             stream: Callable[..., tuple[int, str]] = _stream, progress: Progress | None = None,
@@ -212,12 +244,18 @@ def install(layout: Any, state: dict[str, Any], *, port_free: Callable[[int, str
             seen[0] += 1
             _say(progress, seen[0], "安装 QQ 和 NapCat：" + text[:90])
     env = {**os.environ, "HOME": str(base), "DEBIAN_FRONTEND": "noninteractive", "LANG": "C.UTF-8"}
-    _say(progress, 10, "安装系统依赖、Linux QQ 和 NapCat（几分钟）")
-    code, tail = stream(["bash", str(work / "napcat.sh"), "--docker", "n", "--cli", "n"], on_line, env, work)
+    _say(progress, 10, "安装 QQ 需要的系统库（几分钟）")
+    skip = install_apt_dependencies(run, stream, on_line, env)
+    _say(progress, max(seen[0], 30), "安装 Linux QQ 和 NapCat")
+    cmd = ["bash", str(work / "napcat.sh"), "--docker", "n", "--cli", "n"] + (["--skip-deps"] if skip else [])
+    code, tail = stream(cmd, on_line, env, work)
     shutil.rmtree(work, ignore_errors=True)
     qq = qq_dir(base) / "qq"
     if code != 0 or (run is subprocess.run and not qq.exists()):
-        raise NapcatError("NapCat 安装脚本失败（检查网络 / 软件源）：\n" + tail[-1500:])
+        import re
+        clean = [re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line).strip() for line in tail.splitlines()]
+        last = "\n".join([line for line in clean if line][-12:])
+        raise NapcatError(f"NapCat 安装脚本失败（退出码 {code}）：\n" + last[-1200:])
 
     _say(progress, 82, "写配置（只监听本机）")
     taken: set[int] = set()

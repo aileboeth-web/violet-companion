@@ -245,7 +245,9 @@ if [ "$MODE" = "systemd" ]; then
       case "$st" in done|failed|stale) break ;; esac
       sleep 3
     done
-    [ "$st" = "done" ] || { echo "$tp"; journalctl -u violet-task -n 60 --no-pager || true; fail "$1: $st"; }
+    [ "$st" = "done" ] || { journalctl -u violet-task -n 60 --no-pager || true
+                            echo "$tp" | json '"\n".join((d["data"].get("message") or "").splitlines()[-14:])'
+                            fail "$1: $st"; }
   }
   SXAPI="$SCHEME://127.0.0.1:$PORT/api/control/tools/web/searxng"
   post_sx() { code -b "$JAR" -H "Origin: $SCHEME://127.0.0.1:$PORT" -H 'Content-Type: application/json' \
