@@ -263,7 +263,7 @@ VIOLET_WEB_EXPLORER_LLM_MODEL=
 
 # ── QQ 群聊与其他人（渠道“QQ”，NapCat；后台“设置 → QQ 群聊与其他人”）────────────────
 # 别人私聊她：off 不理 / known 只回群里认识的人 / all 谁都回
-VIOLET_SOCIAL_PRIVATE=known
+VIOLET_SOCIAL_PRIVATE=all
 # 决定在群里说不说用的模型；留空 = 和 Chat 一样
 VIOLET_SOCIAL_MODEL=
 # 等群里安静几秒再决定（被 @ 或私聊时只等 3 秒）

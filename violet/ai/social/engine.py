@@ -36,8 +36,8 @@ def social_settings() -> dict[str, Any]:
 
 
 def private_policy() -> str:
-    value = env_str("VIOLET_SOCIAL_PRIVATE", "known").lower()
-    return value if value in ("off", "known", "all") else "known"
+    value = env_str("VIOLET_SOCIAL_PRIVATE", "all").lower()
+    return value if value in ("off", "known", "all") else "all"
 
 
 def engine_for(runtime) -> "SocialEngine":

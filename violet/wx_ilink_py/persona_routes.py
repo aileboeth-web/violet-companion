@@ -58,6 +58,18 @@ def register_persona_routes(app: Flask, violetdb) -> None:
         from ai import persona_templates as pt
         return ok({"templates": pt.templates(), "current": pt.current()})
 
+    @app.post("/api/persona/custom")
+    def persona_custom():
+        from ai import persona_templates as pt
+        data = body()
+        if data.get("confirm") is not True:
+            return bad("换人设需要确认（confirm: true）")
+        fields = data.get("persona") if isinstance(data.get("persona"), dict) else {}
+        try:
+            return ok(pt.custom(violetdb, fields, str(data.get("memory") or "")))
+        except ValueError as exc:
+            return bad(str(exc))
+
     @app.post("/api/persona/switch")
     def persona_switch():
         from ai import persona_templates as pt

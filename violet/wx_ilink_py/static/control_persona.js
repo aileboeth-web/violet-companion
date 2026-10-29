@@ -144,9 +144,58 @@
       document.body.append(d); d.showModal();
     });
   }
+  // the admin's own persona: starts from the persona in use; one item per line
+  async function customDialog() {
+    let core = {};
+    try { core = ((await api("GET", "/api/persona")).core || {}).data || {}; } catch (_) { /* empty form */ }
+    const ident = core.identity || {};
+    const area = (value, rows, ph) => { const t = h("textarea", { rows, placeholder: ph }); t.value = value; return t; };
+    const lines = (list) => (list || []).map((x) => (typeof x === "string" ? x : x.label)).join("\n");
+    const f = {
+      name: h("input", { maxlength: 20, placeholder: "她的名字" }),
+      summary: h("input", { maxlength: 60, placeholder: "一句话介绍（只在后台显示）" }),
+      self_description: area(ident.self_description || "", 2, "她平时过着什么样的日子"),
+      personality: area(lines(core.personality), 4, "性格，每行一条"),
+      communication_habits: area(lines(core.communication_habits), 3, "说话习惯，每行一条"),
+      interests: area(lines(core.long_term_interests), 3, "兴趣爱好，每行一条（看书、音乐、写日记会带动她的虚拟生活）"),
+      values: area(lines(core.values), 3, "看重什么，每行一条"),
+      flaws: area(lines(core.flaws), 2, "小缺点，每行一条"),
+    };
+    f.name.value = ident.name || "";
+    const keep = h("input", { type: "radio", name: "pc-mem", checked: true }), clear = h("input", { type: "radio", name: "pc-mem" });
+    const err = h("p", { class: "err" });
+    const d = h("dialog", { class: "wide" }, h("form", { method: "dialog", class: "stack" },
+      h("h3", { text: "自定义人设" }),
+      h("p", { class: "note", text: "从现在用的人设开始改。不能编造家人、工作、学校这些背景，也不会自称真人，这两条是固定的。" }),
+      h("label", {}, "名字 ", f.name), h("label", {}, "介绍 ", f.summary), h("label", {}, "日常 ", f.self_description),
+      h("label", {}, "性格 ", f.personality), h("label", {}, "说话习惯 ", f.communication_habits),
+      h("label", {}, "兴趣 ", f.interests), h("label", {}, "看重 ", f.values), h("label", {}, "小缺点 ", f.flaws),
+      h("label", { class: "check" }, keep, " 保留记忆"), h("label", { class: "check" }, clear, " 清除记忆（先在服务器上存备份）"),
+      err,
+      h("div", { class: "row" },
+        h("button", { type: "button", class: "ghost", text: "取消", onclick: () => { d.close(); d.remove(); } }),
+        h("button", { type: "button", text: "保存并使用", onclick: async () => {
+          err.textContent = "";
+          const memory = clear.checked ? "clear" : "keep";
+          if (memory === "clear" && !(await confirmBox("确定清除全部记忆？她会忘记你和以前的一切（服务器上会保留一份备份文件）。"))) return;
+          const persona = Object.fromEntries(Object.entries(f).map(([k, el]) => [k, el.value]));
+          try {
+            await api("POST", "/api/persona/custom", { persona, memory, confirm: true });
+            d.close(); d.remove(); toast("已换成自定义人设"); loaders.persona();
+          } catch (e) { err.textContent = e.message; }
+        } }))));
+    document.body.append(d); d.showModal();
+  }
+
   async function renderTemplates() {
     let d;
     try { d = await api("GET", "/api/persona/templates"); } catch (e) { $("#pl-templates").replaceChildren(h("p", { class: "err", text: e.message })); return; }
+    const own = h("div", { class: "card platform" },
+      h("div", { class: "platform-head" }, h("strong", { text: "自定义人设" }), d.current.template === "custom" ? pill("正在使用", "ok") : pill("自己写", "")),
+      h("p", { class: "note platform-intro", text: "名字、性格、说话方式、兴趣都自己写；从现在用的人设开始改。" }),
+      h("div", { class: "platform-body" }),
+      h("div", { class: "row platform-foot" }, h("button", { type: "button", class: "ghost",
+        text: d.current.template === "custom" ? "修改" : "自己写一个", onclick: customDialog })));
     $("#pl-templates").replaceChildren(...d.templates.map((t) => {
       const using = d.current.template === t.key;
       return h("div", { class: "card platform" },
@@ -164,7 +213,7 @@
               loaders.persona();
             } catch (e) { toast(e.message, false); }
           } })));
-    }));
+    }), own);
   }
 
   loaders.persona = async () => {

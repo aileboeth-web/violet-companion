@@ -152,7 +152,7 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_WEB_EXPLORER_LLM_MODEL", "自主探索用的模型", "features", "model", "now", "留空 = 不探索", optional=True),
     # 2026-10-29: Violet's social life on the channel "QQ" (ai/social): groups are chosen per group on the channels page
     Setting("VIOLET_SOCIAL_PRIVATE", "别人私聊她", "social", "choice", "now",
-            "不是你的人私聊 Violet 时：不理 / 只回群里认识的人 / 谁都回（她仍然自己决定说不说）", "known",
+            "不是你的人私聊 Violet 时：不理 / 只回群里认识的人 / 谁都回（她仍然自己决定说不说）", "all",
             choices=(("off", "不理"), ("known", "只回群里认识的人"), ("all", "谁都回"))),
     Setting("VIOLET_SOCIAL_MODEL", "群聊用的模型", "social", "model", "now",
             "决定在群里说不说、说什么用的模型；留空 = 和 Chat 一样。群消息多时可以换便宜一点的模型", optional=True),

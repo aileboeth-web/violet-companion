@@ -92,6 +92,55 @@ def clear_memory(db) -> tuple[str, dict[str, int]]:
     return str(path), counts
 
 
+LIST_FIELDS = ("personality", "communication_habits", "values", "flaws")
+
+
+def custom(db, fields: dict[str, Any], memory: str) -> dict[str, Any]:
+    """The admin's own persona (2026-10-29): name, a line about her days, lists of personality / habits / values /
+    flaws / interests. The safety parts (no invented family, job, school; not claiming to be human) come from the
+    shipped persona and cannot be edited here."""
+    if memory not in ("keep", "clear"):
+        raise ValueError("记忆要选“保留”或“清除”")
+    name = str(fields.get("name") or "").strip()[:20]
+    if not name:
+        raise ValueError("请填一个名字")
+
+    def items(key: str, limit: int = 8) -> list[str]:
+        raw = fields.get(key) or []
+        if isinstance(raw, str):
+            raw = raw.splitlines()
+        return [str(x).strip()[:120] for x in raw if str(x).strip()][:limit]
+    base = json.loads((TEMPLATE_DIR / "violet.json").read_text(encoding="utf-8"))
+    # the life engine knows reading / music / notes: an interest that is one of these drives her virtual days
+    def key_of(label: str, index: int, taken: set[str]) -> str:
+        for key, words in (("reading", ("书", "读", "小说")), ("music", ("音乐", "歌", "曲")), ("notes", ("记", "写", "日记"))):
+            if key not in taken and any(w in label for w in words):
+                return key
+        return f"custom{index}"
+    interests, taken = [], set()
+    for i, label in enumerate(items("interests", 6), 1):
+        key = key_of(label, i, taken)
+        taken.add(key)
+        interests.append({"key": key, "label": label})
+    data = {"_title": "自定义人设", "_summary": str(fields.get("summary") or "").strip()[:60], "version": "1.0.0",
+            "identity": {"name": name, "self_description": str(fields.get("self_description") or "").strip()[:200],
+                         "virtual_declaration": f"{name}是一个虚构的角色。生活是系统里记录的虚拟日常；不冒充现实中的真人，"
+                                                "也不声称有记录之外的经历。"},
+            **{k: items(k) for k in LIST_FIELDS}, "long_term_interests": interests,
+            "living_constraints": base.get("living_constraints") or [],
+            "forbidden_backstory": base["forbidden_backstory"], "identity_violations": base["identity_violations"],
+            "immutable": []}
+    if not any(data[k] for k in LIST_FIELDS):
+        raise ValueError("性格、说话习惯这些至少写一条")
+    archive, counts = (None, {})
+    if memory == "clear":
+        archive, counts = clear_memory(db)
+    _write(control_dir() / "persona_core.json", data)
+    info = {"template": "custom", "switched_at": db.now(), "memory": memory, "archive": archive}
+    _write(control_dir() / "persona.json", info)
+    return {**info, "removed": counts}
+
+
 def switch(db, key: str, memory: str, name: str | None = None) -> dict[str, Any]:
     """Use template `key`; memory "keep" | "clear". name: the blank persona's name (optional)."""
     if memory not in ("keep", "clear"):

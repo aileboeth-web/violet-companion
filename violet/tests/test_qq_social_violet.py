@@ -149,7 +149,10 @@ def test_daily_limits_and_wait(db, monkeypatch):
 
 
 def test_private_chats_follow_the_setting(db, monkeypatch):
+    from ai.social.engine import private_policy
     from ai.social.store import SocialStore
+    monkeypatch.delenv("VIOLET_SOCIAL_PRIVATE", raising=False)
+    assert private_policy() == "all"                                   # the user's choice: everyone may write
     a = FakeAdapter()
     e = engine(db, a)
     monkeypatch.setenv("VIOLET_SOCIAL_PRIVATE", "known")
@@ -419,6 +422,16 @@ def test_persona_templates_switch_keep_and_clear(db, tmp_path, monkeypatch):
     assert "空白人设" in text and "小白" in text and pt.current()["template"] == "blank"
     pt.switch(db, "violet", "keep")
     assert pt.active_path() is None and "Violet" in PersonaCore.load().render()
+    out = pt.custom(db, {"name": "阿紫", "personality": "爱笑\n嘴硬心软", "interests": "画画\n看小说"}, "keep")
+    core = PersonaCore.load()
+    assert out["template"] == "custom" and pt.current()["template"] == "custom"
+    assert "阿紫" in core.render() and "嘴硬心软" in core.render()
+    assert [i["key"] for i in core.data["long_term_interests"]] == ["custom1", "reading"]     # 小说 drives her life
+    assert core.forbidden_backstory()                                                      # the fixed safety part
+    with pytest.raises(ValueError):
+        pt.custom(db, {"name": "", "personality": "x"}, "keep")
+    with pytest.raises(ValueError):
+        pt.custom(db, {"name": "空"}, "keep")
     with pytest.raises(ValueError):
         pt.switch(db, "../etc", "keep")
     with pytest.raises(ValueError):
