@@ -106,6 +106,16 @@ def attach_images(payload: dict[str, Any], allowed_asset_ids: list[int], turn_ke
     return {**payload, "messages": messages, "should_send": bool(messages)}
 
 
+def attach_stickers(payload: dict[str, Any], sticker_ids: list[int] | None) -> dict[str, Any]:
+    """2026-10-30: the sticker she picked with send_sticker goes out after the text (one per reply; a reply that
+    already carries a [[表情:N]] line keeps that one). The outbox still checks the number against the collection."""
+    messages = list(payload.get("messages") or [])
+    if not sticker_ids or any(m.get("type") == "sticker" for m in messages):
+        return payload
+    messages.append({"type": "sticker", "sticker_id": int(sticker_ids[0]), "content": None, "media_id": None})
+    return {**payload, "messages": messages, "should_send": True}
+
+
 def strip_images(payload: dict[str, Any]) -> dict[str, Any]:
     """Proactive messages, fixed-time tasks and reminders never send images."""
     messages = [m for m in payload.get("messages") or [] if m.get("type") != "image"]

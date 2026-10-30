@@ -406,7 +406,8 @@ def test_RM1_parameter_policy_is_configurable_and_empty_by_default(make_world, t
         {"model": "fake-sem", "max_completion_tokens": 5}
 
 
-def test_RC1_user_message_is_per_thread(iworld):
+def test_RC1_user_message_is_per_thread(iworld, monkeypatch):
+    monkeypatch.setenv("VIOLET_IMAGE_SELF_DECIDE", "0")      # the per-message gate is what shows the thread's message
     w = iworld
     agent = w.agents["chat"]
     offered = {}

@@ -23,6 +23,9 @@ URL_RE = re.compile(r"https?://[^\s\"'<>，。）)\]]+", re.I)
 WEB_SEARCH = f"{SERVER_NAME}__web_search"
 FETCH_URL = f"{SERVER_NAME}__fetch_url"
 WEB_TOOLS = {WEB_SEARCH, FETCH_URL}
+# 2026-10-30: local tools that change nothing outside and send nothing anywhere stay usable after web content came in
+# (a sticker with the answer about the news); MCP tools and image generation stay refused
+SAFE_AFTER_WEB = {"find_stickers", "send_sticker", "save_sticker", "look_at_image"}
 
 
 def _norm(url: str) -> str:
@@ -54,7 +57,7 @@ class WebToolGuard:
 
     def check(self, tool_name: str, arguments: dict[str, Any]) -> str | None:
         if tool_name not in WEB_TOOLS:
-            if self.tainted:
+            if self.tainted and tool_name not in SAFE_AFTER_WEB:
                 return self._deny("DENIED_AFTER_WEB", "本轮已经读取了外部网页内容，不再调用其他工具")
             return None
         if self.calls >= self.max_calls:

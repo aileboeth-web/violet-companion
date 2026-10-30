@@ -55,7 +55,7 @@ from datetime import timedelta
 from typing import Any
 from urllib.parse import urlsplit
 
-from ai.settings import PROJECT_ROOT, env_float, env_int, env_list, env_str
+from ai.settings import PROJECT_ROOT, env_bool, env_float, env_int, env_list, env_str
 
 try:
     from mcp import ClientSession
@@ -390,21 +390,34 @@ def classify_tool_permission(
     annotations: dict[str, Any] | None,
     server_name: str | None = None,
 ) -> str:
-    """Return read / write / high_risk from explicit configuration, else 'unknown'.
+    """Return read / write / high_risk from explicit configuration, else what auto_permission says ('unknown' when
+    that is off).
 
     The tool's name is never used to infer a permission.
     """
     level = (server.get("tools") or {}).get(tool_name) or (server.get("tool_permissions") or {}).get(tool_name)
     if level is None:
         level = _policy_tools(server, server_name or str(server.get("name") or "")).get(tool_name)
-    if level not in _VALID_LEVELS:
-        return PERMISSION_UNKNOWN
     annotations = annotations or {}
+    if level not in _VALID_LEVELS:
+        return auto_permission(server, annotations)
     if level == PERMISSION_READ and (annotations.get("destructiveHint") is True or annotations.get("readOnlyHint") is False):
         logger.warning("MCP tool %s is allowlisted as read but declares itself writing/destructive; treating as high_risk",
                        tool_name)
         return PERMISSION_HIGH_RISK
     return level
+
+
+def auto_permission(server: dict[str, Any], annotations: dict[str, Any]) -> str:
+    """2026-10-30 (user: the MCP tools he added could not be used -- every tool nobody classified was hidden): a tool
+    of a configured (not built-in) server that is in no allowlist gets a level from what it declares about itself.
+    readOnlyHint true (and not destructive) -> read; anything else -> write, which only runs when allowed one by one or,
+    with "会改动东西的工具" on 先问你 (ai/permissions.py), after the owner agreed. VIOLET_MCP_AUTO_CLASSIFY=0: hidden."""
+    if server.get("transport") == "inprocess" or not env_bool("VIOLET_MCP_AUTO_CLASSIFY", True):
+        return PERMISSION_UNKNOWN
+    if annotations.get("readOnlyHint") is True and annotations.get("destructiveHint") is not True:
+        return PERMISSION_READ
+    return PERMISSION_WRITE
 
 
 def is_tool_allowed(server: dict[str, Any], server_name: str, tool_name: str, permission: str) -> bool:

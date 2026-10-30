@@ -101,6 +101,7 @@ class BaseAgent:
     temperature_env_key: str = ""
     default_temperature: float = 0.2
     mcp_agent_name: str = ""
+    answer_after_max_rounds: bool = False      # 2026-10-30: ChatAgent answers without tools instead of failing
     retryable_errors = (APIConnectionError, APITimeoutError, InternalServerError, RateLimitError)
 
     # Test hook: callable(LLMConfig) -> client exposing .chat.completions.create(**kw).
@@ -422,6 +423,10 @@ class BaseAgent:
         chat_history = self.build_context_messages(user_message)
 
         async with MCPToolBridge(self._mcp_servers_for_run(cfg), agent_name=self.mcp_agent_name or None) as mcp_bridge:
+            try:                       # 2026-10-30: the filter may look at a tool's permission (read / write ...)
+                self._call_context["_mcp_permissions"] = {n: b.permission for n, b in mcp_bridge.tool_to_session.items()}
+            except Exception:          # noqa: BLE001 -- an agent without a call context
+                pass
             all_tools = self._filter_tools_for_run(local_tools + list(mcp_bridge.tools))
             offered = {t["function"]["name"] for t in all_tools}
             guard = self._new_tool_guard(user_message)
@@ -528,7 +533,26 @@ class BaseAgent:
                         "finished_after_tools": True,
                     }
 
-        raise RuntimeError(f"{self.__class__.__name__}: max tool rounds exceeded")
+            if not self.answer_after_max_rounds:
+                raise RuntimeError(f"{self.__class__.__name__}: max tool rounds exceeded")
+            # 2026-10-30 (free tool use): out of tool rounds -- one last call without tools, so she answers from what
+            # she has instead of the whole turn failing
+            chat_history.append({"role": "system", "content": "工具已经用够了，这一轮不能再调用工具。按上面已经拿到的结果直接回复；"
+                                                              "没拿到的照实说没拿到。"})
+            completion = self._create_completion(client, cfg, model=cfg.reply_model, messages=chat_history,
+                                                 temperature=cfg.reply_temperature)
+            assistant_message = completion.choices[0].message
+            chat_history.append(assistant_message.model_dump(exclude_none=True))
+            return {
+                "content": assistant_message.content or "",
+                "messages": chat_history,
+                "raw": completion.model_dump(),
+                "mcp_unavailable": list(mcp_bridge.unavailable),
+                "tools_called": list(called),
+                "max_rounds_reached": True,
+                "web_finding_ids": list(getattr(guard, "finding_ids", []) or []),
+                **(guard.result_extras() if hasattr(guard, "result_extras") else {}),
+            }
 
     def run(self, user_message: str, call_context: dict[str, Any] | None = None, **kwargs) -> dict[str, Any]:
         """同步调用 LLM（run_async 的同步包装）。

@@ -433,6 +433,7 @@ class ToolInfo:
     permission: str
     agents: list[str]
     input_schema: dict[str, Any] = field(default_factory=dict)
+    needs_approval: bool = False            # 2026-10-30: every call waits for the owner (ai/permissions.py)
 
     def short(self) -> str:
         first = re.split(r"(?<=[。.!！?？\n])", (self.description or "").strip(), maxsplit=1)[0].strip()
@@ -524,7 +525,8 @@ def discover(servers: list[dict[str, Any]] | None = None) -> Catalog:
         index, server = by_name[binding.server_name]
         cached = {t["name"]: t for t in (_state_for(server, index).tools or [])}.get(binding.original_name) or {}
         catalog.tools[full] = ToolInfo(full, binding.server_name, binding.original_name, cached.get("description") or "",
-                                       binding.permission, _agents_of(server), cached.get("inputSchema") or {})
+                                       binding.permission, _agents_of(server), cached.get("inputSchema") or {},
+                                       bool(binding.extra.get("needs_approval")))
     catalog.unavailable = list(bridge.unavailable)
     catalog.disabled = list(bridge.disabled_tools)
     catalog.refused = list(bridge.denied_tools) + list(bridge.unclassified_tools)
@@ -550,8 +552,10 @@ def intent_note(catalog: Catalog) -> str | None:
         return None
     lines = ["【Violet 现在能用的外部工具（系统根据连接状态列出；没列出的就是现在没有）】"]
     usable = [t for t in catalog.tools.values() if {"chat", "performer"} & set(t.agents)]
+    direct = set(direct_tools(catalog))
     for t in sorted(usable, key=lambda t: t.name):
-        kind = "只读查询" if t.permission == "read" else "执行操作，需要交给任务执行"
+        kind = ("只读查询" if t.permission == "read" else
+                "会改动东西，聊天时直接调用，不需要 route=task" if t.name in direct else "执行操作，需要交给任务执行")
         lines.append(f"- {t.name}：{t.short()}（{kind}）")
     if not usable:
         lines.append("- （无）")
@@ -576,7 +580,11 @@ def plan_for_turn(intent: dict[str, Any], catalog: Catalog) -> dict[str, Any]:
     a task) | blocked (needed, but nothing usable: status says why). Never creates anything itself."""
     query = intent.get("tool_query") if isinstance(intent.get("tool_query"), dict) else None
     new_task = intent.get("route") == "task" and intent.get("active_task_id") is None
+    direct = set(direct_tools(catalog))
     if not query or not query.get("needed"):
+        if new_task and direct:
+            # 2026-10-30 (free tool use): Chat has the tools itself and decides in its own run -- no task, no Performer
+            return {"needed": False, "mode": "direct", "tools": [], "status": "ok", "reason": None, "missing": None}
         if new_task and not catalog.for_agent("performer"):
             # phase 9.2: the Performer has no external tool that could carry this out -- no task that can only fail
             return {"needed": False, "mode": "blocked", "status": "no_executor", "tools": [],
@@ -585,7 +593,7 @@ def plan_for_turn(intent: dict[str, Any], catalog: Catalog) -> dict[str, Any]:
     names = [str(n) for n in query.get("tools") or [] if isinstance(n, str)][:6]
     reason = str(query.get("reason") or query.get("missing") or "")[:120] or None
     chat = [n for n in names if n in catalog.tools and "chat" in catalog.tools[n].agents
-            and catalog.tools[n].permission == "read"]
+            and (catalog.tools[n].permission == "read" or n in direct)]
     if chat:
         return {"needed": True, "mode": "chat", "status": "ok", "tools": chat, "reason": reason, "missing": None}
     performer = [n for n in names if n in catalog.tools and "performer" in catalog.tools[n].agents]
@@ -602,21 +610,69 @@ def plan_for_turn(intent: dict[str, Any], catalog: Catalog) -> dict[str, Any]:
 
 
 def direct_tools(catalog: Catalog) -> list[str]:
-    """2026-10-30: the tools Chat gets on every turn (VIOLET_CHAT_TOOLS_DIRECT, on): connected, assigned to Chat,
-    read-only. Execution tools still go through a task (the Performer)."""
+    """2026-10-30: the tools Chat gets on every turn (VIOLET_CHAT_TOOLS_DIRECT, on): connected and assigned to Chat.
+    Read-only ones always; ones that change something too (VIOLET_CHAT_ACTION_TOOLS, on -- user: "比较自由调用工具"):
+    they are in the catalog only when allowed one by one or waiting for the owner's approval (ai/permissions.py)."""
     from ai.settings import env_bool
     if not env_bool("VIOLET_CHAT_TOOLS_DIRECT", True):
         return []
-    return sorted(n for n, t in catalog.tools.items() if "chat" in t.agents and t.permission == "read")
+    actions = env_bool("VIOLET_CHAT_ACTION_TOOLS", True)
+    return sorted(n for n, t in catalog.tools.items() if "chat" in t.agents and (t.permission == "read" or actions))
 
 
 def direct_note(names: list[str]) -> str | None:
-    """The one rule that goes with them (the tool descriptions themselves come with the tool schemas)."""
+    """The rule that goes with them (the tool descriptions themselves come with the tool schemas)."""
     if not names:
         return None
-    return ("【可以用的工具】这一轮你能直接调用查询工具。需要实时信息（天气、新闻、最新消息）、你不知道的外部资料、"
-            "或对方自己的数据（课表、手机状态等）时，先调用合适的工具，再按结果回答；闲聊、情绪、关于你或对方自己说过的事不用查。"
-            "查不到或出错就照实说，绝不编造；工具名和错误代码不要说给对方听。")
+    return ("【工具怎么用】这一轮你可以自己决定调用工具，不用等对方明说：需要实时信息、你不知道的外部资料、对方自己的数据，"
+            "或者对方想让你做一件工具能做的事，就直接调用合适的工具，可以连着用几个，再按结果回答。闲聊、情绪、你们自己聊过的事不用查。"
+            "会改动东西的操作，结果说要主人同意时就照它说的问主人。查不到或出错就照实说，绝不编造；工具名和错误代码不要说给对方听。")
+
+
+def abilities_note(catalog: Catalog, direct: list[str] | None = None) -> str:
+    """2026-10-30 (user: she says she did something she cannot do, or cannot use what she has): ONE list, written by
+    the code from the real switches and connections, of what she can do in this chat, how, and what not (and why).
+    Facts only -- no style."""
+    from ai.settings import env_bool, env_str
+    lines = ["【你现在能做的事】（系统按现在的设置和连接情况列出；没列出的就是做不到，不要说做了）"]
+    try:
+        from ai import stickers
+        from ai.chat import violetdb
+        if stickers.enabled():
+            total = violetdb.fetch_one("SELECT COUNT(*) AS n FROM stickers WHERE enabled = 1")["n"]
+            bare = violetdb.fetch_one("SELECT COUNT(*) AS n FROM stickers WHERE enabled = 1 AND "
+                                      "(description IS NULL OR description = '')")["n"]
+            lines.append(f"- 表情包：收藏里有 {total} 个" + (f"（其中 {bare} 个还没有说明）" if bare else "")
+                         + "。想发就调用 send_sticker（不确定用哪个先 find_stickers）；对方让你收藏、或你喜欢对方发的表情包，"
+                           "调用 save_sticker。只有调用成功才算发了 / 收藏了。")
+        else:
+            lines.append("- 表情包：功能关着，发不了也收藏不了")
+    except Exception:                                        # noqa: BLE001 -- an old database without the table
+        logger.debug("sticker counts unavailable", exc_info=True)
+    if env_bool("VIOLET_IMAGE_ENABLED", False):
+        if env_str("VIOLET_IMAGE_GEN_MODEL", "").strip():
+            lines.append("- 画图：可以，调用 create_image（每次回复最多一张）；对方发来的图可以 edit_image / look_at_image")
+        else:
+            lines.append("- 画图：图片功能开着，但还没有设置画图模型，现在画不了")
+    else:
+        lines.append("- 画图：图片功能关着，现在画不了")
+    names = sorted(direct if direct is not None else direct_tools(catalog))
+    web = [n for n in names if n.startswith("violet-web__")]
+    lines.append("- 上网：可以，web_search 搜索、fetch_url 读网页" if web else "- 上网：现在没有联网工具（没开或连不上）")
+    others = [catalog.tools[n] for n in names if n in catalog.tools and not n.startswith("violet-web__")]
+    # names and how only: the descriptions come with the tool schemas (no second copy, fewer tokens)
+    groups = {"查询": [], "可以直接做": [], "要主人同意才会执行": []}
+    for t in others[:40]:
+        groups["要主人同意才会执行" if t.needs_approval else ("查询" if t.permission == "read" else "可以直接做")].append(t.name)
+    for how, tools in groups.items():
+        if tools:
+            lines.append(f"- 工具（{how}）：" + "、".join(tools))
+    for u in catalog.unavailable:
+        lines.append(f"- {u['server']} 这次连不上，它的工具用不了")
+    if catalog.disabled:
+        lines.append("- 主人关掉的工具：" + "、".join(sorted(catalog.disabled)[:12]))
+    lines.append("- 提醒：对方让你到时间提醒，系统会自动记下并按时提醒（不用工具）；记忆：聊过的事系统会自己记，不用工具")
+    return "\n".join(lines)
 
 
 def chat_note(plan: dict[str, Any], catalog: Catalog) -> str | None:

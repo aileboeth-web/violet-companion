@@ -83,6 +83,12 @@ def context_style() -> str:
     return style if style in CONTEXT_STYLES else "natural"
 
 
+def ai_natural() -> bool:
+    """2026-10-30: the AI persona talks in the model's own way (its own prompt, no companion nudges).
+    VIOLET_AI_NATURAL=0: the AI persona gets the same prompt and notes as every other persona."""
+    return env_bool("VIOLET_AI_NATURAL", True)
+
+
 def _span(delta) -> str:
     minutes = int(delta.total_seconds() // 60)
     if minutes < 60:
@@ -440,10 +446,14 @@ class ContextEngine:
         if dynamic:
             lines = dynamic.splitlines()
             sections.append(_Section("persona_dynamic", 3, lines[0], lines[1:]))
+        self._is_ai = bool(core.is_ai)
+        # 2026-10-30: the pipeline's abilities note (ai/tool_manager.abilities_note) replaces the ability / sticker lists
+        listed = bool(call_context.get("abilities_note"))
         if core.is_ai:
             # 2026-10-30: an AI that knows it is one has no virtual life -- its real experiences and abilities instead
             sections.append(self._ai_experience_section())
-            sections.append(self._ai_ability_section())
+            if not listed:
+                sections.append(self._ai_ability_section())
         else:
             sections.append(self._life_section(mode, user_message, call_context, LifeStore(self.db)))
         if mode == "chat":
@@ -839,6 +849,7 @@ class ContextEngine:
         sections: list[_Section] = [self._preferences_section(mode)]
         self._turn_message = user_message or ""          # the user's own words (text also holds recalled memories)
         self._relationship = None
+        self._is_ai = False                              # set by _persona_sections
         profile_section, facts = self._profile_section(mode, text)
         sections.append(profile_section)
         situation_section, situations = self._situation_section(text, facts, user_message)
@@ -861,7 +872,10 @@ class ContextEngine:
             sections.append(self._legacy_section())
         if mode in ("chat", "proactive"):
             sections.append(self._restricted_section(call_context))
-        if mode == "chat":
+        # 2026-10-30 (user, AI persona: "不太像他底层模型的颜色，感觉是被提示词污染了"): the AI persona speaks in the
+        # model's own way -- none of the companion nudges (questions to ask, per-message style notes) are added
+        natural = bool(self._is_ai) and ai_natural()
+        if mode == "chat" and not natural:
             onboarding_section, onboarding_key = self._onboarding_section(user_message, call_context)
             sections.append(onboarding_section)
         sections.append(self._base_section())
@@ -886,9 +900,11 @@ class ContextEngine:
             "trimmed_items": trimmed,
             "approx_tokens": self._approx_tokens(chars),
             "onboarding_key": onboarding_key,
+            "is_ai": bool(self._is_ai),
+            "ai_natural": natural,
         }
         note = None
-        if mode == "chat" and context_style() == "natural":
+        if mode == "chat" and context_style() == "natural" and not natural:
             # Phase 8.8: the preference section sits far above the history; the signal that applies to THIS
             # message is repeated next to it (an invitation to ask, or a share under "don't question me").
             # Phase 8.9: plus what Violet's own replies in this conversation already keep doing (care, questions)

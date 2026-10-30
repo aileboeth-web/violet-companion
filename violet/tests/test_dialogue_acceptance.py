@@ -36,6 +36,7 @@ def last_user_call(w):
 
 @pytest.fixture()
 def dialogue_world(make_world, tmp_path, monkeypatch):
+    monkeypatch.setenv("VIOLET_IMAGE_SELF_DECIDE", "0")     # the plan's rounds check the "only when asked" image gate
     from ai.images import adapters, router
     from ai.life_store import LifeStore
     from ai.web import mcp_server

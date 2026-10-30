@@ -22,7 +22,10 @@ AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
 
 @pytest.fixture(autouse=True)
-def clean_state():
+def clean_state(monkeypatch):
+    # the phase 6 gate these tests are about: an image only on the user's request (2026-10-30 default: she decides,
+    # see tests/test_free_tools_violet.py)
+    monkeypatch.setenv("VIOLET_IMAGE_SELF_DECIDE", "0")
     from ai.images import adapters, router
     adapters.MockImageAdapter.calls.clear()
     router.reset_runtime_state()

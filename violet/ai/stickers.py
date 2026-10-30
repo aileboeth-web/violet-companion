@@ -274,5 +274,6 @@ def chat_section(db) -> str:
     lines = prompt_lines(db)
     if not lines:
         return ""
-    return ("【你收藏的表情包】聊到合适的时候可以发一个：单独一行写 [[表情:编号]]。不用每次都发，一次最多一个，"
-            "只用下面有的编号。\n" + "\n".join(lines))
+    # 2026-10-30: sending is the send_sticker tool (ai/sticker_tools.py); the marker line still works
+    return ("【你收藏的表情包】聊到合适的时候可以发一个：调用 send_sticker 填编号（或单独一行写 [[表情:编号]]）。"
+            "不用每次都发，一次最多一个。下面是常用的，全部的用 find_stickers 看。\n" + "\n".join(lines))

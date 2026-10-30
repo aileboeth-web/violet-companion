@@ -19,6 +19,22 @@ USER_21 = "给我看看你现在在干嘛"
 USER_22 = "这张是你拍的吗"
 
 
+@pytest.fixture(autouse=True)
+def _image_only_on_request():
+    """These rounds are about the phase 6 gate (an image only when the user asks); 2026-10-30 default: she decides.
+    Not monkeypatch: set up before clean_env, its undo would run after clean_env's restore and bring back the
+    variables a test set (they leaked into later files)."""
+    keys = ("VIOLET_IMAGE_SELF_DECIDE", "VIOLET_TEST_IMAGE_SELF_DECIDE")   # the second: through tools/harness.py
+    saved = {k: os.environ.get(k) for k in keys}
+    os.environ.update({k: "0" for k in keys})
+    yield
+    for k, v in saved.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+
+
 @pytest.fixture()
 def clean_env():
     saved = dict(os.environ)

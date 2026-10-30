@@ -132,6 +132,15 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_CHAT_TOOLS_DIRECT", "查询工具直接交给回复", "features", "bool", "now",
             "开：每一轮回复都能直接用连上的只读工具（联网搜索、课表、手机状态等），自己判断要不要查；"
             "关：只在意图识别判断要查时才给（以前的做法，少一点 token，但容易漏查）", True),
+    # 2026-10-30 (user: "比较自由调用工具，在聊天的时候知道要用什么工具")
+    Setting("VIOLET_CHAT_ACTION_TOOLS", "会改动东西的工具也交给回复", "features", "bool", "now",
+            "开：会改动东西的工具（例如手机上的操作）也由她在聊天里直接调用，不再单独建任务；没单独放行的，每次都先问你"
+            "（“设置 → 她能自己做的事”）。关：这些工具走任务执行（以前的做法）", True),
+    Setting("VIOLET_CHAT_MAX_TOOL_ROUNDS", "一次回复最多用几轮工具", "mcp", "int", "now",
+            "她连着调用工具最多几轮；用完了就按已经拿到的结果回答", 6, 1, 20),
+    Setting("VIOLET_MCP_AUTO_CLASSIFY", "没分类的 MCP 工具自动处理", "mcp", "bool", "now",
+            "开：你加的 MCP 服务器里没分类的工具，声明自己只读的当查询工具用，其余的当“会改动东西”的工具（要你放行或同意）；"
+            "关：没分类的工具全部藏起来（以前的做法）", True),
     Setting("VIOLET_SCHEDULE_ENABLED", "课表查询（violet-schedule）", "features", "bool", "now",
             "Violet 可以查你在“课表”页录入的课表", False),
     Setting("VIOLET_SCHEDULE_CONTEXT", "聊天时考虑课表", "features", "bool", "now", "聊天时知道你现在是不是在上课", False),
@@ -161,6 +170,11 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_SOCIAL_OBEY_OWNER", "群里听主人的话", "social", "bool", "now",
             "开：你（绑定的主人）在群里或私聊里让她说话、发表情包、收藏表情包、别说了，她照做，做不到会说原因；"
             "别人的话仍然只当聊天。你们私聊的事、链接和联系方式，就算你在群里让她说也不会说。关：你的话也只当聊天", True),
+    Setting("VIOLET_SOCIAL_INITIATIVE", "群里冷场时自己说话", "social", "bool", "now",
+            "“自己决定”的群安静了一阵（15 分钟以上、3 天以内有人说过话），她偶尔会想想要不要自己起个话题；"
+            "9:00–23:00，刚说过话的群不会；大多数时候她会选择不说。会多用一些模型调用", True),
+    Setting("VIOLET_SOCIAL_INITIATIVE_CHANCE", "冷场时想说话的频率", "social", "float", "now",
+            "每 25 分钟左右，每个冷场的群有多大概率让她想一想（0–1）；越大她越常主动说话", 0.3, 0, 1),
     Setting("VIOLET_SOCIAL_MODEL", "群聊用的模型", "social", "model", "now",
             "决定在群里说不说、说什么用的模型；留空 = 和 Chat 一样。群消息多时可以换便宜一点的模型", optional=True),
     Setting("VIOLET_SOCIAL_QUIET_SECONDS", "等群里安静几秒再决定", "social", "float", "now",
@@ -185,6 +199,8 @@ SETTINGS: list[Setting] = [
             "0 = 不限（仍然至少隔 4 小时）；你在后台手动发的不算", 1, 0, 20),
     Setting("VIOLET_IMAGE_ENABLED", "图片功能", "images", "bool", "now",
             "关闭时收到的图片只用下面的识图模型看一眼，聊天里没有生成 / 编辑图片的工具", False),
+    Setting("VIOLET_IMAGE_SELF_DECIDE", "她自己决定什么时候画图", "images", "bool", "now",
+            "开：她觉得合适就会画一张（每次回复最多一张，每天的图片额度照样算）；关：只有你的话里明确要图（画、图片、照片…）才画", True),
     Setting("VISION_LLM_MODEL", "识图模型", "images", "model", "now",
             "看懂你发来的图片用的模型；留空 = 和 Chat 用同一个模型", optional=True),
     Setting("VISION_TIMEOUT_SECONDS", "识图超时（秒）", "images", "float", "now", "", 60.0, 5, 300),
@@ -233,6 +249,9 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_FOLLOW_UP_CHECK", "少追问", "behavior", "bool", "now",
             "你说过不喜欢被追问时，回复仍以提问结尾就重写一次（多一次模型调用）", True),
     Setting("VIOLET_PERSONA_CONTEXT", "人设和生活进入对话", "behavior", "bool", "now", "", True),
+    Setting("VIOLET_AI_NATURAL", "AI 人设用模型本来的说话方式", "behavior", "bool", "now",
+            "开：用 AI 人设时，不再给她“像手机上随手回消息”这类陪聊规则、性格和说话习惯清单，也不加每句话的小提示，"
+            "她用底层模型自己的方式说话（只保留诚实和格式）；关：和其他人设一样", True),
     Setting("VIOLET_PROACTIVE_TOPIC_GUARD", "主动消息避开不该提的话题", "behavior", "bool", "now",
             "主动消息谈到已结束的事、冷却中的话题时不发送", True),
     Setting("VIOLET_PERSONA_REPLY_GUARD", "回复一致性检查", "guard", "choice", "now",
@@ -255,6 +274,8 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_FALLBACK_REPLY", "出错时的兜底回复", "messages", "text", "now",
             "模型整轮失败时发给你的一句话；留空 = 不发（错误仍会记录）",
             "我这边刚刚卡了一下，没接上你的话，你再说一次好不好", optional=True),
+    Setting("VIOLET_NOTICE_VOICE", "通知用她的语气说", "messages", "bool", "now",
+            "要你批准的事、批准后的结果，由她用自己的话告诉你（多一次模型调用；写漏了编号就改发原文）；关：直接发系统写好的原文", True),
     Setting("VIOLET_STARTUP_MESSAGE", "启动通知", "system", "text", "restart",
             "Violet 启动后发给你的一句话；留空 = 不发", "", optional=True),
     Setting("VIOLET_TIMEZONE", "时区", "system", "timezone", "restart",
@@ -287,6 +308,7 @@ COMMON_KEYS = frozenset({
     "VIOLET_LIFE_ENGINE", "VIOLET_DAILY_LIFE", "VIOLET_PROFILE_STORE_SENSITIVE", "VIOLET_COMMITMENT_DEFAULT_TIME",
     "VIOLET_WEB_ENABLED", "VIOLET_SCHEDULE_ENABLED", "VIOLET_SOCIAL_PRIVATE", "VIOLET_SOCIAL_OBEY_OWNER",
     "VIOLET_STICKERS", "VIOLET_QZONE_ENABLED", "VIOLET_TIMEZONE", "VIOLET_UPDATE_MODE", "VIOLET_TRACE",
+    "VIOLET_SOCIAL_INITIATIVE", "VIOLET_AI_NATURAL",                  # 2026-10-30
 })
 GROUPS = {"api": "接口", "models": "模型与 Agent", "prompts": "提示词版本", "messages": "消息发送", "proactive": "主动联系",
           "life": "生活引擎", "behavior": "聊天行为", "memory": "记忆与提醒", "guard": "回复检查", "features": "功能开关",

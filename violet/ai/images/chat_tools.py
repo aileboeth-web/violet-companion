@@ -43,7 +43,7 @@ IMAGE_TOOLS = {"create_image", "edit_image", "look_at_image"}
 SCHEMAS = [
     {"type": "function", "function": {
         "name": "create_image",
-        "description": ("只有用户明确想看图时才用。subject=violet：画 Violet 自己，scene 用 current（此刻，按已记录的生活）、"
+        "description": ("画一张图发给对方：对方想看图，或者你觉得这时候配一张图很合适时用（一次最多一张）。subject=violet：画 Violet 自己，scene 用 current（此刻，按已记录的生活）、"
                         "life_event（已发生的生活事件，需 life_event_id）或 hypothetical（用户想象的画面，会标为想象）；"
                         "subject=other：画用户要的其他东西。结果是 AI 生成的插画，不是照片。"),
         "parameters": {"type": "object", "properties": {
@@ -70,6 +70,11 @@ SCHEMAS = [
             "image_number": {"type": "integer"}, "question": {"type": "string"}},
             "required": ["image_number", "question"]}}},
 ]
+
+
+def image_self_decide() -> bool:
+    from ai.settings import env_bool
+    return env_bool("VIOLET_IMAGE_SELF_DECIDE", True)
 
 
 def _deny(code: str, message: str) -> str:
@@ -99,7 +104,10 @@ class ImageToolGuard:
     def __init__(self, db, user_message: str):
         self.db = db
         self.user_message = user_message or ""
-        self.requested = bool(IMAGE_REQUEST_RE.search(self.user_message))
+        # 2026-10-30 (user: free tool use; "生图发不出来"): she decides herself when a picture fits
+        # (VIOLET_IMAGE_SELF_DECIDE, on); the per-turn limit and the daily budget still apply. Off: the user's words
+        # in this turn must ask for a picture, as before
+        self.requested = image_self_decide() or bool(IMAGE_REQUEST_RE.search(self.user_message))
         self.max_calls = env_int("VIOLET_IMAGE_MAX_PER_TURN", 1)
         self.calls = 0
         self.asset_ids: list[int] = []
@@ -159,6 +167,8 @@ class CompositeGuard:
                 extras["web_finding_ids"] = list(guard.finding_ids)
             if isinstance(guard, ImageToolGuard):
                 extras["image_asset_ids"] = list(guard.asset_ids)
+            if hasattr(guard, "sticker_ids"):                 # 2026-10-30: ai/sticker_tools.StickerGuard
+                extras["sticker_ids"] = list(guard.sticker_ids)
         return extras
 
     def get(self, cls):

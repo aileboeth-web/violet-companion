@@ -76,6 +76,9 @@ class SocialEngine:
                 adapter = qzone._qq(self.runtime)
                 if adapter is not None and adapter.is_running():
                     stickers.sync_qq(self.db, adapter)
+                self.initiative_tick()
+            except Exception:                               # noqa: BLE001 -- the next round tries again
+                logger.exception("social background round failed")
             finally:
                 self.start_posting(interval)
         if self._post_timer is not None:
@@ -84,6 +87,39 @@ class SocialEngine:
         timer.daemon = True
         self._post_timer = timer
         timer.start()
+
+    def initiative_tick(self, rand=None) -> list[int]:
+        """2026-10-30 (user: "在群里面只会有人发言之后才会冒泡"): in a group set to 自己决定 that has gone quiet, she
+        is sometimes asked whether she wants to say something herself -- start a topic, share something, pick an old
+        one up. The model decides (mostly silent); the group's daily limits apply. Not at night, not in a group nobody
+        has spoken in for days, not right after she spoke. VIOLET_SOCIAL_INITIATIVE (on),
+        VIOLET_SOCIAL_INITIATIVE_CHANCE (0.3 per ~25-minute round). Returns the groups asked."""
+        import random
+        from ai import test_mode
+        if not env_bool("VIOLET_SOCIAL_INITIATIVE", True) or test_mode.active():
+            return []
+        rand = rand or random.random
+        now = datetime.fromisoformat(self.db.now()[:19])
+        if not 9 <= now.hour < 23:
+            return []
+        chance = max(0.0, min(1.0, env_float("VIOLET_SOCIAL_INITIATIVE_CHANCE", 0.3)))
+        asked = []
+        for conv in self.db.fetch_all("SELECT id FROM social_conversations WHERE kind = 'group' AND mode = 'auto'"):
+            row = self.db.fetch_one("SELECT MAX(created_at) AS last_any, MAX(CASE WHEN is_self = 1 THEN created_at END) "
+                                    "AS last_self FROM social_messages WHERE conversation_id = ?", (conv["id"],))
+            last_any, last_self = (row or {}).get("last_any"), (row or {}).get("last_self")
+            if not last_any:
+                continue
+            quiet = now - datetime.fromisoformat(str(last_any)[:19])
+            if quiet < timedelta(minutes=15) or quiet > timedelta(days=3):
+                continue                                  # people are talking (the normal flow), or a dead group
+            if last_self and now - datetime.fromisoformat(str(last_self)[:19]) < timedelta(minutes=90):
+                continue
+            if rand() >= chance:
+                continue
+            asked.append(conv["id"])
+            self.schedule(conv["id"], delay=1.0, trigger="idle")
+        return asked
 
     # -- receiving --------------------------------------------------------------------------------------------------
     def receive(self, adapter, *, kind: str, peer_id: str, sender_id: str, sender_name: str | None, text: str,
@@ -223,7 +259,7 @@ class SocialEngine:
             self.store.update(conversation_id, next_wake_at=None)
         unread = self.store.unread(conv)
         newest = max([m["id"] for m in self.store.messages(conversation_id, limit=1)] or [conv["watermark"]])
-        if not unread and trigger != "wake":
+        if not unread and trigger not in ("wake", "idle"):
             return None
         if conv["mode"] == "observe":
             self.store.advance(conversation_id, newest)

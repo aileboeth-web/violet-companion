@@ -601,8 +601,8 @@ def _run_pipeline(
     errors: dict[str, str] = {}
 
     # Step 0 (phase 9.2): the external tools that are really available now -- Intent decides with this list
-    from ai.tool_manager import (Catalog, chat_note, direct_note, direct_tools, discover, intent_note, plan_for_turn,
-                                 tool_results_from)
+    from ai.tool_manager import (Catalog, abilities_note, chat_note, direct_note, direct_tools, discover, intent_note,
+                                 plan_for_turn, tool_results_from)
     try:
         catalog = discover()
     except Exception:
@@ -698,7 +698,7 @@ def _run_pipeline(
                原因=plan.get("reason"), 缺少=plan.get("missing"),
                说明="提醒 / 遗忘请求这一轮不用工具" if reminder is not None or forget is not None else None)
     new_task = intent_json["route"] == "task" and intent_json.get("active_task_id") is None
-    if plan["mode"] in ("chat", "blocked") and new_task:
+    if plan["mode"] in ("chat", "blocked", "direct") and new_task:
         intent_json = {**intent_json, "route": "chat", "route_override": f"tool_{plan['mode']}"}
     elif plan["mode"] == "performer" and intent_json["route"] != "task":
         intent_json = {**intent_json, "route": "task", "route_override": "tool_performer", "active_task_id": None,
@@ -772,6 +772,8 @@ def _run_pipeline(
         # Intent's tool_query still makes the named one come first. Off: VIOLET_CHAT_TOOLS_DIRECT=0 (only when planned)
         "direct_tools": direct,
         "tool_results": tool_results_from((performer_result or {}).get("messages") or []),
+        # 2026-10-30: one list, written by the code, of what she can do now and how (and what not, and why)
+        "abilities_note": abilities_note(catalog, direct),
     }
     try:
         chat_result = chat_agent.run(user_message, call_context=chat_context)
@@ -1302,3 +1304,31 @@ def run_commitment_pipeline(commitment: dict[str, Any], chat_agent) -> dict[str,
         "used_fallback": True,
         "error": error or ("generated text did not mention the reminder" if payload.get("should_send") else "no text generated"),
     }
+
+
+def run_notice_pipeline(note: str, chat_agent, must_say: list[str] | None = None) -> dict[str, Any]:
+    """2026-10-30 (user: the fixed texts did not sound like her): something the code has to tell the owner -- an
+    approval's outcome, a request to approve -- written by the Chat agent in her own voice from this note. Falls back
+    to the note itself when generation fails, declines, or leaves out a must-say piece (e.g. "同意 3").
+    VIOLET_NOTICE_VOICE=0: always the plain note."""
+    from ai.channels.outbound import chat_payload, fixed_text
+    if not env_bool("VIOLET_NOTICE_VOICE", True) or chat_agent is None:
+        return {"messages": fixed_text(note), "used_fallback": True, "error": None}
+    decision = {"action_type": "notice", "reason": "系统要告诉主人一件事（不是用户消息）",
+                "chat_brief": {"topic": note, "must_say": list(must_say or [])}}
+    error, text = None, ""
+    try:
+        result = chat_agent.run("[notice]", call_context={
+            "is_proactive": True, "proactive_result": decision, "commitment": None,
+            "proactive_note": ("【要告诉主人的事】" + note + "\n用你平常和主人说话的方式说出来，一两条消息就够；"
+                               "事实（做没做成、编号、结果）一个字都不能改，也不要添没发生的事。"
+                               + ("其中必须原样包含：" + "、".join(must_say) if must_say else ""))})
+        text = result.get("content", "")
+    except Exception as exc:                                  # noqa: BLE001 -- the plain note still goes out
+        error = f"{exc.__class__.__name__}: {exc}"
+        logger.warning("notice: chat generation failed: %s", error)
+    payload = chat_payload(text if isinstance(text, str) else "", images=False)
+    joined = "".join(m.get("content") or "" for m in payload.get("messages", []))
+    if payload.get("should_send") and all(piece in joined for piece in must_say or []):
+        return {"messages": payload["messages"], "used_fallback": False, "error": error}
+    return {"messages": fixed_text(note), "used_fallback": True, "error": error or "no usable text generated"}

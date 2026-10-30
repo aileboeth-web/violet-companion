@@ -128,10 +128,14 @@ def build_reply(pipeline: dict[str, Any] | None, turn_key: str | None = None) ->
     """The reply of one turn. Reads ``pipeline["chat"]["content"]`` (a string) and nothing else."""
     chat = (pipeline or {}).get("chat") or {}
     content = chat.get("content") if isinstance(chat.get("content"), str) else ""
-    if chat.get("failed") or (pipeline or {}).get("should_reply") is False:
+    blocked = bool(chat.get("failed") or (pipeline or {}).get("should_reply") is False)
+    if blocked:
         content = ""
     payload = normalize_chat_output(content)
     payload = attach_images(payload, chat.get("image_asset_ids") or [], turn_key=turn_key)
+    if not blocked and not payload.get("declined"):   # a failed / declined reply sends nothing, not even the sticker
+        from ai.chat_output import attach_stickers
+        payload = attach_stickers(payload, chat.get("sticker_ids"))
     return envelope_from_payload(payload)
 
 

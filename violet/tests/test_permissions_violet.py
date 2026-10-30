@@ -28,7 +28,7 @@ def told(monkeypatch):
 
 def test_levels(data_dir):
     from ai import permissions
-    assert permissions.levels() == {"qzone_post": "self", "risky_tools": "forbid"}
+    assert permissions.levels() == {"qzone_post": "self", "risky_tools": "ask"}       # 2026-10-30: ask (was forbid)
     assert permissions.set_level("qzone_post", "ask")["qzone_post"] == "ask"
     with pytest.raises(ValueError):
         permissions.set_level("qzone_post", "maybe")
@@ -89,8 +89,9 @@ def test_qzone_ask_first_and_forbid(db, data_dir, told, monkeypatch):
     assert "不允许" in qzone.due(db)
 
 
-def test_the_owner_answers_in_the_chat_without_a_model_call(make_world, data_dir, told):
+def test_the_owner_answers_in_the_chat_without_a_model_call(make_world, data_dir, told, monkeypatch):
     from ai import permissions
+    monkeypatch.setenv("VIOLET_NOTICE_VOICE", "0")          # the plain outcome (in her voice: test_free_tools_violet)
     w = make_world()
     w.db.execute("DELETE FROM approvals")
     permissions.register("test_ability", lambda d, payload: "已经帮你关好了")
@@ -108,13 +109,15 @@ def test_risky_tools_wait_for_the_owner(db, data_dir, told, monkeypatch):
     from ai import mcp, permissions
     db.execute("DELETE FROM approvals")
     server = {"name": "phone", "tools": {"torch_on": "write"}}
+    permissions.set_level("risky_tools", "forbid")
     assert permissions.tool_needs_approval(server, "phone", "torch_on", "write") is False      # forbid: hidden
     permissions.set_level("risky_tools", "ask")
     assert permissions.tool_needs_approval(server, "phone", "torch_on", "write") is True
     assert permissions.tool_needs_approval(server, "phone", "battery", "read") is False
     assert permissions.tool_needs_approval({**server, "allow_tools": ["torch_on"]}, "phone", "torch_on", "write") is False
     text = json.loads(permissions.ask_for_tool(db, "phone__torch_on", {"level": 1}))
-    assert text["error_code"] == "NEEDS_APPROVAL" and "phone__torch_on" in told[-1]
+    assert text["error_code"] == "NEEDS_APPROVAL" and f"同意 {text['approval']}" in text["message"]
+    assert told == [] and permissions.pending(db)[0]["id"] == text["approval"]     # 2026-10-30: asked in her reply
     calls = []
 
     class Bridge:

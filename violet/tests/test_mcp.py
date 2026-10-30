@@ -28,6 +28,11 @@ def _fast_timeouts(monkeypatch):
     monkeypatch.setenv("MCP_CONNECT_TIMEOUT_SECONDS", "2")
     monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "2")
     monkeypatch.delenv("MCP_ALLOWED_RISKY_TOOLS", raising=False)
+    # the strict allowlist these tests are about (2026-10-30 default: unclassified tools get a level from their hints,
+    # see tests/test_free_tools_violet.py)
+    monkeypatch.setenv("VIOLET_MCP_AUTO_CLASSIFY", "0")
+    from ai import permissions                     # and write tools hidden, as before "先问你" became the default
+    monkeypatch.setattr(permissions, "level", lambda ability: "forbid")
     mcp_module.reset_registry()
 
 

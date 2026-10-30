@@ -232,6 +232,17 @@ VIOLET_SCHEDULE_ENABLED=0
 # 查询工具直接交给回复：1 = 每一轮都把连上的只读工具（联网、课表、手机状态等）交给 Chat，它自己决定查不查；
 # 0 = 只在意图识别判断要查时才给（以前的做法）
 VIOLET_CHAT_TOOLS_DIRECT=1
+# 2026-10-30 自由用工具：会改动东西的工具也由 Chat 直接调用（没放行的每次先问主人）；一次回复最多几轮工具；
+# 没分类的 MCP 工具按它自己的 readOnlyHint 处理（0 = 藏起来）；她自己决定什么时候画图；AI 人设用模型本来的说话方式；
+# 批准请求 / 结果用她的语气说；“自己决定”的群冷场时她可能自己起话题（每轮约 25 分钟的概率）
+VIOLET_CHAT_ACTION_TOOLS=1
+VIOLET_CHAT_MAX_TOOL_ROUNDS=6
+VIOLET_MCP_AUTO_CLASSIFY=1
+VIOLET_IMAGE_SELF_DECIDE=1
+VIOLET_AI_NATURAL=1
+VIOLET_NOTICE_VOICE=1
+VIOLET_SOCIAL_INITIATIVE=1
+VIOLET_SOCIAL_INITIATIVE_CHANCE=0.3
 VIOLET_SCHEDULE_TOOL_TIMEOUT_SECONDS=10
 # 哪些个人字段可以在对方明确问到时返回（地点 / 老师 / 考试座位号）；去掉某项就永远不返回
 VIOLET_SCHEDULE_DETAIL_FIELDS=location,teacher,seat

@@ -28,7 +28,7 @@ def test_chat_gets_the_read_only_tools_without_intent_asking(make_world, monkeyp
     w, chats = world(make_world, monkeypatch, campus_server(), intent=lambda kw: intent_json("chat"), chat=chat)
     say(w, "今天杭州什么天气")
     assert sorted(offered(chats[0])) == sorted([SCHEDULE, WEATHER, SEARCH]) and chats[0]["tool_choice"] == "auto"
-    assert "【可以用的工具】" in system(chats[0])
+    assert "【工具怎么用】" in system(chats[0])
     assert w.client.sent_texts[-1] == "杭州今天可能下小雨"
 
 
@@ -46,7 +46,7 @@ def test_the_old_way_is_one_switch_away(make_world, monkeypatch):
     monkeypatch.setenv("VIOLET_CHAT_TOOLS_DIRECT", "0")
     w, chats = world(make_world, monkeypatch, campus_server(), intent=lambda kw: intent_json("chat"))
     say(w, "今天好累啊")
-    assert not offered(chats[0]) and "【可以用的工具】" not in system(chats[0])
+    assert not offered(chats[0]) and "【工具怎么用】" not in system(chats[0])
 
 
 def test_usage_ledger_numbers_and_summary(violetdb):

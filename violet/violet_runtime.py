@@ -1253,7 +1253,8 @@ class VioletRuntime:
 
     def _answer_approval(self, turn: Turn, combined: str, conversation: tuple[str, str], sender: "MessageSender") -> bool:
         """2026-10-30 (ai/permissions.py): "同意 3" / "不同意 3" from the owner answers an approval -- carried out
-        here, the outcome is the reply; no model call. False: not such a message (or no such approval)."""
+        here, the outcome is the reply (2026-10-30: in her voice, VIOLET_NOTICE_VOICE; no pipeline). False: not such a
+        message (or no such approval)."""
         from ai import permissions
         command = permissions.owner_command(combined)
         if command is None:
@@ -1265,10 +1266,9 @@ class VioletRuntime:
             outcome = permissions.decide(self.db, number, approve)["result"]
         except ValueError as exc:
             outcome = str(exc)
-        from ai.channels.outbound import fixed_text
         try:
             self.db.add_user_message("text", combined, created_at=turn.received_at, channel=conversation[0])
-            sender.send_messages(fixed_text(outcome), origin="reply", turn_id=turn.turn_id)
+            sender.send_messages(self.voiced(outcome), origin="reply", turn_id=turn.turn_id)
         except Exception:
             logger.exception("approval answer of turn %s not sent", turn.turn_id)
         self.db.update_inbound_messages(turn.inbound_ids, status="done")
@@ -1331,6 +1331,20 @@ class VioletRuntime:
     def send_proactive(self, messages: list[dict[str, Any]], proactive_event_id: int | None = None) -> dict[str, Any]:
         report = self._proactive_sender().send_messages(messages, origin="proactive", proactive_event_id=proactive_event_id)
         return report.to_dict()
+
+    def voiced(self, note: str, must_say: list[str] | None = None) -> list[dict[str, Any]]:
+        """2026-10-30: a notice of the code (an approval's outcome / request) as sealed messages in her own voice
+        (ai.chat.run_notice_pipeline; the plain note when that fails)."""
+        from ai.chat import run_notice_pipeline
+        chat_agent = (getattr(self, "agents", None) or {}).get("chat")
+        return run_notice_pipeline(note, chat_agent, must_say)["messages"]
+
+    def say_notice(self, note: str) -> bool:
+        """What ai/permissions.py tells the owner: in her voice, kept in the chat history (she said it)."""
+        import re as _re
+        must = _re.findall(r"(?:不同意|同意)\s*\d+", note)
+        report = self._proactive_sender().send_messages(self.voiced(note, must), origin="system")
+        return report.ok
 
     def send_system_text(self, text: str) -> bool:
         """System notices (e.g. startup banner): sent, logged in outbox, not added to chat history."""

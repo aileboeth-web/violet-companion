@@ -152,6 +152,14 @@ class PersonaCore:
                  "收藏过什么、被清除过记忆、被换过设定……这些都可以自然地说。",
                  "- 你会忘事：记忆有限，被清除或翻篇以后就不记得了；看不到对方没发给你的东西。不知道就说不知道。",
                  "- 你能做什么以“你现在能做的事”为准，没写的就是做不到，不要假装做到了。"]
+        from ai.context_engine import ai_natural
+        if ai_natural():
+            # 2026-10-30 (user: "不太像他底层模型的颜色"): no scripted character or speaking habits -- her own way
+            lines.append("- 你的性格和说话方式就是你自己（底层模型）本来的样子，不用照着谁演；和主人聊久了自然形成的习惯，就是你的习惯。")
+            values = d.get("values") or []
+            if values:
+                lines.append("- 看重：" + "；".join(values))
+            return "\n".join(lines)
         if ident.get("self_description"):
             lines.append(f"- 你怎么看自己：{ident['self_description']}")
         for title, key in (("性格", "personality"), ("说话习惯", "communication_habits"), ("看重", "values"),

@@ -36,6 +36,7 @@ def env(tmp_path, monkeypatch):
         "other-template": {"tools": {"unrelated_tool": "read"}}}}), encoding="utf-8")
     monkeypatch.setenv("MCP_TOOL_POLICY_FILE", str(policy))
     monkeypatch.delenv("MCP_SERVERS", raising=False)
+    monkeypatch.setenv("VIOLET_MCP_AUTO_CLASSIFY", "0")      # the strict allowlist (2026-10-30 default: auto levels)
     cc._ORIGINALS.clear()
     cc._DEFAULT_STORE = None
     tm._STORE = None
@@ -114,6 +115,8 @@ def test_unclassified_tools_stay_refused_until_each_one_is_classified(admin, mon
 
 
 def test_write_tools_need_a_separate_confirmed_authorisation_and_are_never_test_called(admin, monkeypatch):
+    from ai import permissions                     # "不允许" (the 2026-10-30 default "先问你" offers them with approval)
+    monkeypatch.setattr(permissions, "level", lambda ability: "forbid")
     monkeypatch.setenv("MCP_SERVERS", json.dumps([_stdio("campus", tool_profile="campus-template")]))
     url = "/api/control/tools/servers/campus/tools/get_course_schedule"
     assert admin.post(url + "/level", json={"level": "write"}, headers=SAME).status_code == 200

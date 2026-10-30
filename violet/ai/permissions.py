@@ -9,7 +9,8 @@ Every ability with consequences has one of three levels, set on the settings pag
 
   qzone_post    posting on QQ 空间 by herself (the "发 QQ 动态" switch still has to be on)       default self
   risky_tools   MCP tools that change something (write / high risk), beyond the ones allowed one by one on the
-                tools page (those always run). ask: they are offered too, every call waits for the owner. default forbid
+                tools page (those always run). ask: they are offered too, every call waits for the owner.
+                default ask (2026-10-30, user: "比较自由调用工具"; was forbid)
 
 An approval expires after 24 hours. Carrying it out is the ability's handler (registered here); the outcome goes
 back to the owner through the runtime's system message.
@@ -45,7 +46,7 @@ LEVELS = {"self": "自己做", "ask": "先问你", "forbid": "不允许"}
 ABILITIES = {
     "qzone_post": ("自己发 QQ 动态", "她觉得想发时就发（还要打开“发 QQ 动态”）。先问你：她会私聊你要发的内容，你同意才发。", "self"),
     "risky_tools": ("会改动东西的工具", "手机上的操作这类“写入 / 高风险”的工具（工具页里单独放行的那些照常直接用）。"
-                    "先问你：这些工具她都能用，但每次调用都要你同意；不允许：只有单独放行的能用。", "forbid"),
+                    "先问你：这些工具她都能用，但每次调用都要你同意；不允许：只有单独放行的能用。", "ask"),
 }
 EXPIRE_HOURS = 24
 COMMAND_RE = re.compile(r"^\s*(同意|批准|可以|好的?|不同意|拒绝|不要|不行|算了)\s*#?(\d{1,6})\s*$")
@@ -103,11 +104,16 @@ def attach_runtime(runtime) -> None:
 
 
 def _tell_owner(text: str) -> None:
+    """2026-10-30: said in her own voice when the runtime can (VioletRuntime.say_notice: the Chat agent writes it from
+    this note, the plain text is the fallback)."""
     rt = _RUNTIME.get("rt")
     if rt is None:
         return
     try:
-        rt.send_system_text(text)
+        if hasattr(rt, "say_notice"):
+            rt.say_notice(text)
+        else:
+            rt.send_system_text(text)
     except Exception:                                    # noqa: BLE001
         logger.exception("could not tell the owner about an approval")
 
@@ -195,10 +201,13 @@ def tool_needs_approval(server: dict[str, Any], server_name: str, tool_name: str
 def ask_for_tool(db, full_name: str, arguments: dict[str, Any]) -> str:
     """The tool result the model gets instead of running the tool: it waits for the owner."""
     args = json.dumps(arguments, ensure_ascii=False)
-    number = request(db, "risky_tools", f"我想用工具 {full_name}（参数 {args[:200]}）", {"tool": full_name, "arguments": arguments})
+    # 2026-10-30: the reply she is writing asks for it in her own words (no second, technical system message)
+    number = request(db, "risky_tools", f"我想用工具 {full_name}（参数 {args[:200]}）", {"tool": full_name, "arguments": arguments},
+                     tell=False)
     return json.dumps({"ok": False, "error_code": "NEEDS_APPROVAL", "approval": number,
-                       "message": f"这个操作要主人同意才会执行（已经请主人批准，编号 {number}）。现在还没有执行，告诉对方要等主人同意，"
-                                  "不要说已经做了。"}, ensure_ascii=False)
+                       "message": (f"这个操作要主人同意才会执行，现在还没有执行（请求编号 {number}）。在回复里用你自己的话说清楚你想做什么，"
+                                   f"并告诉主人：回复“同意 {number}”你就去做，回复“不同意 {number}”就不做。不要说已经做了。"
+                                   "对方不是主人时，就说这件事要等主人同意。")}, ensure_ascii=False)
 
 
 def _run_tool(db, payload: dict[str, Any]) -> str:
@@ -221,7 +230,7 @@ def _run_tool(db, payload: dict[str, Any]) -> str:
     code, message = tool_outcome(text)
     if code != "ok":
         raise RuntimeError(message or code)
-    return f"做好了（{name}）。结果：{text[:300]}"
+    return f"主人同意后你用工具 {name} 做好了，工具返回：{text[:600]}"
 
 
 register("risky_tools", _run_tool)

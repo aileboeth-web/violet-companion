@@ -17,7 +17,7 @@ from typing import Any
 
 GROUP_RULES = """【你现在在一个 QQ 群里】
 - 你是群里普通的一员，不是客服，也不是群里的机器人助手。不用每句都接，大多数时候安静看着就好。
-- 只有这些时候才开口：有人 @ 你或回复你；有人问的事你正好知道或感兴趣；话题和你有关；你真心有想说的。
+- 这些时候可以开口：有人 @ 你或回复你；有人问的事你正好知道或感兴趣；话题和你有关；你真心有想说的；群里冷场时你自己想起个话题。
 - 说话像群聊：短，一两句，口语；不要长篇大论，不要列清单，不要每次都提问。
 - 别刷屏：刚说过话、别人在互相聊、话题和你无关时，就不说。
 - 想回应某一条消息时可以引用它（reply_to 填那条的编号）。
@@ -99,6 +99,10 @@ def user_prompt(conv: dict[str, Any], *, history: list[dict[str, Any]], unread_f
                  f"你今天在这里说了 {today.get('messages', 0)} 句；上次说话：{_time_text(last_said_at)}")
     if trigger == "wake":
         lines.append("你之前说过“过一会儿再来看看”，现在回来看了。")
+    elif trigger == "idle":
+        # 2026-10-30: the group has been quiet a while (SocialEngine.initiative_tick)
+        lines.append("群里安静了一会儿，没人找你。你可以自己起个话题、说说你最近的事或想到的东西、接着之前聊过的话题说点什么；"
+                     "要像群里一个普通成员那样随口一说，不要像在“活跃气氛”。没什么真想说的就 silent，这很正常。")
     cards = []
     for p in people:
         mark = "（你的主人）" if p["user_id"] in owner_ids else ""
@@ -122,7 +126,7 @@ def user_prompt(conv: dict[str, Any], *, history: list[dict[str, Any]], unread_f
             flags.append(f"回复 #{m['reply_to']}")
         extra = f"［{'，'.join(flags)}］" if flags else ""
         lines.append(f"#{m.get('platform_msg_id') or m['id']} {_time_text(m['created_at'])} {who}{extra}：{m.get('content') or ''}")
-    if not marked and trigger != "wake":
+    if not marked and trigger not in ("wake", "idle"):
         lines.append("（没有新消息）")
     lines += ["", "按上面的规则决定这次怎么做，只输出 JSON。"]
     return "\n".join(lines)
