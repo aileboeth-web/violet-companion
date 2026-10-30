@@ -276,6 +276,8 @@ VIOLET_SOCIAL_OWNER_DIGEST=1
 VIOLET_STICKERS=1
 # 你在 QQ 上发给她的表情包自动收藏
 VIOLET_STICKER_AUTO_COLLECT=1
+# QQ 登录后和每 6 小时：这个 QQ 号自己收藏的表情放进她的收藏，分批写说明（她只用有说明的）
+VIOLET_STICKER_QQ_SYNC=1
 # 群里 / 别人私聊发来没见过的表情包时用识图模型看一眼（同一个只看一次）
 VIOLET_STICKER_LOOK=1
 # 发 QQ 动态（QQ 空间说说）：9:00–23:00，两条至少隔 4 小时，只写她自己的生活

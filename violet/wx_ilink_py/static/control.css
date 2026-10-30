@@ -162,7 +162,9 @@ code{background:var(--panel-hover);border:1px solid var(--line);border-radius:7p
 .social .social-conv select{width:auto;min-width:170px}
 .social input.limit{width:110px}
 .social .decision{border-left:3px solid var(--line-strong);padding:4px 0 4px 10px;margin:6px 0}
-.social .person{border-bottom:1px solid var(--line);padding:6px 0}
+.social .people{max-width:900px}
+.social .person{border-bottom:1px solid var(--line);padding:10px 0;gap:8px;max-width:none}
+.social .person textarea{width:100%;min-height:58px;resize:vertical;line-height:1.6;overflow:hidden}
 #ch-extra:empty,#ch-social:empty{display:none}
 #tab-channels > label.inline{margin:6px 0 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 #tab-channels > label.inline select{width:auto;min-width:220px;max-width:100%}
@@ -262,9 +264,13 @@ pre.note{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%}   /* phase 
 .wx-qr-wrap{display:flex;flex-wrap:wrap;gap:18px;align-items:center}
 .wx-qr-wrap .stack{align-items:flex-start;flex:1;min-width:220px}
 .wx-qr{width:180px;height:180px;border-radius:14px;background:#fff;padding:8px;box-shadow:var(--shadow);animation:pop .3s both}
-.qq-screen-box{max-width:100%;max-height:560px;overflow:auto;border-radius:10px}
-.qq-screen{display:block;max-width:100%;height:auto;border-radius:10px;border:1px solid var(--line);cursor:pointer;background:#000}
-.qq-screen.full{max-width:none}
+.qq-preview-frame{display:flex;align-items:center;justify-content:center;width:100%;height:300px;padding:10px;
+  border-radius:14px;background:#1d1a26;border:1px solid var(--line-strong);cursor:zoom-in;box-shadow:none}
+.qq-preview-frame:hover{transform:none;border-color:var(--accent,#8b5cf6)}
+.qq-preview{display:block;max-width:100%;max-height:100%;object-fit:contain;border-radius:6px}
+dialog.qq-window-dialog{width:min(1100px,96vw)}
+.qq-live-box{display:flex;justify-content:center;background:#1d1a26;border-radius:14px;padding:10px}
+.qq-live{display:block;max-width:100%;max-height:70vh;object-fit:contain;cursor:crosshair;border-radius:6px}
 .wx-qr-wait{background:linear-gradient(90deg,var(--panel) 25%,var(--panel-hover) 50%,var(--panel) 75%);background-size:200% 100%;
   animation:shimmer 1.2s linear infinite}
 @keyframes shimmer{to{background-position:-200% 0}}

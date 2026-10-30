@@ -62,13 +62,19 @@
     try {
       const d = await api("GET", "/api/control/social/people");
       box.replaceChildren(...(d.people.length ? d.people.map((p) => {
-        const t = h("input", { maxlength: 200, placeholder: "还没有印象" }); t.value = p.impression || "";
-        return h("div", { class: "row person" }, h("strong", { text: p.nickname || p.user_id }),
-          h("span", { class: "note", text: `QQ ${p.user_id} · ${p.message_count} 条 · 最近 ${when(p.last_seen_at)}` }),
-          h("label", { class: "grow" }, t),
-          h("button", { class: "ghost", type: "button", text: "保存印象", onclick: async () => {
+        // the whole impression readable at once: a text box over the full width that grows with the text
+        const t = h("textarea", { maxlength: 400, rows: 2, placeholder: "还没有印象（她自己会慢慢写，你也可以改）", "aria-label": "印象" });
+        t.value = p.impression || "";
+        const fit = () => { t.style.height = "auto"; t.style.height = t.scrollHeight + 2 + "px"; };
+        t.addEventListener("input", fit);
+        requestAnimationFrame(fit);
+        return h("div", { class: "stack person" },
+          h("div", { class: "row" }, h("strong", { text: p.nickname || p.user_id }),
+            h("span", { class: "note", text: `QQ ${p.user_id} · ${p.message_count} 条 · 最近 ${when(p.last_seen_at)}` })),
+          t,
+          h("div", { class: "row" }, h("button", { class: "ghost", type: "button", text: "保存印象", onclick: async () => {
             try { await api("POST", `/api/control/social/people/${p.id}`, { impression: t.value }); toast("已保存"); } catch (e) { toast(e.message, false); }
-          } }));
+          } })));
       }) : [h("p", { class: "note", text: "她还不认识任何人。" })]));
     } catch (e) { box.replaceChildren(h("p", { class: "err", text: e.message })); }
   }
@@ -115,7 +121,7 @@
     let d;
     try { d = await api("GET", "/api/control/social"); } catch (e) { root.replaceChildren(h("p", { class: "err", text: e.message })); return; }
     modes = d.modes;
-    const people = h("div", { class: "stack" }), qzone = h("div", { class: "stack" });
+    const people = h("div", { class: "stack people" }), qzone = h("div", { class: "stack" });
     const groups = [...d.groups].sort((a, b) => (b.mode !== "off") - (a.mode !== "off") || String(a.title).localeCompare(String(b.title)));
     const PRIV = { off: "不理", known: "只回群里认识的人", all: "谁都回" };
     root.replaceChildren(h("div", { class: "set-group social" },

@@ -421,14 +421,17 @@ def test_qq_screen_and_click_routes(admin, tmp_path, monkeypatch):
     (tmp_path / "snowluma.json").write_text(json.dumps({"ws_url": "ws://127.0.0.1:1", "ws_token": "t", "vnc_port": 5,
                                                        "vnc_password": "pw"}), encoding="utf-8")
     clicks = []
-    monkeypatch.setattr(vnc, "screenshot", lambda port, pw: {"png": b"PNG", "x": 1, "y": 2, "width": 3, "height": 4,
-                                                             "screen_width": 9, "screen_height": 9})
+    crops = []
+    monkeypatch.setattr(vnc, "screenshot", lambda port, pw, crop=True: crops.append(crop) or {
+        "png": b"PNG", "x": 1, "y": 2, "width": 3, "height": 4, "screen_width": 9, "screen_height": 9})
     monkeypatch.setattr(vnc, "click", lambda port, pw, x, y: clicks.append((port, pw, x, y)))
     monkeypatch.setattr(vnc, "reachable", lambda port: True)
     from ai.channels import snowluma
     monkeypatch.setattr(snowluma, "probe_login", lambda info: None)
     d = admin.get("/api/control/qq/screen").get_json()["data"]
     assert d["image"] == "data:image/png;base64,UE5H" and d["x"] == 1 and "png" not in d
+    admin.get("/api/control/qq/screen?full=1")
+    assert crops == [True, False]                                  # the enlarged view may ask for the whole screen
     assert admin.post("/api/control/qq/click", json={"x": 10, "y": 20}, headers=SAME).status_code == 200
     assert clicks == [(5, "pw", 10, 20)]
     assert admin.post("/api/control/qq/click", json={"x": "a"}, headers=SAME).status_code == 400

@@ -217,14 +217,16 @@ def png(pixels: bytes, width: int, box: tuple[int, int, int, int]) -> bytes:
             + chunk(b"IDAT", zlib.compress(bytes(raw), 6)) + chunk(b"IEND", b""))
 
 
-def screenshot(port: int, password: str, timeout: float = 8.0, session_factory=Session) -> dict[str, Any]:
+def screenshot(port: int, password: str, timeout: float = 8.0, session_factory=Session,
+               crop: bool = True) -> dict[str, Any]:
+    """The screen cut down to QQ's windows (crop=False: all of it)."""
     try:
         with session_factory(port, password, timeout=timeout) as s:
             pixels = s.frame(wait=timeout)
             width, height = s.width, s.height
     except OSError as exc:
         raise VNCError(f"连不上 QQ 窗口（{exc.__class__.__name__}）：QQ 可能还在启动") from None
-    box = content_box(pixels, width, height)
+    box = content_box(pixels, width, height) if crop else (0, 0, width, height)
     return {"png": png(pixels, width, box), "x": box[0], "y": box[1], "width": box[2] - box[0],
             "height": box[3] - box[1], "screen_width": width, "screen_height": height}
 

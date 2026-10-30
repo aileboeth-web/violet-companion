@@ -167,6 +167,8 @@ SETTINGS: list[Setting] = [
             "她可以从自己收藏的表情包里挑一个发（和你聊天、在群里都可以）；收藏在“图片”页管理", True),
     Setting("VIOLET_STICKER_AUTO_COLLECT", "收藏你发的表情包", "social", "bool", "now",
             "你在 QQ 上发给她的表情包自动存进她的收藏（用识图结果当说明）", True),
+    Setting("VIOLET_STICKER_QQ_SYNC", "用 QQ 号收藏的表情", "social", "bool", "now",
+            "QQ 登录后和之后每 6 小时，把这个 QQ 号自己收藏的表情放进她的收藏，并用识图模型分批写好说明（她只会用有说明的表情包）", True),
     Setting("VIOLET_STICKER_LOOK", "看别人发的表情包", "social", "bool", "now",
             "群里或别人私聊发来没见过的表情包时，用识图模型看一眼（同一个表情包只看一次；会用识图模型）", True),
     Setting("VIOLET_QZONE_ENABLED", "发 QQ 动态", "social", "bool", "now",

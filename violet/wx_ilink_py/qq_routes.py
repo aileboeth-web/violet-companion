@@ -3,7 +3,7 @@ Violet's social life (2026-10-29). Behind the admin authentication like every ro
 
   GET  /api/control/qq                        installed? logged in (and as whom), the channel, the install progress
   POST /api/control/qq/<install|uninstall|restart>   root task (one-click install from the page)
-  GET  /api/control/qq/screen                 QQ's window as a PNG data URL (the QR code is scanned there) + where it is
+  GET  /api/control/qq/screen[?full=1]        QQ's window (full=1: the whole screen) as a PNG data URL + where it is
   POST /api/control/qq/click                  {x, y}: a click in QQ's window (screen coordinates)
   GET  /api/control/social                    groups (QQ's list + what Violet stored), private chats, settings
   POST /api/control/social/conversation/<id>  {mode, daily_message_limit, daily_decision_limit, notes}
@@ -96,7 +96,8 @@ def register_qq_routes(app: Flask, violetdb, runtime) -> None:
         if info is None:
             return bad("还没有安装 QQ（SnowLuma）")
         try:
-            shot = vnc.screenshot(int(info["vnc_port"]), str(info.get("vnc_password") or ""))
+            shot = vnc.screenshot(int(info["vnc_port"]), str(info.get("vnc_password") or ""),
+                                  crop=request.args.get("full") != "1")
         except vnc.VNCError as exc:
             return bad(str(exc), 503)
         image = "data:image/png;base64," + base64.b64encode(shot.pop("png")).decode("ascii")
@@ -296,29 +297,13 @@ def register_qq_routes(app: Flask, violetdb, runtime) -> None:
     @app.post("/api/control/stickers/import-qq")
     def control_sticker_import():
         from ai import stickers
-        from ai.channels.base import Part
         a = adapter()
         if a is None or not a.is_running():
             return bad("QQ 没有连接")
-        try:
-            urls = a.favourite_stickers()
+        try:                                         # the rest of the descriptions: the automatic sync (6 hours)
+            return ok(stickers.import_qq(violetdb, a, describe_limit=8))
         except Exception as exc:                     # noqa: BLE001
             return bad(f"读不到 QQ 收藏的表情：{exc}")
-        added, failed, described = 0, 0, 0
-        for url in urls[:48]:
-            try:
-                before = violetdb.fetch_one("SELECT COUNT(*) AS n FROM stickers")["n"]
-                row = stickers.add_file(violetdb, a.download(Part("image", "", {"url": url})), source="qq")
-                if violetdb.fetch_one("SELECT COUNT(*) AS n FROM stickers")["n"] > before:
-                    added += 1
-                if not row.get("description") and described < 8:      # the rest: "看一眼" on the page
-                    text = stickers.describe(stickers.path_of(row))
-                    if text:
-                        stickers.update(violetdb, row["id"], description=text)
-                        described += 1
-            except Exception:                        # noqa: BLE001 -- one bad picture does not stop the rest
-                failed += 1
-        return ok({"found": len(urls), "added": added, "failed": failed, "described": described})
 
     @app.post("/api/control/stickers/<int:sticker_id>")
     def control_sticker_update(sticker_id: int):

@@ -64,7 +64,8 @@ class SocialEngine:
         self._post_timer = None
 
     def start_posting(self, interval: float = 1500.0) -> None:
-        """0.7.9: every ~25 minutes she may post on QQ 空间 (ai/social/qzone.py decides whether)."""
+        """0.7.9: every ~25 minutes she may post on QQ 空间 (ai/social/qzone.py decides whether); 2026-10-30: and the
+        QQ account's favourite stickers are synced when it is time (stickers.sync_qq, every 6 hours)."""
         import random
 
         def run():
@@ -72,6 +73,9 @@ class SocialEngine:
             self._post_timer = None
             try:
                 qzone.tick(self.runtime)
+                adapter = qzone._qq(self.runtime)
+                if adapter is not None and adapter.is_running():
+                    stickers.sync_qq(self.db, adapter)
             finally:
                 self.start_posting(interval)
         if self._post_timer is not None:

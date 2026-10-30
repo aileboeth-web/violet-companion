@@ -84,7 +84,9 @@
     }, 3000);
   }
   function statusLine(ch) {
-    return h("p", { class: "note", text: fmt(ch.status.detail) + (ch.status.last_error ? `（最近错误：${ch.status.last_error}）` : "") +
+    // an error from before the connection worked (e.g. QQ not logged in yet) is history once it is connected
+    const error = ch.status.state !== "connected" && ch.status.last_error;
+    return h("p", { class: "note", text: fmt(ch.status.detail) + (error ? `（最近错误：${error}）` : "") +
       ` · 收到 ${ch.status.received || 0} · 发出 ${ch.status.sent || 0}` + (ch.status.send_failures ? ` · 发送失败 ${ch.status.send_failures}` : "") });
   }
 
@@ -340,29 +342,59 @@
     catch (e) { toast(e.message, false); return; }
     watchQQ(title);
   }
-  function qqWindow(holder) {                // QQ's window in `holder`; refresh() takes a new picture
-    const img = h("img", { class: "qq-screen", alt: "QQ 窗口" });
-    const box = h("div", { class: "qq-screen-box" }, img);
+  // QQ's window on the server. In the card: a preview that always fits (scan the QR code there; a click enlarges it).
+  // Enlarged (a dialog): the picture as large as the screen allows, refreshed every 3 s; a click on it is a click in
+  // QQ's window (the server maps it back to screen coordinates).
+  async function qqShot(full) {
+    return api("GET", "/api/control/qq/screen" + (full ? "?full=1" : ""));
+  }
+  function qqWindowDialog() {
+    const img = h("img", { class: "qq-live", alt: "QQ 窗口" });
     const note = h("p", { class: "note", text: "正在读取 QQ 窗口…" });
-    let shot = null;
+    const whole = h("input", { type: "checkbox" });
+    let shot = null, timer = null;
     async function refresh() {
+      clearTimeout(timer);
       try {
-        shot = await api("GET", "/api/control/qq/screen");
+        shot = await qqShot(whole.checked);
         img.src = shot.image;
-        // the window could not be cut out (the whole screen came back): real size in a scrolling box, so the QR code
-        // stays big enough for a phone
-        img.classList.toggle("full", shot.width > 720);
-        note.textContent = "这是服务器上 QQ 的窗口，点画面就等于点 QQ 窗口。";
+        note.textContent = "点画面就等于在 QQ 窗口里点一下。画面每 3 秒刷新。";
       } catch (e) { note.textContent = e.message; }
+      if (d.open) timer = setTimeout(refresh, 3000);
     }
     img.addEventListener("click", async (ev) => {
       if (!shot) return;
       const r = img.getBoundingClientRect();
       const x = Math.round(shot.x + (ev.clientX - r.left) * shot.width / r.width);
       const y = Math.round(shot.y + (ev.clientY - r.top) * shot.height / r.height);
-      try { await api("POST", "/api/control/qq/click", { x, y }); setTimeout(refresh, 700); } catch (e) { toast(e.message, false); }
+      try { await api("POST", "/api/control/qq/click", { x, y }); setTimeout(refresh, 600); } catch (e) { toast(e.message, false); }
     });
-    holder.replaceChildren(box, note, h("div", { class: "row" },
+    whole.addEventListener("change", () => refresh());
+    const d = h("dialog", { class: "qq-window-dialog" }, h("div", { class: "stack" },
+      h("div", { class: "row" }, h("h3", { text: "服务器上的 QQ 窗口" }), h("span", { class: "grow" }),
+        h("label", { class: "check" }, whole, " 显示整个屏幕")),
+      h("div", { class: "qq-live-box" }, img), note,
+      h("div", { class: "row" },
+        h("button", { class: "ghost", type: "button", text: "刷新", onclick: () => refresh() }),
+        h("button", { type: "button", text: "关闭", onclick: () => d.close() }))));
+    d.addEventListener("close", () => { clearTimeout(timer); d.remove(); });
+    document.body.append(d);
+    d.showModal();
+    refresh();
+  }
+  function qqWindow(holder) {                // the preview in `holder`; refresh() takes a new picture
+    const img = h("img", { class: "qq-preview", alt: "QQ 窗口（点击放大）", title: "点击放大" });
+    const frame = h("button", { type: "button", class: "qq-preview-frame", onclick: () => qqWindowDialog() }, img);
+    const note = h("p", { class: "note", text: "正在读取 QQ 窗口…" });
+    async function refresh() {
+      try {
+        const shot = await qqShot(false);
+        img.src = shot.image;
+        note.textContent = "这是服务器上 QQ 的窗口。要在窗口里点按钮，点画面放大后再点。";
+      } catch (e) { note.textContent = e.message; }
+    }
+    holder.replaceChildren(frame, note, h("div", { class: "row" },
+      h("button", { class: "ghost", type: "button", text: "放大操作", onclick: () => qqWindowDialog() }),
       h("button", { class: "ghost", type: "button", text: "刷新画面", onclick: () => refresh() })));
     refresh();
     return { refresh };
@@ -393,7 +425,7 @@
         body.dataset.window = "1";
         const holder = h("div", { class: "stack" });
         body.replaceChildren(step(1, "用手机 QQ 扫 QQ 窗口里的二维码", holder,
-          h("p", { class: "note", text: "用要给 Violet 用的 QQ 号（建议小号）扫码，并在手机上确认。窗口里要点“登录”之类的按钮时，直接点画面。QQ 刚启动时要等几十秒才有窗口。" })));
+          h("p", { class: "note", text: "用要给 Violet 用的 QQ 号（建议小号）扫码，并在手机上确认。QQ 刚启动时要等几十秒才有窗口。" })));
         qqView = qqWindow(holder);
       } else if (qqView) qqView.refresh();
       foot.replaceChildren(h("button", { class: "ghost", type: "button", text: "重启 QQ", onclick: () => qqTask("restart", "重启 QQ") }));

@@ -184,6 +184,18 @@ class SnowLumaChannel(ChannelAdapter):
         self.status_info.extra.update(self_id=self.self_id, nickname=self.nickname)
         self._set_state("connected", f"已登录 {self.nickname or 'QQ'}（{self.self_id}）")
         self._social()                                   # starts the social engine: the wake-ups she had planned
+        self._sync_stickers_soon()
+
+    def _sync_stickers_soon(self, delay: float = 20.0) -> None:
+        """The account's favourite stickers into her collection once connected (stickers.sync_qq; after a while,
+        because the actions need the receive loop that starts when prepare() returns)."""
+        db = getattr(self.runtime, "db", None)
+        if db is None:
+            return
+        from ai import stickers
+        timer = threading.Timer(delay, lambda: self.is_running() and stickers.sync_qq(db, self))
+        timer.daemon = True
+        timer.start()
 
     def on_stop(self) -> None:
         ws, self._ws = self._ws, None

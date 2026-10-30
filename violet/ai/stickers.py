@@ -4,7 +4,9 @@ Where stickers come from:
   * the owner sends one (QQ marks it as a sticker) -- collected automatically (VIOLET_STICKER_AUTO_COLLECT), with the
     description the picture recognition already made for the chat;
   * someone in a group / private chat sends one and she decides to keep it (the social decision's "collect");
-  * the admin uploads one, or imports the QQ account's own favourites (SnowLuma fetch_custom_face), on the 图片 page.
+  * the admin uploads one, or imports the QQ account's own favourites (SnowLuma fetch_custom_face), on the 图片 page;
+  * 2026-10-30: those favourites also come in by themselves after QQ connects and every 6 hours (sync_qq).
+Only stickers with a description are offered to the model, so missing descriptions are filled a batch at a time.
 
 Sending: in the owner's chat she writes "[[表情:N]]" on its own line (ai/chat_output.py); in groups the social decision
 names a number. Only stickers of this collection can be sent -- the number is looked up here, never a path or an URL
@@ -17,6 +19,8 @@ import hashlib
 import logging
 import os
 import re
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -196,6 +200,73 @@ def describe(path: str | os.PathLike[str]) -> str | None:
     from ai.web.content import neutralize
     text, _ = neutralize(text)
     return _clean(text.splitlines()[0] if text else "")
+
+
+QQ_SYNC_SECONDS = 6 * 3600
+DESCRIBE_PER_RUN = 24
+_synced: dict[str, float] = {}
+_sync_lock = threading.Lock()
+
+
+def describe_pending(db, limit: int = DESCRIBE_PER_RUN) -> int:
+    """Stickers without a description get one (only described stickers are offered to the model). Returns how many."""
+    done = 0
+    for row in db.fetch_all("SELECT * FROM stickers WHERE enabled = 1 AND (description IS NULL OR description = '') "
+                            "ORDER BY id LIMIT ?", (int(limit),)):
+        if not path_of(row).is_file():
+            continue
+        text = describe(path_of(row))
+        if not text:
+            break                                            # recognition not available now: try again next time
+        update(db, row["id"], description=text)
+        done += 1
+    return done
+
+
+def import_qq(db, adapter, describe_limit: int = DESCRIBE_PER_RUN, count: int = 200) -> dict[str, int]:
+    """The QQ account's own favourite stickers (QQ's 收藏的表情) into the collection. One already imported (same
+    address without its query, or the same picture) is not downloaded again."""
+    from ai.channels.base import Part
+    urls = adapter.favourite_stickers(count)
+    added = failed = known = 0
+    for url in urls[:count]:
+        key = "qq:" + hashlib.sha256(url.split("?", 1)[0].encode("utf-8")).hexdigest()[:40]
+        if by_file_key(db, key) is not None:
+            known += 1
+            continue
+        try:
+            before = db.fetch_one("SELECT COUNT(*) AS n FROM stickers")["n"]
+            add_file(db, adapter.download(Part("image", "", {"url": url})), source="qq", file_key=key)
+            if db.fetch_one("SELECT COUNT(*) AS n FROM stickers")["n"] > before:
+                added += 1
+            else:
+                known += 1
+        except Exception:                                     # noqa: BLE001 -- one bad picture does not stop the rest
+            failed += 1
+    described = describe_pending(db, describe_limit) if describe_limit else 0
+    return {"found": len(urls), "added": added, "known": known, "failed": failed, "described": described}
+
+
+def sync_qq(db, adapter, force: bool = False, clock=time.time) -> dict[str, int] | None:
+    """2026-10-30 (user: she could not use the stickers the QQ account had already collected): after QQ connects and
+    then every 6 hours, the favourites come into her collection and get described a batch at a time
+    (VIOLET_STICKER_QQ_SYNC). None when it is not time yet, switched off, or QQ did not answer. Never raises."""
+    if not enabled() or not env_bool("VIOLET_STICKER_QQ_SYNC", True):
+        return None
+    key = str(getattr(adapter, "channel_id", "qq"))
+    with _sync_lock:
+        if not force and key in _synced and clock() - _synced[key] < QQ_SYNC_SECONDS:
+            return None
+        _synced[key] = clock()
+    try:
+        result = import_qq(db, adapter)
+    except Exception as exc:                                  # noqa: BLE001 -- QQ may be busy; next round tries again
+        logger.info("QQ favourite stickers not synced: %s", exc)
+        return None
+    from ai import trace
+    trace.step("QQ 收藏的表情", 找到=result["found"], 新增=result["added"], 补上说明=result["described"],
+               失败=result["failed"])
+    return result
 
 
 def chat_section(db) -> str:

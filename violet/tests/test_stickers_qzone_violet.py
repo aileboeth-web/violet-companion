@@ -95,6 +95,46 @@ def test_qq_marks_stickers_and_sends_them_as_stickers(tmp_path):
     assert calls[1][0] == "send_private_msg" and calls[1][1]["message"][0]["data"]["summary"] == "[动画表情]"
 
 
+class FavouritesAdapter:
+    """The QQ account's own favourites: three pictures behind addresses whose query changes every time."""
+    channel_id = "napcat"
+
+    def __init__(self, tmp_path):
+        self.tmp, self.downloads, self.round = tmp_path, [], 0
+
+    def favourite_stickers(self, count=48):
+        self.round += 1
+        return [f"https://p.qpic.cn/fav/{i}?rkey={self.round}" for i in range(3)]
+
+    def download(self, part):
+        url = part.data["url"]
+        self.downloads.append(url)
+        path = self.tmp / f"fav-{len(self.downloads)}.png"
+        path.write_bytes(PNG + url.split("?")[0].encode())          # a different picture per address
+        return path
+
+
+def test_qq_favourites_come_in_by_themselves_and_get_described(db, tmp_path, monkeypatch):
+    from ai import stickers
+    stickers._synced.clear()
+    a = FavouritesAdapter(tmp_path)
+    looked = []
+    monkeypatch.setattr(stickers, "describe", lambda path: looked.append(path) or (None if len(looked) > 2 else "猫猫点头"))
+    clock = [1000.0]
+    r = stickers.sync_qq(db, a, clock=lambda: clock[0])
+    assert r["found"] == 3 and r["added"] == 3 and r["described"] == 2         # recognition failed on the third
+    assert stickers.chat_section(db).count("猫猫点头") == 2                     # only described ones are offered
+    assert stickers.sync_qq(db, a, clock=lambda: clock[0]) is None              # not before 6 hours
+    clock[0] += stickers.QQ_SYNC_SECONDS
+    monkeypatch.setattr(stickers, "describe", lambda path: "狗狗摇头")
+    r = stickers.sync_qq(db, a, clock=lambda: clock[0])
+    assert r["known"] == 3 and r["added"] == 0 and len(a.downloads) == 3      # new rkey, same address: not again
+    assert r["described"] == 1 and "狗狗摇头" in stickers.chat_section(db)       # the missing description filled
+    assert {s["source"] for s in stickers.listing(db)} == {"qq"}
+    monkeypatch.setenv("VIOLET_STICKER_QQ_SYNC", "0")
+    assert stickers.sync_qq(db, a, force=True) is None
+
+
 # ------------------------------------------------------------------------------------------------ groups
 
 class StickerAdapter:
