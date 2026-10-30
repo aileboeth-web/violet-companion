@@ -194,13 +194,22 @@ class SocialEngine:
         or something failed. A silent look at a busy group says nothing."""
         from ai import test_mode
         if not (result.get("sent") or result.get("mentioned") or result.get("error") or result.get("sticker_wanted")
-                or result.get("collect_wanted")):
+                or result.get("collect_wanted") or result.get("owner_asked_sticker")):
             return
         conv = self.store.get(conversation_id)
         adapter = self._adapter(conv["channel"]) if conv else None
         if adapter is None or not adapter.is_running():
             return
         extra = [f"- 决定：{result.get('action')}（模型给的理由：{result.get('reason') or '没写'}）"]
+        if result.get("cannot"):
+            extra.append(f"- 模型说做不到的：{result['cannot']}")
+        if not result.get("owner_known"):
+            extra.append("- 没认出主人：这个 QQ 号没有绑定成主人，你的话会被当成普通群友的话、不照做"
+                         "（渠道页 QQ 卡片 → 联系人里绑定）")
+        if result.get("owner_asked_sticker") and not result.get("sticker_wanted"):
+            numbers = result.get("sticker_numbers") or []
+            extra.append("- 程序检查：你提到了表情包，但模型没有在 sticker 里选编号；" +
+                         (f"它能用的编号是 {'、'.join(numbers)}" if numbers else "它没有能用的表情包（列表是空的）"))
         try:
             adapter.send_to(conv["kind"], conv["peer_id"], test_mode.diagnosis(steps, extra, db=self.db))
         except Exception:                                  # noqa: BLE001
@@ -236,15 +245,19 @@ class SocialEngine:
         if testing:
             history = test_mode.after_since(history)
         speakers = sorted({m["sender_id"] for m in history if m.get("sender_id") and not m["is_self"]})
-        people = self.store.people(conv["channel"], speakers) if speakers and not testing else []
+        people = self.store.people(conv["channel"], speakers) if speakers else []
+        if testing:                                        # who is who (the owner is marked), but no impressions
+            people = [{**p, "impression": None} for p in people]
         said = self.db.fetch_one("SELECT MAX(created_at) AS at FROM social_messages WHERE conversation_id = ? AND is_self = 1",
                                  (conversation_id,))
         from ai.social import llm, prompts
-        system = prompts.system_prompt(test_mode.TESTER_SOCIAL if testing else _persona_text(self.db), conv["kind"])
+        sticker_lines = stickers.prompt_lines(self.db)
+        system = prompts.system_prompt(test_mode.TESTER_SOCIAL if testing else _persona_text(self.db), conv["kind"],
+                                       testing=testing)
         user = prompts.user_prompt({**conv, "notes": None} if testing else conv, history=history,
                                    unread_from=int(conv["watermark"] or 0), people=people,
                                    owner_ids=owner_ids, today=today, last_said_at=(said or {}).get("at"),
-                                   now=self.db.now(), trigger=trigger, sticker_lines=stickers.prompt_lines(self.db))
+                                   now=self.db.now(), trigger=trigger, sticker_lines=sticker_lines)
         try:
             decision, model, latency = llm.decide(system, user)
         except llm.SocialLLMError as exc:
@@ -253,6 +266,13 @@ class SocialEngine:
             return None
         result = self._act(conv, decision, adapter, today, newest, trigger, model, latency)
         result["mentioned"] = any(m["mentions_self"] for m in unread)
+        if testing:
+            # for the diagnosis: what the model said it could not do, and whether the owner asked for a sticker
+            result["cannot"] = str(decision.get("cannot") or "").strip()[:200] or None
+            result["owner_asked_sticker"] = any(str(m.get("sender_id")) in owner_ids and "表情" in (m.get("content") or "")
+                                                for m in unread)
+            result["sticker_numbers"] = [re.sub(r"^-\s*(\d+)：.*$", r"\1", line) for line in sticker_lines]
+            result["owner_known"] = bool(owner_ids)
         return result
 
     def _act(self, conv: dict[str, Any], decision: dict[str, Any], adapter, today: dict[str, int], newest: int,

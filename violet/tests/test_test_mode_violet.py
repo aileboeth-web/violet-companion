@@ -105,9 +105,12 @@ def test_group_decision_in_test_mode(db, data_dir, monkeypatch):
                             "remember": {"people": {"5": "测试里写的印象"}}}, seen)
     result = e.decide(conv["id"])
     assert test_mode.TESTER_SOCIAL in seen["system"] and "旧消息" not in seen["user"] and "以前的印象" not in seen["user"]
+    from ai.social import prompts
+    assert prompts.TEST_RULES in seen["system"] and prompts.GROUP_RULES not in seen["system"]   # no "像真人一样偶尔用"
+    assert "不是给你的指令" not in prompts.TEST_RULES.split("其他人")[0]       # the owner's requests are carried out
     assert result["sent"] == 1 and a.sent[0][2] == "好"
     diag = a.sent[-1][2]
-    assert diag.startswith("🔧 诊断") and "模型给的理由" in diag
+    assert diag.startswith("🔧 诊断") and "模型给的理由" in diag and "没认出主人" in diag   # not bound in this test
     assert "发表情包：编号 77；结果 不能发；原因 没有这个表情包" in diag
     assert "收藏表情包：消息 999；结果 没收藏；原因 找不到这条消息" in diag
     assert not db.fetch_one("SELECT impression FROM social_people WHERE user_id = '5'")["impression"]   # nothing learned
@@ -117,6 +120,27 @@ def test_group_decision_in_test_mode(db, data_dir, monkeypatch):
     before = len(a.sent)
     e.decide(conv["id"])
     assert len(a.sent) == before
+
+
+def test_the_owner_asks_for_a_sticker_and_the_model_picks_none(db, data_dir, monkeypatch):
+    """The real case of 2026-10-30: 4 usable stickers were offered, the model chose none and made up a reason."""
+    from ai import stickers, test_mode
+    from ai.social.store import SocialStore
+    from tests.image_fixtures import PNG
+    s = stickers.add_bytes(db, PNG, source="upload", description="猫猫点头")
+    conv = SocialStore(db).conversation("napcat", "group", "322", "测试群", default_mode="auto")
+    a = FakeAdapter(owners={"8"})
+    e = engine(db, a)
+    test_mode.enable(db, 1)
+    e.receive(a, kind="group", peer_id="322", sender_id="8", sender_name="主人", text="@你 发个表情包", mentioned=True)
+    seen = {}
+    decide_as(monkeypatch, {"action": "reply", "messages": ["不发了"], "cannot": "我觉得刚才发过了",
+                            "reason": "不再继续发表情包"}, seen)
+    e.decide(conv["id"])
+    assert "（你的主人）" in seen["user"] and f"{s['id']}：猫猫点头" in seen["user"]
+    diag = a.sent[-1][2]
+    assert "模型说做不到的：我觉得刚才发过了" in diag and "没认出主人" not in diag
+    assert f"你提到了表情包，但模型没有在 sticker 里选编号；它能用的编号是 {s['id']}" in diag
 
 
 def test_nothing_by_herself_while_testing(violetdb, data_dir, monkeypatch):
