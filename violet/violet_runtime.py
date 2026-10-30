@@ -457,10 +457,12 @@ class MessageSender:
         label = f"[表情包：{(sticker or {}).get('description') or '表情'}]"
         outbound_id = self.db.add_outbound_message(client_id, origin, "sticker", label, turn_id, proactive_event_id,
                                                    channel=self.channel, peer_id=self.peer_id)
+        from ai import trace
         if stop_reason is not None or problem:
             self.db.update_outbound_message(outbound_id, status="cancelled" if stop_reason else "skipped",
                                             error=(stop_reason or problem)[:300])
             report.skipped.append({**msg, "error": stop_reason or problem})
+            trace.step("发表情包", 编号=msg.get("sticker_id"), 结果="不能发", 原因=stop_reason or problem)
             return
         send = getattr(self.client, "send_sticker", None) or self.client.send_image
         try:
@@ -473,11 +475,13 @@ class MessageSender:
             logger.warning("sticker %s not sent: %s", sticker["id"], error)
             self.db.update_outbound_message(outbound_id, status="failed", error=error)
             report.skipped.append({**msg, "error": error})      # not a failed reply: no fallback text for it
+            trace.step("发表情包", 编号=sticker["id"], 结果="失败", 原因=error)
             return
         message_id = self.db.add_assistant_message("text", label, channel=self.channel) if record_history else None
         self.db.update_outbound_message(outbound_id, status="sent", message_id=message_id)
         stickers.mark_used(self.db, sticker["id"])
         report.sent.append({**msg, "content": label})
+        trace.step("发表情包", 编号=sticker["id"], 结果="已发出")
 
     def _mark_life_event_shown(self, asset: dict[str, Any]) -> int | None:
         """Phase 7 (D5): a picture of a life event that actually reached WeChat counts as telling it.
@@ -1011,9 +1015,10 @@ class VioletRuntime:
     def _collect_owner_sticker(self, inbound_id: int, part, path, text: str) -> str:
         """0.7.9: a sticker the owner sends goes into her collection (VIOLET_STICKER_AUTO_COLLECT); the chat sees
         that it was a sticker. Never raises."""
-        from ai import stickers
+        from ai import stickers, trace
         text = text.replace("[用户发来一张图片]", "[用户发来一个表情包]", 1)
         if not stickers.enabled() or not env_bool("VIOLET_STICKER_AUTO_COLLECT", True):
+            trace.step("收藏表情包", 来源="你发的", 结果="没收藏", 原因="表情包或“收藏你发的表情包”关着")
             return text
         match = re.search(r"图片内容[^：\n]*：(.+)", text)
         description = match.group(1).strip()[:60] if match else None
@@ -1022,11 +1027,14 @@ class VioletRuntime:
                                     file_key=str((part.data or {}).get("file") or "") or None)
         except Exception as exc:                             # noqa: BLE001
             logger.info("owner sticker not collected (inbound #%s): %s", inbound_id, exc)
+            trace.step("收藏表情包", 来源="你发的", 结果="没收藏", 原因=str(exc)[:120])
             return text
         if not row.get("description"):
             described = stickers.describe(path)
             if described:
                 row = stickers.update(self.db, row["id"], description=described) or row
+        trace.step("收藏表情包", 来源="你发的", 编号=row["id"], 结果="已收藏",
+                   说明=row.get("description") or "没有说明（识图没成功：模型暂时看不到它，之后自动补）")
         text += f"\n（这个表情包已经存进你的收藏，编号 {row['id']}）"
         self.db.update_inbound_messages([inbound_id], content=text)
         return text
@@ -1095,12 +1103,18 @@ class VioletRuntime:
     def process_turn(self, turn: Turn) -> str:
         """Run one turn end to end. Returns the final inbound status. Phase 10.6: the turn id is the correlation id of
         every log line and diagnosis event written while it runs (also while sending)."""
+        from ai import test_mode
         from ai.diagnostics import turn_scope
         with turn_scope(turn.turn_id):
-            return self._process_turn(turn)
+            if not test_mode.active():
+                return self._process_turn(turn)
+            # 2026-10-30: test mode -- the turn's steps are collected and sent after the reply as a diagnosis
+            with test_mode.collect() as steps:
+                return self._process_turn(turn, test_steps=steps)
 
-    def _process_turn(self, turn: Turn) -> str:
+    def _process_turn(self, turn: Turn, test_steps: list | None = None) -> str:
         combined = turn.combined
+        testing = test_steps is not None                 # test mode: nothing is learned from this turn
         self.db.update_inbound_messages(turn.inbound_ids, status="processing", turn_id=turn.turn_id, increment_attempts=True)
         conversation = (turn.channel or "wechat", turn.peer_id or "")
         from ai import trace
@@ -1116,7 +1130,8 @@ class VioletRuntime:
         status, error = "done", None
         pipeline: dict[str, Any] | None = None
         try:
-            self._before_pipeline(combined, turn.turn_id)
+            if not testing:
+                self._before_pipeline(combined, turn.turn_id)
         except Exception:
             logger.exception("engagement / preference bookkeeping failed for turn %s", turn.turn_id)
         extra = {"defer_memory": True, "turn_id": turn.turn_id} if self.async_memory else {"turn_id": turn.turn_id}
@@ -1154,7 +1169,7 @@ class VioletRuntime:
                 # Phase 9.1 (A6): a silent turn ("晚安啦，对了明早八点去复查") may still carry news; only a bare
                 # closing word ("晚安" / "嗯嗯") skips the memory call.
                 from ai.memory_model import is_engaged_reply
-                if self.memory_worker is not None and (not silent or is_engaged_reply(combined)):
+                if self.memory_worker is not None and not testing and (not silent or is_engaged_reply(combined)):
                     try:
                         memory_job = self.memory_worker.enqueue(turn.turn_id, combined, message_id) is not None
                     except Exception:
@@ -1190,7 +1205,9 @@ class VioletRuntime:
         self.db.update_inbound_messages(turn.inbound_ids, status=status, error=error)
         trace.step("这一轮结束", 结果=status, 错误=error, 回复=trace.text("\n".join(sent_texts)) if sent_texts else "没有发出回复",
                    不回复=(pipeline or {}).get("should_reply") is False or None, 记忆整理="已排队" if memory_job else None)
-        if pipeline is not None and sent_texts:
+        if testing and sender is not None:
+            self._send_test_diagnosis(sender, turn, test_steps, report, status, error, pipeline)
+        if pipeline is not None and sent_texts and not testing:
             try:
                 self.tracker.note_eve_reply("\n".join(sent_texts), pipeline.get("recalled_memories") or [],
                                             pipeline.get("user_raised_memory_ids") or [])
@@ -1229,6 +1246,34 @@ class VioletRuntime:
         self.onboarding.note_user_turn(text)
         if self.proactive_scheduler is not None and hasattr(self.proactive_scheduler, "on_user_engagement"):
             self.proactive_scheduler.on_user_engagement(category != "disengaged" or result["user_initiated"])
+
+    def _send_test_diagnosis(self, sender: "MessageSender", turn: Turn, steps: list, report, status: str,
+                             error: str | None, pipeline: dict[str, Any] | None) -> None:
+        """Test mode: after the reply, one message with what the code saw this turn (ai/test_mode.py). It is not
+        kept in the chat history, so the next turn of the test does not read it as part of the conversation."""
+        from ai import test_mode
+        from ai.channels.outbound import fixed_text
+        extra = []
+        if pipeline is not None and pipeline.get("should_reply") is False:
+            extra.append("- 回复：意图识别判断这条不用回复，所以没有回复")
+        if report is not None:
+            kinds: dict[str, int] = {}
+            for m in report.sent:
+                kinds[str(m.get("type") or "text")] = kinds.get(str(m.get("type") or "text"), 0) + 1
+            names = {"text": "文字", "image": "图片", "sticker": "表情包"}
+            if kinds:
+                extra.append("- 发出：" + "，".join(f"{names.get(k, k)} {n} 条" for k, n in kinds.items()))
+            for m in [*report.skipped, *report.failed]:
+                kind = names.get(str(m.get("type") or "text"), m.get("type"))
+                what = f"表情包 {m.get('sticker_id')}" if m.get("type") == "sticker" else kind
+                extra.append(f"- 没发出：{what}（{m.get('error') or '跳过'}）")
+        if status != "done" or error:
+            extra.append(f"- 这一轮：{status}" + (f"（{error}）" if error else ""))
+        try:
+            text = test_mode.diagnosis(steps, extra, db=self.db)
+            sender.send_messages(fixed_text(text), origin="test_diagnosis", turn_id=turn.turn_id, record_history=False)
+        except Exception:
+            logger.exception("test mode diagnosis not sent for turn %s", turn.turn_id)
 
     def _send_fallback(self, sender: "MessageSender", turn: Turn, error: str | None):
         fallback = env_str("VIOLET_FALLBACK_REPLY", DEFAULT_FALLBACK_REPLY)

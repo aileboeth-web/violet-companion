@@ -137,6 +137,7 @@ code{background:var(--panel-hover);border:1px solid var(--line);border-radius:7p
 .pill.ok::before{background:var(--ok)}
 .pill.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,transparent);background:color-mix(in srgb,var(--bad) 10%,transparent)}
 .pill.bad::before{background:var(--bad)}
+.platform.test-on{border-color:var(--warn);box-shadow:0 0 0 2px color-mix(in srgb,var(--warn) 25%,transparent)}
 .pill.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent);background:color-mix(in srgb,var(--warn) 10%,transparent)}
 .pill.warn::before{background:var(--warn)}
 .legend{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}

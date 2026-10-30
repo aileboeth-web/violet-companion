@@ -56,7 +56,23 @@ def register_persona_routes(app: Flask, violetdb) -> None:
     @app.get("/api/persona/templates")
     def persona_templates():
         from ai import persona_templates as pt
-        return ok({"templates": pt.templates(), "current": pt.current(), "custom": pt.custom_preview()})
+        from ai import test_mode
+        return ok({"templates": pt.templates(), "current": pt.current(), "custom": pt.custom_preview(),
+                   "test_mode": test_mode.status()})
+
+    # -- 2026-10-30: test mode (ai/test_mode.py) -- on top of the persona, which stays as it is ------------------------
+    @app.post("/api/persona/test-mode")
+    def persona_test_mode():
+        from ai import test_mode
+        data = body()
+        if data.get("on") is True:
+            try:
+                return ok(test_mode.enable(violetdb, data.get("hours", test_mode.DEFAULT_HOURS)))
+            except ValueError as exc:
+                return bad(str(exc))
+        if data.get("on") is False:
+            return ok(test_mode.disable())
+        return bad("on 要是 true 或 false")
 
     @app.post("/api/persona/custom")
     def persona_custom():

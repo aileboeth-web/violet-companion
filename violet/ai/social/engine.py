@@ -178,8 +178,33 @@ class SocialEngine:
         return adapter if adapter is not None and hasattr(adapter, "send_to") else None
 
     def decide(self, conversation_id: int, trigger: str = "messages") -> dict[str, Any] | None:
+        from ai import test_mode
         with self._conv_lock(conversation_id):
-            return self._decide(conversation_id, trigger)
+            if not test_mode.active():
+                return self._decide(conversation_id, trigger)
+            # 2026-10-30 test mode: the decision's steps go into a diagnosis sent to the same chat
+            with test_mode.collect() as steps:
+                result = self._decide(conversation_id, trigger)
+            if result is not None:
+                self._send_test_diagnosis(conversation_id, result, steps)
+            return result
+
+    def _send_test_diagnosis(self, conversation_id: int, result: dict[str, Any], steps: list) -> None:
+        """Only when there is something to explain: she sent something, was @-ed, wanted a sticker or to collect one,
+        or something failed. A silent look at a busy group says nothing."""
+        from ai import test_mode
+        if not (result.get("sent") or result.get("mentioned") or result.get("error") or result.get("sticker_wanted")
+                or result.get("collect_wanted")):
+            return
+        conv = self.store.get(conversation_id)
+        adapter = self._adapter(conv["channel"]) if conv else None
+        if adapter is None or not adapter.is_running():
+            return
+        extra = [f"- 决定：{result.get('action')}（模型给的理由：{result.get('reason') or '没写'}）"]
+        try:
+            adapter.send_to(conv["kind"], conv["peer_id"], test_mode.diagnosis(steps, extra, db=self.db))
+        except Exception:                                  # noqa: BLE001
+            logger.exception("test mode diagnosis not sent to conversation %s", conversation_id)
 
     def _decide(self, conversation_id: int, trigger: str) -> dict[str, Any] | None:
         conv = self.store.get(conversation_id)
@@ -205,14 +230,19 @@ class SocialEngine:
         adapter = self._adapter(conv["channel"])
         owner_ids = adapter.owner_ids() if adapter is not None and hasattr(adapter, "owner_ids") else set()
         self._look_at_stickers(unread, adapter)
+        from ai import test_mode
+        testing = test_mode.active()       # 2026-10-30: no persona, no impressions, only the messages since the test began
         history = self.store.messages(conversation_id, limit=max(10, env_int("VIOLET_SOCIAL_CONTEXT_MESSAGES", 30)))
+        if testing:
+            history = test_mode.after_since(history)
         speakers = sorted({m["sender_id"] for m in history if m.get("sender_id") and not m["is_self"]})
-        people = self.store.people(conv["channel"], speakers) if speakers else []
+        people = self.store.people(conv["channel"], speakers) if speakers and not testing else []
         said = self.db.fetch_one("SELECT MAX(created_at) AS at FROM social_messages WHERE conversation_id = ? AND is_self = 1",
                                  (conversation_id,))
         from ai.social import llm, prompts
-        system = prompts.system_prompt(_persona_text(self.db), conv["kind"])
-        user = prompts.user_prompt(conv, history=history, unread_from=int(conv["watermark"] or 0), people=people,
+        system = prompts.system_prompt(test_mode.TESTER_SOCIAL if testing else _persona_text(self.db), conv["kind"])
+        user = prompts.user_prompt({**conv, "notes": None} if testing else conv, history=history,
+                                   unread_from=int(conv["watermark"] or 0), people=people,
                                    owner_ids=owner_ids, today=today, last_said_at=(said or {}).get("at"),
                                    now=self.db.now(), trigger=trigger, sticker_lines=stickers.prompt_lines(self.db))
         try:
@@ -222,6 +252,7 @@ class SocialEngine:
             trace.step("社交决定", 会话=conv["id"], 结果="失败", 原因=str(exc))
             return None
         result = self._act(conv, decision, adapter, today, newest, trigger, model, latency)
+        result["mentioned"] = any(m["mentions_self"] for m in unread)
         return result
 
     def _act(self, conv: dict[str, Any], decision: dict[str, Any], adapter, today: dict[str, int], newest: int,
@@ -242,8 +273,13 @@ class SocialEngine:
         reason = str(decision.get("reason") or "")[:300]
         error = None
         sticker = None
-        if str(decision.get("sticker") or "").strip().lstrip("#").isdigit():
-            sticker, _ = stickers.sendable(self.db, str(decision["sticker"]).strip().lstrip("#"))
+        wanted = str(decision.get("sticker") or "").strip().lstrip("#")
+        if wanted.isdigit():
+            sticker, problem = stickers.sendable(self.db, wanted)
+            if problem:
+                trace.step("发表情包", 编号=wanted, 结果="不能发", 原因=problem)
+        elif wanted:
+            trace.step("发表情包", 编号=wanted, 结果="不能发", 原因="不是收藏里的编号")
         if action in ("say", "reply") and not texts and sticker is None:
             action = "silent"
         if action in ("say", "reply") and conv["daily_message_limit"] and today["messages"] >= conv["daily_message_limit"]:
@@ -276,8 +312,10 @@ class SocialEngine:
                         stickers.mark_used(self.db, sticker["id"])
                         texts.append(label)
                         sent += 1
+                        trace.step("发表情包", 编号=sticker["id"], 结果="已发出")
                     except Exception as exc:          # noqa: BLE001
                         error = f"表情包没发出去：{exc}"[:300]
+                        trace.step("发表情包", 编号=sticker["id"], 结果="失败", 原因=str(exc))
         collected = self._collect(conv, decision.get("collect"), adapter)
         if collected:
             reason = (reason + f"（收藏了表情包 {collected}）").strip()
@@ -288,7 +326,9 @@ class SocialEngine:
             at = (datetime.fromisoformat(self.db.now()[:19]) + timedelta(minutes=check_back)).isoformat(timespec="seconds")
             self.store.update(conv["id"], next_wake_at=at)
             self.schedule(conv["id"], delay=check_back * 60, trigger="wake")
-        self._remember(conv, decision.get("remember"))
+        from ai import test_mode
+        if not test_mode.active():                       # test mode: no impressions, no group notes
+            self._remember(conv, decision.get("remember"))
         self.store.record_decision(conv["id"], trigger=trigger, action=action, reply_to=reply_to,
                                    text="\n".join(texts[:sent] if sent else texts) or None,
                                    wait_minutes=check_back or None, reason=reason, model=model, latency_ms=latency,
@@ -296,7 +336,8 @@ class SocialEngine:
         trace.step("社交决定", 会话=f"{conv['kind']}:{conv['peer_id']}", 触发=trigger, 决定=action, 发出=sent,
                    过会儿再看=f"{check_back:g} 分钟" if check_back else None, 理由=trace.text(reason), 错误=error,
                    模型=model, 耗时毫秒=latency)
-        return {"action": action, "sent": sent, "check_back": check_back, "error": error}
+        return {"action": action, "sent": sent, "check_back": check_back, "error": error, "reason": reason,
+                "sticker_wanted": bool(wanted), "collect_wanted": bool(decision.get("collect"))}
 
     # -- stickers (0.7.9) ---------------------------------------------------------------------------------------
     def _download(self, adapter, url: str | None):
@@ -333,7 +374,11 @@ class SocialEngine:
             meaning = collect.get("meaning") or collect.get("note")
             collect = collect.get("message") or collect.get("id")
         ref = str(collect or "").strip().lstrip("#")
+
+        def failed(why: str) -> None:                    # 2026-10-30: every reason a collect does not happen is visible
+            trace.step("收藏表情包", 消息=ref or None, 结果="没收藏", 原因=why)
         if not ref.isdigit():
+            failed("模型给的不是消息编号")
             return None
         message = self.store.find_message(conv["id"], ref)
         if message is None:
@@ -341,13 +386,16 @@ class SocialEngine:
                                     (int(ref), conv["id"]))
             message = row
         if message is None or message["is_self"]:
+            failed("找不到这条消息" if message is None else "那是她自己发的消息")
             return None
         media = self.store.media([message["id"]])
         if not media:
+            failed("那条消息里没有图片或表情包")
             return None
         item = next((m for m in media if m["kind"] == "sticker"), media[0])
         path = self._download(adapter, item["url"])
         if path is None:
+            failed("下载图片失败（地址可能过期了）")
             return None
         description = item.get("description") or (str(meaning).strip()[:60] if meaning else None) or stickers.describe(path)
         try:
@@ -356,6 +404,7 @@ class SocialEngine:
                                     source_detail=conv.get("title") or conv["peer_id"])
         except Exception as exc:                          # noqa: BLE001
             logger.info("sticker not collected: %s", exc)
+            failed(str(exc)[:120])
             return None
         self.db.execute("UPDATE social_media SET sticker_id = ? WHERE id = ?", (row["id"], item["id"]))
         trace.step("收藏表情包", 编号=row["id"], 内容=row.get("description"))

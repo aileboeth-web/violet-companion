@@ -335,8 +335,9 @@ class ContextEngine:
         """Messages of the current conversation: back from now until a quiet gap (VIOLET_CONTEXT_SESSION_GAP_HOURS)."""
         from ai.memory_model import parse_time
         gap = timedelta(hours=env_float("VIOLET_CONTEXT_SESSION_GAP_HOURS", 3.0))
+        from ai import test_mode
         out, later = [], parse_time(self.db.now())
-        for row in reversed(self.db.get_recent_messages(limit=30)):
+        for row in reversed(test_mode.after_since(self.db.get_recent_messages(limit=30))):
             at = parse_time(row["created_at"]) if row.get("created_at") else None
             if at is None or later - at >= gap:
                 break
@@ -677,7 +678,8 @@ class ContextEngine:
         limit = limit or max(env_int("VIOLET_CONTEXT_HISTORY_MESSAGES", 20), turn_limit * 3 if turn_limit > 0 else 0)
         max_chars = env_int("VIOLET_CONTEXT_HISTORY_MAX_CHARS", 4000)
         turns, times = [], {}
-        for row in self.db.get_recent_messages(limit=limit):
+        from ai import test_mode
+        for row in test_mode.after_since(self.db.get_recent_messages(limit=limit)):     # test mode: since it began
             content = row.get("content") or ""
             if row["message_type"] != "text":
                 content = f"[{row['message_type']}] {content}".strip()
@@ -744,6 +746,9 @@ class ContextEngine:
               with_history: bool = True) -> ContextPacket:
         """mode: chat | proactive (Violet writes a proactive message) | decision (ProactiveAgent) | memory."""
         call_context = call_context or {}
+        from ai import test_mode
+        if test_mode.active() and mode in ("chat", "proactive", "decision"):
+            return self._test_build(mode, with_history)
         recalled = call_context.get("recalled_memories") or []
         text = " ".join([user_message or ""] + [m.get("content") or "" for m in recalled])
         mask_terms = self._mask_terms()
@@ -827,6 +832,17 @@ class ContextEngine:
             if getattr(self, "_relationship", None) is not None:
                 report["relationship"] = self._relationship.stage
         return ContextPacket([txt for _, txt in rendered], history, report, turn_note=note)
+
+    def _test_build(self, mode: str, with_history: bool) -> ContextPacket:
+        """2026-10-30 test mode (ai/test_mode.py): no persona, profile, memories, life or relationship -- only what
+        can be tested (the sticker list) and the time; the history starts when test mode was switched on."""
+        sections = [s for s in (self._sticker_section(), self._base_section())]
+        rendered = [(s.name, s.render()) for s in sections]
+        rendered = [(name, txt) for name, txt in rendered if txt]
+        history = self.history([], mode=mode) if with_history else []
+        report = {"mode": mode, "test_mode": True, "sections": {name: len(txt) for name, txt in rendered},
+                  "history_messages": sum(1 for h in history if h["role"] != "system")}
+        return ContextPacket([txt for _, txt in rendered], history, report, turn_note=None)
 
     def _eve_replies_today(self) -> list[str]:
         """Phase 8.9.4: everything Violet said since local midnight (care is counted per day, not per conversation)."""

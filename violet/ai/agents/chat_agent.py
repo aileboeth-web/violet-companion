@@ -161,7 +161,9 @@ class ChatAgent(BaseAgent):
         self._call_context["_user_message"] = user_message      # per thread / per run (contextvar)
         packet = ContextEngine(violetdb).build("proactive" if is_proactive else "chat", user_message, self._call_context)
         self.last_context_report = packet.report
-        messages = [{"role": "system", "content": self._config.reply_prompt}]
+        from ai import test_mode
+        testing = bool(packet.report.get("test_mode"))           # 2026-10-30: no persona voice while testing
+        messages = [{"role": "system", "content": test_mode.TESTER_PROMPT if testing else self._config.reply_prompt}]
         messages += [{"role": "system", "content": section} for section in packet.sections]
         from ai.images.service import images_enabled
         if not is_proactive and images_enabled():

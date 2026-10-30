@@ -376,6 +376,9 @@ class ProactiveScheduler:
         return pipeline
 
     def _is_due(self, current: datetime) -> tuple[bool, str]:
+        from ai import test_mode
+        if test_mode.active():
+            return False, "test mode"                    # 2026-10-30: nothing by herself while testing
         next_at = self._get_next_proactive_at()
         if not next_at:
             self._set_next_proactive_at(self._random_next_time(current))

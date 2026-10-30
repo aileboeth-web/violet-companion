@@ -219,7 +219,24 @@
       h("div", { class: "row platform-foot" }, h("button", { type: "button", class: "ghost",
         text: d.current.template === "custom" ? "修改" : "自己写一个", onclick: customDialog })));
     withPreview(own, d.custom);
-    $("#pl-templates").replaceChildren(...d.templates.map((t) => {
+    // 2026-10-30: test mode -- on top of the persona in use (which stays as it is), switches itself off
+    const tm = d.test_mode || { on: false };
+    const hours = h("select", { "aria-label": "多久后自动关闭" }, ...[[1, "1 小时"], [2, "2 小时"], [4, "4 小时"], [8, "8 小时"]]
+      .map(([v, label]) => h("option", { value: v, text: label + "后自动关闭" })));
+    hours.value = "2";
+    const testCard = h("div", { class: "card platform" + (tm.on ? " test-on" : "") },
+      h("div", { class: "platform-head" }, h("strong", { text: "测试" }), tm.on ? pill(`测试中 · 还有 ${tm.minutes_left} 分钟`, "warn") : pill("排查问题用", "")),
+      h("p", { class: "note platform-intro", text: "不用人设、不看记忆和以前的聊天，什么都不记下来；每条回复后面附一段程序写的诊断：她判断你要做什么、能用什么、实际做了什么、哪里没成。" }),
+      h("div", { class: "platform-body" },
+        h("p", { class: "note", text: "私聊和群聊都生效：群里的诊断群友也能看到。关掉后回到现在的人设，记忆不受影响。" })),
+      h("div", { class: "row platform-foot" }, tm.on
+        ? h("button", { type: "button", text: "关闭测试", onclick: async () => {
+          try { await api("POST", "/api/persona/test-mode", { on: false }); toast("测试模式已关闭"); loaders.persona(); } catch (e) { toast(e.message, false); }
+        } })
+        : h("div", { class: "row" }, hours, h("button", { type: "button", text: "开始测试", onclick: async () => {
+          try { await api("POST", "/api/persona/test-mode", { on: true, hours: Number(hours.value) }); toast("测试模式已打开"); loaders.persona(); } catch (e) { toast(e.message, false); }
+        } }))));
+    $("#pl-templates").replaceChildren(testCard, ...d.templates.map((t) => {
       const using = d.current.template === t.key;
       return withPreview(h("div", { class: "card platform" },
         h("div", { class: "platform-head" }, h("strong", { text: t.title }), using ? pill("正在使用", "ok") : pill("模板", "")),

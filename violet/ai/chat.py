@@ -629,14 +629,18 @@ def _run_pipeline(
     trace.step("意图识别", 路线=intent_json.get("route"), 要回复=intent_json.get("should_reply"),
                工具请求=intent_json.get("tool_query") or "没有", 问题=problem, 原始输出=trace.text(intent_result.get("content")))
     recalled_memories = extract_tool_memories(intent_result)
+    from ai import test_mode
+    testing = test_mode.active()          # 2026-10-30: no memories, no topic bookkeeping, no persona checks
     try:
         # phase 9.1 (A2): memories the user's own words are about, whether or not Intent searched
         from ai.recall_search import user_word_recall
-        recalled_memories += user_word_recall(violetdb, user_message, exclude_ids=[m.get("id") for m in recalled_memories])
+        if not testing:
+            recalled_memories += user_word_recall(violetdb, user_message,
+                                                  exclude_ids=[m.get("id") for m in recalled_memories])
     except Exception:
         logger.exception("word recall failed; continuing with Intent's results only")
     try:
-        user_raised = TopicTracker(violetdb).note_user_mentions(user_message, recalled_memories)
+        user_raised = [] if testing else TopicTracker(violetdb).note_user_mentions(user_message, recalled_memories)
     except Exception:
         logger.exception("could not record user-raised topics")
         user_raised = []
@@ -749,7 +753,7 @@ def _run_pipeline(
     chat_context = {
         "performer_result": performer_result,
         "recalled_memories": recalled_memories,
-        "restricted_topics": cooling_topics_for_turn(recalled_memories),
+        "restricted_topics": [] if testing else cooling_topics_for_turn(recalled_memories),
         "route": intent_json.get("route"),
         # phase 8.9.8: IntentAgent's reading of this message (8.9.7: it read "调侃" / "带撒娇" well, Chat never saw it)
         "intent_reading": None if intent_json.get("fallback") else
@@ -777,7 +781,7 @@ def _run_pipeline(
         guard_flags = {"turn_used_web": used("violet-web")}
         if used("violet-schedule"):
             guard_flags["turn_used_schedule"] = True        # phase 9.4.2 (only passed when true: older wrappers)
-        guarded, violations = guard_reply(
+        guarded, violations = (chat_result.get("content", ""), []) if testing else guard_reply(
             chat_result.get("content", ""),
             regenerate=lambda note: chat_agent.run(user_message, call_context={**chat_context, "consistency_note": note})
             .get("content", ""),
@@ -788,7 +792,7 @@ def _run_pipeline(
             if not guarded.strip():
                 errors["chat"] = "consistency: every line contradicted recorded facts"
                 chat_result["failed"] = True
-        if not chat_result.get("failed"):
+        if not chat_result.get("failed") and not testing:
             content, follow_up = enforce_follow_up_preference(
                 user_message, chat_result.get("content", ""),
                 regenerate=lambda note: chat_agent.run(user_message, call_context={**chat_context, "follow_up_note": note})
@@ -801,8 +805,8 @@ def _run_pipeline(
         chat_result = {"content": "", "messages": [], "raw": {}, "error": errors["chat"], "failed": True}
     _ps.node_done("Chat", "Memory", output_data={"messages": chat_result.get("messages", []), "content": chat_result.get("content")})
 
-    # Step 3: 记忆判断（以本轮对话为输入）
-    if defer_memory:
+    # Step 3: 记忆判断（以本轮对话为输入）；测试模式不记
+    if defer_memory or testing:
         _ps.node_skip("Memory")
         memory_result = {"content": "", "messages": [], "raw": {}, "skipped": True, "deferred": True}
         visualize_pipeline_end()

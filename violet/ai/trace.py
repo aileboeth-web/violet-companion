@@ -68,7 +68,13 @@ def _value(v: Any) -> str:
 
 
 def step(name: str, **fields: Any) -> None:
-    """One line: "工具调用 · tool=violet-web__web_search · 结果=ok · …". Fields with value None are left out."""
+    """One line: "工具调用 · tool=violet-web__web_search · 结果=ok · …". Fields with value None are left out.
+    2026-10-30: the step is also handed to test mode's diagnosis (ai/test_mode.py), whether or not this log is on."""
+    try:
+        from ai import test_mode
+        test_mode.record(name, {k: v for k, v in fields.items() if v is not None})
+    except Exception:
+        pass
     if not enabled():
         return
     try:

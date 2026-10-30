@@ -111,7 +111,8 @@ class IntentAgent(BaseAgent):
         limit = env_int("VIOLET_INTENT_RECENT_MESSAGES", 6)
         if limit <= 0:
             return None
-        rows = violetdb.get_recent_messages(limit=limit)
+        from ai import test_mode
+        rows = test_mode.after_since(violetdb.get_recent_messages(limit=limit))      # test mode: since it began
         if not rows:
             return None
         engine = ContextEngine(violetdb)
@@ -129,7 +130,11 @@ class IntentAgent(BaseAgent):
     def _query_tool_hidden() -> bool:
         """Phase 7 B.2 (M4b): when no event memory could be returned by query_memory (same filter as the
         search), the tool is not offered -- the model cannot spend a call on a search that finds nothing.
-        Profile facts and situations are not affected: they reach Chat through the ContextEngine."""
+        Profile facts and situations are not affected: they reach Chat through the ContextEngine.
+        2026-10-30: never in test mode (no memories while testing)."""
+        from ai import test_mode
+        if test_mode.active():
+            return True
         return env_bool("VIOLET_INTENT_HIDE_EMPTY_MEMORY_TOOL", True) and not violetdb.has_searchable_event_memories()
 
     def _filter_tools_for_run(self, tools):

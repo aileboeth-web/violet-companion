@@ -121,6 +121,9 @@ def due(db, now: datetime | None = None) -> str | None:
     """None when she may post now, else why not (for the tick and the page)."""
     if not enabled():
         return "发动态没有打开"
+    from ai import test_mode
+    if test_mode.active():
+        return "测试模式中不自己发动态"
     now = now or datetime.fromisoformat(db.now()[:19])
     if not 9 <= now.hour <= 22:
         return "只在 9:00 到 23:00 之间发"
