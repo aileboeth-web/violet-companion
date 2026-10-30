@@ -53,7 +53,12 @@
         isGroup ? h("label", {}, "她对这个群的印象 ", notes) : null,
         h("div", { class: "row" }, h("button", { type: "button", text: "保存", onclick: () => saveConv(c.id, {
           daily_message_limit: Number(msgLimit.value || 0), daily_decision_limit: Number(decLimit.value || 0),
-          ...(isGroup ? { notes: notes.value } : {}) }) })))) : null,
+          ...(isGroup ? { notes: notes.value } : {}) }) }),
+          // 2026-10-30: she no longer sees what was said here before now (the messages stay on the history page)
+          h("button", { class: "ghost", type: "button", text: "翻篇", onclick: async () => {
+            if (!(await confirmBox("在这里翻篇？她看不到这里以前的聊天了，像重新开始；聊天记录不删。"))) return;
+            if (await saveConv(c.id, { cut: true })) toast("已翻篇");
+          } })))) : null,
       on ? h("details", { ontoggle: (ev) => { if (ev.target.open) loadDecisions(c.id, decisions); } },
         h("summary", { text: "最近的决定（为什么说 / 不说）" }), decisions) : null);
   }

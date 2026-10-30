@@ -96,6 +96,9 @@ class LifeEngine:
         run_key = now.date().isoformat()
         if not self.enabled():
             return {"outcome": "disabled", "run_key": run_key}
+        if getattr(self.core, "is_ai", False):
+            # 2026-10-30: an AI that knows it is one has no invented days; its "life" is its real records
+            return {"outcome": "ai_persona", "run_key": run_key}
         if now.hour < int(self.config.get("run_after_hour", 21)):
             return {"outcome": "too_early", "run_key": run_key}     # the day is not over yet; not claimed
         if not self.store.claim_run(run_key):

@@ -601,6 +601,24 @@ def plan_for_turn(intent: dict[str, Any], catalog: Catalog) -> dict[str, Any]:
             "missing": str(query.get("missing") or reason or "")[:60] or None}
 
 
+def direct_tools(catalog: Catalog) -> list[str]:
+    """2026-10-30: the tools Chat gets on every turn (VIOLET_CHAT_TOOLS_DIRECT, on): connected, assigned to Chat,
+    read-only. Execution tools still go through a task (the Performer)."""
+    from ai.settings import env_bool
+    if not env_bool("VIOLET_CHAT_TOOLS_DIRECT", True):
+        return []
+    return sorted(n for n, t in catalog.tools.items() if "chat" in t.agents and t.permission == "read")
+
+
+def direct_note(names: list[str]) -> str | None:
+    """The one rule that goes with them (the tool descriptions themselves come with the tool schemas)."""
+    if not names:
+        return None
+    return ("【可以用的工具】这一轮你能直接调用查询工具。需要实时信息（天气、新闻、最新消息）、你不知道的外部资料、"
+            "或对方自己的数据（课表、手机状态等）时，先调用合适的工具，再按结果回答；闲聊、情绪、关于你或对方自己说过的事不用查。"
+            "查不到或出错就照实说，绝不编造；工具名和错误代码不要说给对方听。")
+
+
 def chat_note(plan: dict[str, Any], catalog: Catalog) -> str | None:
     """What Chat must know about this turn's tools (facts, in Violet's terms; tool names stay internal)."""
     mode = plan.get("mode")

@@ -213,7 +213,11 @@ def register_qq_routes(app: Flask, violetdb, runtime) -> None:
             return bad(str(exc))
         if "notes" in body:
             fields["notes"] = str(body["notes"] or "")[:600]
-        social.update(conversation_id, **fields)
+        if body.get("cut") is True:                  # 2026-10-30 翻篇 for this chat only (the messages stay)
+            from ai import context_cut
+            context_cut.cut(violetdb, conversation_id=conversation_id)
+        if fields:
+            social.update(conversation_id, **fields)
         return ok(conv_public({**social.get(conversation_id), "message_count": None}, social))
 
     @app.get("/api/control/social/conversation/<int:conversation_id>/decisions")

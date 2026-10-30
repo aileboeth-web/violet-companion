@@ -784,10 +784,16 @@ class MCPToolBridge:
             if tool["name"] in switched_off:
                 self.disabled_tools.append(full_name)
                 continue
+            ask = False
             if not is_tool_allowed(server, name, tool["name"], permission):
-                self.denied_tools.append(full_name)
-                continue
-            self.tool_to_session[full_name] = _ToolBinding(index, name, tool["name"], permission)
+                # 2026-10-30 (ai/permissions.py): "先问你" -- offered, but every call waits for the owner's approval
+                from ai.permissions import tool_needs_approval
+                if not tool_needs_approval(server, name, tool["name"], permission):
+                    self.denied_tools.append(full_name)
+                    continue
+                ask = True
+            self.tool_to_session[full_name] = _ToolBinding(index, name, tool["name"], permission,
+                                                           extra={"needs_approval": True} if ask else {})
             self.schemas[full_name] = tool.get("inputSchema") or {}
             self.tools.append(tool_schema_to_openai_tool(full_name, tool.get("description"), tool.get("inputSchema")))
         state.unclassified_tools = unclassified

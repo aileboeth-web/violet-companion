@@ -157,6 +157,12 @@ class VioletDatabase:
         # 0.7.9: her sticker collection (ai/stickers.py)
         from ai.stickers import SCHEMA as sticker_schema
         self.conn.executescript(sticker_schema)
+        # 2026-10-30: tokens of every model call (ai/usage.py)
+        from ai.usage import SCHEMA as usage_schema
+        self.conn.executescript(usage_schema)
+        # 2026-10-30: what waits for the owner's approval (ai/permissions.py)
+        from ai.permissions import SCHEMA as approval_schema
+        self.conn.executescript(approval_schema)
         self.conn.commit()
 
     def _create_tables_locked(self) -> None:

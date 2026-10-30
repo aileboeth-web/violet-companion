@@ -19,6 +19,13 @@ from tests.test_phase2_scenarios import make_world, say  # noqa: F401  (make_wor
 from tests.test_tools_p92 import fresh_registry  # noqa: F401  (fixture)
 from tests.test_web_p93 import chat_plays, offered, systems, tool_texts
 
+
+@pytest.fixture(autouse=True)
+def _planned_tools_only(monkeypatch):
+    """These tests describe the tools offered only when Intent plans them (VIOLET_CHAT_TOOLS_DIRECT=0); the default
+    since 2026-10-30 (every read-only tool on every turn) is tested in tests/test_chat_polish_violet.py."""
+    monkeypatch.setenv("VIOLET_CHAT_TOOLS_DIRECT", "0")
+
 SH = timezone(timedelta(hours=8))
 DAY, RANGE, STATUS, FIND = (f"violet-schedule__{t}" for t in ("get_day_schedule", "get_schedule_range",
                                                             "get_current_status", "find_course"))

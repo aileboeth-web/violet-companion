@@ -111,8 +111,8 @@ class IntentAgent(BaseAgent):
         limit = env_int("VIOLET_INTENT_RECENT_MESSAGES", 6)
         if limit <= 0:
             return None
-        from ai import test_mode
-        rows = test_mode.after_since(violetdb.get_recent_messages(limit=limit))      # test mode: since it began
+        from ai import context_cut
+        rows = context_cut.owner_rows(violetdb.get_recent_messages(limit=limit))     # 翻篇 / test mode
         if not rows:
             return None
         engine = ContextEngine(violetdb)

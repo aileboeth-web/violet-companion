@@ -87,7 +87,7 @@ def compose(db) -> dict[str, Any]:
              "", "【你最近发过的动态】", *([f"- {str(r['created_at'])[5:16]} {r['content']}" for r in recent] or ["（还没发过）"]),
              "", "决定这次发不发，只输出 JSON。"]
     try:
-        decision, model, _ = llm.decide(_persona_text(db) + "\n\n" + COMPOSE_RULES, "\n".join(lines))
+        decision, model, _ = llm.decide(_persona_text(db, "napcat") + "\n\n" + COMPOSE_RULES, "\n".join(lines))
     except llm.SocialLLMError as exc:
         raise QzoneError(str(exc)) from None
     text = " ".join(str(decision.get("text") or "").split())[:300]
@@ -124,6 +124,12 @@ def due(db, now: datetime | None = None) -> str | None:
     from ai import test_mode
     if test_mode.active():
         return "测试模式中不自己发动态"
+    from ai import permissions
+    if permissions.level("qzone_post") == "forbid":
+        return "设置里不允许她自己发动态（设置 → 她能自己做的事）"
+    if permissions.level("qzone_post") == "ask" and db.fetch_one(
+            "SELECT 1 FROM approvals WHERE ability = 'qzone_post' AND status = 'pending'"):
+        return "上一条还在等你批准"
     now = now or datetime.fromisoformat(db.now()[:19])
     if not 9 <= now.hour <= 22:
         return "只在 9:00 到 23:00 之间发"
@@ -155,9 +161,32 @@ def tick(runtime, rng: random.Random | None = None) -> dict[str, Any] | None:
         if not idea["post"]:
             trace.step("QQ 动态", 结果="这次不发", 理由=idea["reason"])
             return None
+        from ai import permissions                       # 2026-10-30: "先问你" -- the owner approves in the chat
+        if permissions.level("qzone_post") == "ask":
+            number = permissions.request(runtime.db, "qzone_post", f"我想在 QQ 空间发一条动态：{idea['text']}",
+                                         {"text": idea["text"], "reason": idea["reason"]})
+            return {"approval": number, "text": idea["text"]}
         return post_now(runtime, idea["text"], origin="auto", reason=idea["reason"])
     except QzoneError as exc:
         logger.info("qzone post skipped: %s", exc)
     except Exception:
         logger.exception("qzone tick failed")
     return None
+
+
+def _approved_post(db, payload: dict[str, Any]) -> str:
+    """ai/permissions.py: the owner said yes to a post."""
+    from ai.permissions import _RUNTIME
+    runtime = _RUNTIME.get("rt")
+    if runtime is None:
+        raise QzoneError("Violet 还没准备好")
+    done = post_now(runtime, str(payload.get("text") or ""), origin="auto", reason=payload.get("reason"))
+    return f"发好了：{done['text']}"
+
+
+def _register() -> None:
+    from ai import permissions
+    permissions.register("qzone_post", _approved_post)
+
+
+_register()

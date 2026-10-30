@@ -90,6 +90,10 @@
   <section id="tab-overview" class="tab active">
     <div class="row"><h2>运行状态</h2><button class="ghost" id="ov-refresh">刷新</button></div>
     <div id="ov-cards" class="cards"></div>
+    <h3>今天的 token 用量</h3>
+    <div id="ov-usage"></div>
+    <div class="row"><button class="ghost" id="ov-prompt" type="button">看最近一次回复给模型的内容</button>
+      <span class="note">规则、人设、记忆、聊天记录……每一块多少字，都在这里</span></div>
     <h3>各 Agent 当前模型</h3>
     <div class="table-wrap"><table id="ov-agents"></table></div>
     <h3>最近的错误（只显示类型和时间，不显示内容）</h3>
@@ -137,6 +141,7 @@
     <h2>设置</h2>
     <nav class="jump" id="set-jump" aria-label="设置分类"></nav>
     <p class="note">模型和 API 在“模型服务”页。只列出代码里真正会读取的设置。“立即生效”保存后马上用于新的请求；“重启后生效”需要重启 Violet。保存前会整体检查，有任何一项不合格就一项也不改。</p>
+    <div class="set-group" id="set-g-permissions"><h3>她能自己做的事</h3><div id="set-permissions"></div></div>
     <div id="set-groups"></div>
     <div class="savebar"><input id="set-reason" maxlength="200" placeholder="修改原因（可选，会记在修改记录里）">
       <button id="set-save" disabled>保存修改</button>
@@ -145,10 +150,10 @@
     <h3>生活引擎</h3>
     <div class="row"><span id="life-mode" class="pill"></span>
       <button class="ghost" data-life="pause">暂停</button><button class="ghost" data-life="resume">恢复</button></div>
-    <h3>清除数据</h3>
+    <h3>清除数据 / 翻篇</h3>
     <div class="card danger-zone">
-      <p class="note">清除她的全部记忆、把全部配置恢复默认，可以只选一项，也可以两项都选。聊天记录不会删除。</p>
-      <button class="danger" id="set-reset" type="button">清除记忆 / 配置…</button>
+      <p class="note">清除她的全部记忆、把全部配置恢复默认、翻篇（她看不到以前的聊天，像重新开始），可以任选。聊天记录不会删除。</p>
+      <button class="danger" id="set-reset" type="button">清除记忆 / 配置 / 翻篇…</button>
     </div>
   </section>
 
@@ -319,6 +324,10 @@
     <p class="note">Violet 的核心人设、会慢慢变化的部分，以及她的虚拟生活。这里的生活经历都是虚构的；改动会记下原因，可以看历史。</p>
     <h3>选择人设 <span class="note">（几套模板，也可以用空白人设从零开始）</span></h3>
     <div id="pl-templates" class="platforms"></div>
+    <h3>和你的关系 <span class="note">（人设是“她是谁”，这里是“你们是什么关系”，可以自由搭配）</span></h3>
+    <div class="card" id="pl-relationship"></div>
+    <h3>不同聊天渠道用不同人设 <span class="note">（不设就和上面一样；记忆是共用的）</span></h3>
+    <div class="card" id="pl-channels"></div>
     <div class="card" id="pl-core"></div>
     <h3>人设动态 <span class="note">（缓慢变化，需要你批准）</span></h3>
     <div id="pl-dynamics" class="cards list"></div>

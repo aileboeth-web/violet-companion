@@ -162,8 +162,49 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
                    "message_totals": {"received": totals.get("user", 0), "sent": totals.get("assistant", 0)},
                    "aux_calls_24h": aux, "messages": violetdb.get_message_stats(), "errors": errors[:12],
                    "settings_revision": store().revision(),
-                   "notes": {"model_calls": "Intent / Chat / Memory / Proactive 的单次调用不写数据库，这里只有服务计数"
-                                            "（service.stats）和辅助模型（语义守卫等）的记录"}})
+                   "usage": _usage_summary(),
+                   "notes": {"model_calls": ""}})
+
+    # 2026-10-30: what she may do by herself, and what waits for the owner's approval (ai/permissions.py)
+    @app.get("/api/control/permissions")
+    def control_permissions():
+        from ai import permissions
+        return ok({"abilities": permissions.describe(), "levels": permissions.LEVELS,
+                   "pending": permissions.pending(violetdb), "recent": permissions.recent(violetdb)})
+
+    @app.post("/api/control/permissions")
+    def control_permissions_set():
+        from ai import permissions
+        body = request.get_json(silent=True) or {}
+        try:
+            permissions.set_level(str(body.get("ability") or ""), str(body.get("level") or ""))
+        except ValueError as exc:
+            return bad(str(exc))
+        return ok({"abilities": permissions.describe()})
+
+    @app.post("/api/control/approvals/<int:number>")
+    def control_approval(number: int):
+        from ai import permissions
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body.get("approve"), bool):
+            return bad("approve 要是 true 或 false")
+        try:
+            return ok(permissions.decide(violetdb, number, body["approve"], tell=True))
+        except ValueError as exc:
+            return bad(str(exc))
+
+    @app.get("/api/control/last-prompt")
+    def control_last_prompt():
+        """2026-10-30: what the last reply was built from (rules, persona, context, history, the message)."""
+        from ai.agents.chat_agent import LAST_PROMPT
+        return ok(dict(LAST_PROMPT) or None)
+
+    def _usage_summary():
+        from ai import usage                    # 2026-10-30: tokens of every model call today
+        try:
+            return usage.summary(violetdb)
+        except Exception:                       # noqa: BLE001 -- an old database without the table
+            return None
 
     # ------------------------------------------------------------------ chat history (read only)
     def _proactive_index(day_from: str, day_to: str) -> list[dict]:
@@ -826,7 +867,8 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
         / private chat back to its starting mode. Chat history, channels, the persona and the login stay."""
         body = request.get_json(silent=True) or {}
         memory, config = body.get("memory") is True, body.get("config") is True
-        if not memory and not config:
+        cut = body.get("cut") is True            # 2026-10-30 翻篇: she no longer sees the chat before now
+        if not memory and not config and not cut:
             return bad("请至少选一项")
         if body.get("confirm") is not True:
             return bad("清除需要确认（confirm: true）")
@@ -849,5 +891,8 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
             violetdb.execute("UPDATE social_conversations SET mode = CASE kind WHEN 'group' THEN 'off' ELSE 'auto' END, "
                              "daily_message_limit = 0, daily_decision_limit = 0, next_wake_at = NULL")
             out["config"] = result
-        logger.warning("dashboard reset by %s: memory=%s config=%s", actor(), memory, config)
+        if cut:
+            from ai import context_cut
+            out["cut"] = context_cut.cut(violetdb, "all")
+        logger.warning("dashboard reset by %s: memory=%s config=%s cut=%s", actor(), memory, config, cut)
         return ok(out)

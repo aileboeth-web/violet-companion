@@ -218,11 +218,43 @@ loaders.overview = async () => {
     errors.replaceChildren(h("tr", {}, h("th", { text: "时间" }), h("th", { text: "位置" }), h("th", { text: "类型" }), h("th", { text: "编号" })),
       ...((d.errors || []).length ? d.errors.map((e) => h("tr", {}, h("td", { text: when(e.at) }), h("td", { text: e.where }), h("td", { text: fmt(e.type) }), h("td", { text: e.id })))
         : [h("tr", {}, h("td", { colspan: 4, text: "没有记录到失败" }))]));
+    renderUsage(d.usage);
     const aux = (d.aux_calls_24h || []).map((r) => `${r.status} ${r.n} 次`).join("，") || "无";
-    $("#ov-note").textContent = `辅助模型最近 24 小时：${aux}。${d.notes ? d.notes.model_calls : ""}`;
+    $("#ov-note").textContent = `辅助模型最近 24 小时：${aux}。`;
     watchOverview(d.channels || []);
   } catch (e) { toast("概览读取失败：" + e.message, false); }
 };
+// 2026-10-30: today's tokens (ai/usage.py): totals, per conversation turn, cache hits, and which part used them
+function renderUsage(u) {
+  const box = $("#ov-usage");
+  if (!u || !u.calls) { box.replaceChildren(h("p", { class: "note", text: "今天还没有模型调用。" })); return; }
+  const k = (n) => (n >= 10000 ? (n / 10000).toFixed(1) + " 万" : String(n));
+  box.replaceChildren(
+    h("div", { class: "cards" },
+      stat("今天一共", `${k(u.total)} token · ${u.calls} 次调用`),
+      stat("你的每条消息平均", u.per_turn ? `${k(u.per_turn)} token · ${u.calls_per_turn} 次调用` : "—"),
+      stat("缓存命中", u.cache_rate === null ? "—" : `${Math.round(u.cache_rate * 100)}%（${k(u.cached)} token 按缓存价）`,
+        u.cache_rate === null ? "" : u.cache_rate >= 0.5 ? "ok" : "warn")),
+    h("div", { class: "table-wrap" }, h("table", {},
+      h("tr", {}, h("th", { text: "哪部分" }), h("th", { text: "调用" }), h("th", { text: "输入 token" }), h("th", { text: "其中命中缓存" }), h("th", { text: "输出 token" })),
+      ...u.parts.map((p) => h("tr", {}, h("td", { text: p.label }), h("td", { text: p.calls }), h("td", { text: k(p.prompt) }),
+        h("td", { text: k(p.cached) }), h("td", { text: k(p.completion) }))))));
+}
+// 2026-10-30: what the last reply was built from (GET /api/control/last-prompt), block by block with its size
+async function lastPromptDialog() {
+  let p;
+  try { p = await api("GET", "/api/control/last-prompt"); } catch (e) { toast(e.message, false); return; }
+  const ROLE = { system: "规则 / 资料", user: "对方的话", assistant: "她说过的话" };
+  const body = !p ? [h("p", { class: "note", text: "Violet 启动以来还没有回复过消息。" })] : [
+    h("p", { class: "note", text: `${when(p.at)} · 一共 ${p.chars} 字（中文大约 1 字 ≈ 1 token）· ${p.parts.length} 块` }),
+    ...p.parts.map((x) => h("details", {}, h("summary", { text: `${ROLE[x.role] || x.role} · ${x.chars} 字 · ${x.title || "（空）"}` }),
+      h("pre", { class: "prompt-part", text: x.text || "" })))];
+  const d = h("dialog", { class: "wide" }, h("div", { class: "stack" }, h("h3", { text: "最近一次回复给模型的内容" }), ...body,
+    h("div", { class: "row" }, h("button", { type: "button", text: "关闭", onclick: () => d.close() }))));
+  d.addEventListener("close", () => d.remove());
+  document.body.append(d); d.showModal();
+}
+$("#ov-prompt").addEventListener("click", lastPromptDialog);
 // 0.7.6: while a channel is still connecting (just after a start or an update), look again every few seconds
 let ovPending = null, ovTries = 0;
 function watchOverview(channels) {
@@ -414,15 +446,21 @@ loaders.memories = () => { memOffset = 0; loadMemories(); };
 // ---------------------------------------------------------------- tools (phase 9.2)
 const TOOL_STATUS = { connected: "已连接", unavailable: "连不上", disabled: "已停用", unknown: "还没检查" };
 const PERMISSION = { read: "只读", write: "写入（需另外授权）", high_risk: "高风险（需另外授权）", unknown: "不在白名单（隐藏）" };
+// the phone's server (made by the phone card's "连接") is shown in the phone card, not a second time in this list
+const PHONE_SERVER = "android-phone";
 function renderTools(servers) {
   $("#tools-updated").textContent = "更新于 " + new Date().toLocaleTimeString();
-  $("#tools-list").replaceChildren(...(servers.length ? servers.map((s) => {
+  const phone = servers.find((s) => s.name === PHONE_SERVER);
+  const others = servers.filter((s) => s.name !== PHONE_SERVER);
+  window.phoneToolServer = phone || null;
+  if (window.renderPhoneTools) window.renderPhoneTools();
+  $("#tools-list").replaceChildren(...(others.length ? others.map((s) => {
     const el = toolServerCard(s); el.id = "tool-srv-" + s.name; return el;
-  }) : [h("p", { class: "note", text: "没有配置任何 MCP 服务器" })]));
-  jumpNav($("#tools-jump"), [["手机 MCP", "phone-mcp"], ["联网工具", "tools-web"],
-    ...servers.filter((s) => s.name !== "violet-web").map((s) => [s.name, "tool-srv-" + s.name]), ["添加服务器", "mcp-add-box"]]);
+  }) : [h("p", { class: "note", text: "没有配置其他 MCP 服务器" })]));
+  jumpNav($("#tools-jump"), [["手机", "phone-mcp"], ["联网工具", "tools-web"],
+    ...others.filter((s) => s.name !== "violet-web").map((s) => [s.name, "tool-srv-" + s.name]), ["添加服务器", "mcp-add-box"]]);
 }
-function toolServerCard(s) {
+function toolServerCard(s, title = s.name) {
   const facts = [`状态 ${TOOL_STATUS[s.status] || s.status}`, `传输 ${s.transport}`, s.url ? `地址 ${s.url}` : null, s.command,
     `可用于 ${s.agents.join("、") || "—"}`, `提供方式 ${s.offer === "always" ? "每轮都给 Chat" : "需要时才给"}`,
     `调用 ${s.total_calls} 次 / 失败 ${s.total_failures} 次`];
@@ -434,7 +472,7 @@ function toolServerCard(s) {
   const headers = s.headers.map((x) => h("div", { class: "row" }, h("span", { text: `${x.header}：${x.is_set ? "已设置（" + x.fingerprint + "）" : "未设置"}` }),
     h("button", { class: "ghost", text: "替换", onclick: () => replaceToolSecret(s.name, x.header) })));
   return h("div", { class: "card" },
-    h("div", { class: "row" }, h("strong", { text: s.name }),
+    h("div", { class: "row" }, h("strong", { text: title }),
       h("button", { class: s.enabled ? "danger" : "ghost", text: s.enabled ? "停用服务器" : "启用服务器",
         onclick: async () => { try { await api("POST", `/api/control/tools/servers/${encodeURIComponent(s.name)}`, { enabled: !s.enabled }); toast("已保存"); loaders.tools(); } catch (e) { toast("失败：" + e.message, false); } } })),
     h("div", { class: "badges" }, ...facts.filter(Boolean).map((f) => pill(f))),
@@ -684,14 +722,25 @@ loaders.settings = async () => {
     // Violet stage 3: API and models are on the model page; the rest in a useful order, with a jump bar on top
     const order = SETTINGS_ORDER.filter((g) => g in d.groups).concat(Object.keys(d.groups).filter((g) => !SETTINGS_ORDER.includes(g)));
     const shown = [];
+    // 2026-10-30: the common settings by group; everything else folded under "高级设置"
+    const advanced = h("div", { class: "stack" });
     for (const g of order) {
       if (SETTINGS_ELSEWHERE.includes(g)) continue;
-      const rows = d.settings.filter((s) => s.group === g);
-      if (!rows.length) continue;
-      box.append(h("div", { class: "set-group", id: "set-g-" + g }, h("h3", { text: d.groups[g] }), ...rows.map((s) => settingInput(s))));
-      shown.push([d.groups[g], "set-g-" + g]);
+      const rows = d.settings.filter((s) => s.group === g && s.common);
+      const more = d.settings.filter((s) => s.group === g && !s.common);
+      if (rows.length) {
+        box.append(h("div", { class: "set-group", id: "set-g-" + g }, h("h3", { text: d.groups[g] }), ...rows.map((s) => settingInput(s))));
+        shown.push([d.groups[g], "set-g-" + g]);
+      }
+      if (more.length) advanced.append(h("div", { class: "set-group" }, h("h3", { text: d.groups[g] }), ...more.map((s) => settingInput(s))));
     }
-    jumpNav($("#set-jump"), shown);
+    if (advanced.children.length) {
+      box.append(h("details", { class: "set-advanced", id: "set-g-advanced" },
+        h("summary", { text: "高级设置（一般不用改：超时、重试、长度上限、检查用的模型、提示词版本等）" }), advanced));
+      shown.push(["高级", "set-g-advanced"]);
+    }
+    jumpNav($("#set-jump"), [["她能自己做的事", "set-g-permissions"], ...shown]);
+    renderPermissions();
     const life = await api("GET", "/api/life/engine").catch(() => null);
     $("#life-mode").textContent = "当前：" + fmt(life && (life.mode || (life.data && life.data.mode)));
     const rs = await api("GET", "/api/control/restart").catch(() => null);
@@ -699,6 +748,34 @@ loaders.settings = async () => {
     $("#set-restart-note").textContent = rs && !rs.available ? rs.reason : "";
   } catch (e) { toast("设置读取失败：" + e.message, false); }
 };
+// 2026-10-30: what she may do by herself (自己做 / 先问你 / 不允许) and the approvals waiting for you
+async function renderPermissions() {
+  const box = $("#set-permissions");
+  let d;
+  try { d = await api("GET", "/api/control/permissions"); } catch (e) { box.replaceChildren(h("p", { class: "err", text: e.message })); return; }
+  const rows = d.abilities.map((a) => {
+    const sel = h("select", { "aria-label": a.label }, ...Object.entries(d.levels).map(([v, label]) => h("option", { value: v, text: label })));
+    sel.value = a.level;
+    sel.addEventListener("change", async () => {
+      try { await api("POST", "/api/control/permissions", { ability: a.key, level: sel.value }); toast(`${a.label}：${d.levels[sel.value]}`); }
+      catch (e) { toast(e.message, false); sel.value = a.level; }
+    });
+    return h("div", { class: "set-row" }, h("div", {}, h("div", { text: a.label })), h("div", {}, sel, h("div", { class: "help", text: a.help })));
+  });
+  const STATUS = { pending: "等你批准", approved: "已同意，做好了", denied: "已拒绝", expired: "过期了", failed: "同意了但没做成" };
+  const decide = (id, approve) => async () => {
+    try { const r = await api("POST", `/api/control/approvals/${id}`, { approve }); toast(r.result); renderPermissions(); } catch (e) { toast(e.message, false); }
+  };
+  const list = d.recent.length ? d.recent.map((x) => h("div", { class: "card" },
+    h("div", { class: "row" }, pill(`#${x.id} ${STATUS[x.status] || x.status}`, x.status === "pending" ? "warn" : x.status === "approved" ? "ok" : ""),
+      h("span", { class: "note", text: when(x.created_at) })),
+    h("div", { text: x.summary }), x.result ? h("p", { class: "note", text: x.result }) : null,
+    x.status === "pending" ? h("div", { class: "row" }, h("button", { type: "button", text: "同意", onclick: decide(x.id, true) }),
+      h("button", { class: "ghost", type: "button", text: "不同意", onclick: decide(x.id, false) })) : null))
+    : [h("p", { class: "note", text: "还没有请你批准过什么。" })];
+  box.replaceChildren(...rows, h("p", { class: "note", text: "“先问你”时，她会私聊你要做的事，你回“同意 编号”或“不同意 编号”就行，也可以在下面点。24 小时没回就作废。" }),
+    h("details", { open: d.pending.length > 0 }, h("summary", { text: `批准记录（等你批准的 ${d.pending.length} 个）` }), ...list));
+}
 async function restartViolet() {
   if (!(await confirmBox("重启 Violet？正在处理的消息会在重启后继续，大约需要十几秒。"))) return;
   try { await api("POST", "/api/control/restart", { confirm: true }); }
@@ -718,30 +795,34 @@ async function restartViolet() {
 $("#set-restart").addEventListener("click", restartViolet);
 // 0.7.9: clear her memory and / or every setting (user: "二选一或都选")
 function resetDialog() {
-  const mem = h("input", { type: "checkbox" }), cfg = h("input", { type: "checkbox" });
+  const mem = h("input", { type: "checkbox" }), cfg = h("input", { type: "checkbox" }), cut = h("input", { type: "checkbox" });
+  mem.addEventListener("change", () => { if (mem.checked) cut.checked = true; });   // forgetting without 翻篇 does not stick
   const err = h("p", { class: "err" });
   const d = h("dialog", {}, h("form", { method: "dialog", class: "stack" },
-    h("h3", { text: "清除数据" }),
+    h("h3", { text: "清除数据 / 翻篇" }),
     h("label", { class: "check" }, mem, h("span", {}, h("strong", { text: " 清除所有记忆" }),
       h("span", { class: "note", text: "：她记得的关于你的事、你的资料、约定和提醒、她的生活经历和人设变化、对群友的印象。清除前会在服务器上存一份备份。" }))),
     h("label", { class: "check" }, cfg, h("span", {}, h("strong", { text: " 清除所有配置" }),
       h("span", { class: "note", text: "：设置页和图片页改过的设置全部恢复默认，QQ 群全部回到“关闭”。模型服务（API 地址、Key、模型）保留，不然她就没法说话了；可以在“修改记录”里回滚。" }))),
-    h("p", { class: "note", text: "聊天记录、聊天渠道的绑定、人设和登录账号都不会动。" }),
+    h("label", { class: "check" }, cut, h("span", {}, h("strong", { text: " 翻篇" }),
+      h("span", { class: "note", text: "：从现在起她看不到以前的聊天（和你的、群里的都算），像重新开始聊。聊天记录不删，“聊天记录”页照样能看。只清记忆不翻篇的话，她还会从最近的聊天里看到以前的事。" }))),
+    h("p", { class: "note", text: "聊天渠道的绑定、人设和登录账号都不会动。" }),
     err,
     h("div", { class: "row" },
       h("button", { type: "button", class: "ghost", text: "取消", onclick: () => { d.close(); d.remove(); } }),
-      h("button", { type: "button", class: "danger", text: "清除", onclick: async () => {
+      h("button", { type: "button", class: "danger", text: "确定", onclick: async () => {
         err.textContent = "";
-        if (!mem.checked && !cfg.checked) { err.textContent = "请至少选一项"; return; }
-        const what = [mem.checked ? "全部记忆" : null, cfg.checked ? "全部配置" : null].filter(Boolean).join("和");
+        if (!mem.checked && !cfg.checked && !cut.checked) { err.textContent = "请至少选一项"; return; }
+        const what = [mem.checked ? "清除全部记忆" : null, cfg.checked ? "清除全部配置" : null, cut.checked ? "翻篇" : null].filter(Boolean).join("、");
         d.close();
-        if (!(await confirmBox(`确定清除${what}？这一步不能在页面上撤销。`))) { d.remove(); return; }
+        if (!(await confirmBox(`确定${what}？这一步不能在页面上撤销。`))) { d.remove(); return; }
         d.remove();
         try {
-          const r = await api("POST", "/api/control/reset", { memory: mem.checked, config: cfg.checked, confirm: true });
+          const r = await api("POST", "/api/control/reset", { memory: mem.checked, config: cfg.checked, cut: cut.checked, confirm: true });
           const parts = [];
           if (r.memory) parts.push(`记忆已清除（备份：${r.memory.archive}）`);
           if (r.config) parts.push(`${r.config.reset.length} 项设置已恢复默认`);
+          if (r.cut) parts.push("已翻篇");
           toast(parts.join("；")); loaders.settings();
         } catch (e) { toast("清除失败：" + e.message, false); }
       } }))));

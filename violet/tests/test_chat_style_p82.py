@@ -30,7 +30,8 @@ def test_loaded_prompt_is_v1_and_v0_is_kept_verbatim(monkeypatch):
     from ai.agents.chat_agent import ChatAgent
     monkeypatch.delenv("CHAT_LLM_PROMPT", raising=False)
     assert "CHAT_LLM_PROMPT" not in _parse_env_file(PROJECT / "env_example")      # prompts live in files now
-    assert ChatAgent.configured_prompt() == V1.strip()                             # a fresh install loads v1
+    # 2026-10-30: a fresh install loads v3 (v1 without the built-in "你是 Violet，一个虚构的女孩"); v1 stays as it was
+    assert ChatAgent.configured_prompt() == (VERSIONS / "chat.v3.txt").read_text(encoding="utf-8").strip()
     v0 = (VERSIONS / "chat.v0.txt").read_text(encoding="utf-8")
     assert hashlib.sha256(v0.encode("utf-8")).hexdigest() == V0_SHA256
     assert "允许露骨内容" in v0 and "找一个轻量借口" in v0          # the record of what was replaced

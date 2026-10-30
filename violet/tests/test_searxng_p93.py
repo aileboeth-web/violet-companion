@@ -25,6 +25,13 @@ from tests.test_web_p93 import FETCH, PAGE, SEARCH, chat_plays, offered, systems
 from tests.test_web_security import make_fetcher
 from tests.web_fixtures import LocalWeb
 
+
+@pytest.fixture(autouse=True)
+def _planned_tools_only(monkeypatch):
+    """These tests describe the tools offered only when Intent plans them (VIOLET_CHAT_TOOLS_DIRECT=0); the default
+    since 2026-10-30 (every read-only tool on every turn) is tested in tests/test_chat_polish_violet.py."""
+    monkeypatch.setenv("VIOLET_CHAT_TOOLS_DIRECT", "0")
+
 PROJECT = Path(__file__).resolve().parents[1]
 DEPLOY = PROJECT / "deploy" / "searxng"
 HIT = {"title": "Python 3.14 正式发布", "url": "http://news.example.org/release", "content": "Python 3.14 发布了",

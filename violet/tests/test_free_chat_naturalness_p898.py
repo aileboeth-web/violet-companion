@@ -170,7 +170,7 @@ def test_chat_v2_changes_how_a_reply_is_organised_not_what_eve_is():
 
 def test_proactive_v2_drops_the_time_of_day_template_only():
     from ai.agents.proactive_agent import ProactiveAgent
-    assert ProactiveAgent.default_prompt_file.endswith("proactive.v1.txt")                       # the stable one, kept
+    assert ProactiveAgent.default_prompt_file.endswith("proactive.v3.txt")    # 2026-10-30: v1 without "虚拟女友"
     for gone in ("【主动聊天可以选择的方向】", "中午/下午：问吃饭没", "问用户在干嘛", "轻轻问他现在在干嘛", "退化为普通关心"):
         assert gone in PROACTIVE_V1 and gone not in PROACTIVE_V2, gone
     assert "时间段本身不是理由" in PROACTIVE_V2 and "已经说好的就按说好的往下说" in PROACTIVE_V2
@@ -326,7 +326,9 @@ def test_replay_v2_sends_the_candidates_and_keeps_them(runs):
     assert all(r[0]["content"] == PROACTIVE_V2.strip() for r in requests(path, "ProactiveAgent"))
     v1_path, _ = runs["v1"]
     assert all(r[0]["content"] != CHAT_V2.strip() for r in requests(v1_path, "ChatAgent"))
-    assert all(r[0]["content"] == PROACTIVE_V1.strip() for r in requests(v1_path, "ProactiveAgent"))
+    # 2026-10-30: the run without a chosen version uses the default, now v3
+    proactive_v3 = (cd.PROJECT / "persona/proactive_prompt_versions/proactive.v3.txt").read_text(encoding="utf-8")
+    assert all(r[0]["content"] == proactive_v3.strip() for r in requests(v1_path, "ProactiveAgent"))
     assert "提示词：chat v2、proactive v2" in (path / fc.TRANSCRIPT).read_text(encoding="utf-8")
     code, out = replay(path, ["--chat-prompt", "v1"], lines=["yes", "/quit"])
     assert code == 2 and "不能换成 v1" in out

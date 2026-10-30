@@ -136,7 +136,7 @@
         h("p", { class: "note", text: t.summary }),
         t.blank ? h("label", {}, "给她起个名字（可选） ", name) : null,
         h("label", { class: "check" }, keep, " 保留记忆：她记得你、记得以前聊过的事，只是性格和说话方式换了"),
-        h("label", { class: "check" }, clear, " 清除记忆：从零开始（记忆、你的资料、她的生活经历都清空；聊天记录保留；清除前会在服务器上存一份备份）"),
+        h("label", { class: "check" }, clear, " 清除记忆：从零开始（记忆、你的资料、她的生活经历都清空，并且翻篇：她看不到以前的聊天；聊天记录保留在后台；清除前会在服务器上存一份备份）"),
         h("div", { class: "row" },
           h("button", { type: "button", class: "ghost", text: "取消", onclick: () => { d.close(); d.remove(); resolve(null); } }),
           h("button", { type: "button", text: "换人设", onclick: () => {
@@ -170,7 +170,7 @@
       h("label", {}, "名字 ", f.name), h("label", {}, "介绍 ", f.summary), h("label", {}, "日常 ", f.self_description),
       h("label", {}, "性格 ", f.personality), h("label", {}, "说话习惯 ", f.communication_habits),
       h("label", {}, "兴趣 ", f.interests), h("label", {}, "看重 ", f.values), h("label", {}, "小缺点 ", f.flaws),
-      h("label", { class: "check" }, keep, " 保留记忆"), h("label", { class: "check" }, clear, " 清除记忆（先在服务器上存备份）"),
+      h("label", { class: "check" }, keep, " 保留记忆"), h("label", { class: "check" }, clear, " 清除记忆并翻篇（先在服务器上存备份；聊天记录保留在后台）"),
       err,
       h("div", { class: "row" },
         h("button", { type: "button", class: "ghost", text: "取消", onclick: () => { d.close(); d.remove(); } }),
@@ -209,9 +209,48 @@
     return card;
   }
 
+  // 2026-10-30: the relationship (second layer) and a persona / relationship per channel
+  function relationshipSelect(d, value, withMain) {
+    const sel = h("select", { "aria-label": "关系" }, ...(withMain ? [h("option", { value: "", text: "和主设定一样" })] : []),
+      ...d.relationships.map((r) => h("option", { value: r.key, text: r.label, title: r.text })));
+    sel.value = value || "";
+    return sel;
+  }
+  function renderRelationship(d) {
+    const rel = d.relationship || { kind: "close" };
+    const sel = relationshipSelect(d, rel.kind, false);
+    const call = h("input", { maxlength: 12, placeholder: "她怎么称呼你（可空，例如 爸爸）" }); call.value = rel.call || "";
+    const text = h("p", { class: "note" });
+    const show = () => { const r = d.relationships.find((x) => x.key === sel.value); text.textContent = r ? r.text : ""; };
+    sel.addEventListener("change", show); show();
+    $("#pl-relationship").replaceChildren(h("div", { class: "row" }, sel, call,
+      h("button", { type: "button", text: "保存", onclick: async () => {
+        try { await api("POST", "/api/persona/relationship", { kind: sel.value, call: call.value }); toast("已保存，下一条消息起生效"); loaders.persona(); }
+        catch (e) { toast(e.message, false); }
+      } })), text);
+  }
+  function renderChannelPersonas(d) {
+    const options = [h("option", { value: "", text: "和主人设一样" }),
+      ...d.templates.map((t) => h("option", { value: t.key, text: t.title })), ...(d.custom ? [h("option", { value: "custom", text: "自定义人设" })] : [])];
+    const rows = (d.channels || []).map((c) => {
+      const tpl = h("select", { "aria-label": "人设" }, ...options.map((o) => o.cloneNode(true))); tpl.value = c.template || "";
+      const rel = relationshipSelect(d, (c.relationship || {}).kind, true);
+      const call = h("input", { maxlength: 12, placeholder: "称呼（可空）" }); call.value = (c.relationship || {}).call || "";
+      return h("div", { class: "row" }, h("strong", { text: c.label, style: "min-width:7em" }), tpl, rel, call,
+        h("button", { class: "ghost", type: "button", text: "保存", onclick: async () => {
+          try { await api("POST", "/api/persona/channel", { channel: c.id, template: tpl.value || null, kind: rel.value || null, call: call.value }); toast(`${c.label} 已保存`); }
+          catch (e) { toast(e.message, false); }
+        } }));
+    });
+    $("#pl-channels").replaceChildren(...(rows.length ? rows : [h("p", { class: "note", text: "还没有聊天渠道。" })]),
+      h("p", { class: "note", text: "比如：微信上是“Violet + 恋人”，QQ 上是“AI + 开发者”。记忆、提醒和课表是共用的；QQ 群里也按 QQ 这一行的设定。" }));
+  }
+
   async function renderTemplates() {
     let d;
     try { d = await api("GET", "/api/persona/templates"); } catch (e) { $("#pl-templates").replaceChildren(h("p", { class: "err", text: e.message })); return; }
+    renderRelationship(d);
+    renderChannelPersonas(d);
     const own = h("div", { class: "card platform" },
       h("div", { class: "platform-head" }, h("strong", { text: "自定义人设" }), d.current.template === "custom" ? pill("正在使用", "ok") : pill("自己写", "")),
       h("p", { class: "note platform-intro", text: "名字、性格、说话方式、兴趣都自己写；从现在用的人设开始改。" }),

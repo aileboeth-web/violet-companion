@@ -15,6 +15,13 @@ from tests.fakes import completion, intent_json
 from tests.test_phase2_scenarios import make_world, say  # noqa: F401  (make_world: fixture)
 from tests.test_tools_p92 import fresh_registry, offered, system, world  # noqa: F401  (fresh_registry: fixture)
 
+
+@pytest.fixture(autouse=True)
+def _planned_tools_only(monkeypatch):
+    """These tests describe the tools offered only when Intent plans them (VIOLET_CHAT_TOOLS_DIRECT=0); the default
+    since 2026-10-30 (every read-only tool on every turn) is tested in tests/test_chat_polish_violet.py."""
+    monkeypatch.setenv("VIOLET_CHAT_TOOLS_DIRECT", "0")
+
 SCHEDULE, WEATHER, SEARCH = "campus__get_course_schedule", "campus__get_weather", "campus__search_web"
 QUESTION = "周三下午要是没课，我想去西湖边走走。帮我查查那天下午有没有课，天气适不适合出门？"
 ARGS = {SCHEDULE: {"day": "周三"}, WEATHER: {"city": "杭州"}, SEARCH: {"query": "西湖 周三"}}

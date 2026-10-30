@@ -179,9 +179,13 @@ def prepare_environment(workdir: Path | None = None, config_file: Path | None = 
         values.update({k: v for k, v in cfg.items() if ALLOWED_KEYS.match(k)})
         values["_ignored_config_keys"] = ",".join(refused)
     for key in [k for k in environ if k.startswith(("VIOLET_", "LLM_", "MCP_")) or k.endswith("_LLM_MODEL")]:
-        if key not in ("VIOLET_TEST_ALLOW_REAL_API", "VIOLET_TEST_API_KEY", "VIOLET_TEST_API_URL", "VIOLET_TEST_SEARCH_API_KEY"):
+        if key not in ("VIOLET_TEST_ALLOW_REAL_API", "VIOLET_TEST_API_KEY", "VIOLET_TEST_API_URL", "VIOLET_TEST_SEARCH_API_KEY",
+                       "VIOLET_TEST_CHAT_TOOLS_DIRECT"):
             environ.pop(key, None)                        # nothing from the tester's shell leaks into Violet
     environ.update({k: v for k, v in values.items() if not k.startswith("_")})
+    if environ.get("VIOLET_TEST_CHAT_TOOLS_DIRECT") in ("0", "1"):
+        # 2026-10-30: a test of the old tool mode (tools only when Intent plans them) can still run it
+        environ["VIOLET_CHAT_TOOLS_DIRECT"] = environ["VIOLET_TEST_CHAT_TOOLS_DIRECT"]
     environ.update(FORCED)
     environ.update({
         "VIOLET_ENV_FILE": str(empty_env), "VIOLET_DB_PATH": str(workdir / "violet-test.db"),

@@ -170,6 +170,8 @@ with patch("openai.OpenAI", FakeSDK):
 def child_env():
     env = {k: v for k, v in os.environ.items() if not k.startswith(("VIOLET_", "LLM_"))}
     env.update(PYTHONIOENCODING="utf-8", VIOLET_TEST_ALLOW_REAL_API="1", VIOLET_TEST_API_KEY=KEY, NO_PROXY="127.0.0.1,localhost")
+    if "VIOLET_CHAT_TOOLS_DIRECT" in os.environ:          # 2026-10-30: a test pinned to the old tool mode keeps it
+        env["VIOLET_TEST_CHAT_TOOLS_DIRECT"] = os.environ["VIOLET_CHAT_TOOLS_DIRECT"]       # (tools/harness.py)
     return env
 
 

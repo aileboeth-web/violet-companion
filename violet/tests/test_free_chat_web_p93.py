@@ -13,9 +13,19 @@ import json
 import subprocess
 import sys
 
+import pytest
+
 from tests.test_free_chat_budget_p911 import KEY, child_env, real
 
-SKEY = "fake-search-key-p93-0123456789"
+
+@pytest.fixture(autouse=True)
+def _planned_tools_only(monkeypatch):
+    """These tests describe the tools offered only when Intent plans them (VIOLET_CHAT_TOOLS_DIRECT=0); the default
+    since 2026-10-30 (every read-only tool on every turn) is tested in tests/test_chat_polish_violet.py."""
+    monkeypatch.setenv("VIOLET_CHAT_TOOLS_DIRECT", "0")
+
+
+SKEY ="fake-search-key-p93-0123456789"
 SEARCH, FETCH = "violet-web__web_search", "violet-web__fetch_url"
 
 BOOT = r'''

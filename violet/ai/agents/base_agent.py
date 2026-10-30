@@ -329,6 +329,9 @@ class BaseAgent:
                        结果=f"失败（{kind}：{exc.__class__.__name__}）")
             raise
         record("model", True, agent=self.__class__.__name__)
+        from ai import usage as usage_ledger
+        usage_ledger.record(self.__class__.__name__, getattr(completion, "model", None) or kwargs.get("model"),
+                            getattr(completion, "usage", None))
         if trace.enabled():
             usage = getattr(completion, "usage", None)
             calls = []
@@ -476,6 +479,12 @@ class BaseAgent:
                         arguments = {}
 
                     denial = guard.check(tool_name, arguments) if guard is not None else None
+                    binding = mcp_bridge.tool_to_session.get(tool_name)
+                    if denial is None and binding is not None and binding.extra.get("needs_approval"):
+                        # 2026-10-30 (ai/permissions.py): this tool waits for the owner -- not run now
+                        from ai.chat import violetdb as _db
+                        from ai.permissions import ask_for_tool
+                        denial = ask_for_tool(_db, tool_name, arguments)
                     refused = mcp_bridge.denied_tools + mcp_bridge.disabled_tools
                     if denial is None and tool_name not in offered and tool_name not in refused:
                         denial = json.dumps({"ok": False, "error_code": "UNKNOWN_TOOL",

@@ -155,6 +155,8 @@ class AuxLLM:
                 self._record("error", int((time.monotonic() - started) * 1000), error=last_error, attempt=attempt)
                 continue
             latency = int((time.monotonic() - started) * 1000)
+            from ai import usage
+            usage.record("aux", self.config.model, getattr(response, "usage", None), db=getattr(self, "db", None))
             try:
                 content = response.choices[0].message.content
                 value = parse_json_object(content)

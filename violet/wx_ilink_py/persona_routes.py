@@ -58,7 +58,43 @@ def register_persona_routes(app: Flask, violetdb) -> None:
         from ai import persona_templates as pt
         from ai import test_mode
         return ok({"templates": pt.templates(), "current": pt.current(), "custom": pt.custom_preview(),
-                   "test_mode": test_mode.status()})
+                   "test_mode": test_mode.status(),
+                   # 2026-10-30: the second layer, and per channel
+                   "relationship": pt.relationship(),
+                   "relationships": [{"key": k, "label": v[0], "text": v[1]} for k, v in pt.RELATIONSHIPS.items()],
+                   "channels": _channel_rows(pt)})
+
+    def _channel_rows(pt) -> list[dict]:
+        from ai.channels.manager import ChannelStore
+        stored = ChannelStore().channels()
+        names = {"wechat": (stored.get("wechat") or {}).get("label") or "微信"}
+        for cid, entry in stored.items():
+            if cid != "wechat" and isinstance(entry, dict):
+                names[cid] = entry.get("label") or cid
+        own = pt.channel_map()
+        return [{"id": cid, "label": label, "template": (own.get(cid) or {}).get("template"),
+                 "relationship": (own.get(cid) or {}).get("relationship")} for cid, label in names.items()]
+
+    @app.post("/api/persona/relationship")
+    def persona_relationship():
+        from ai import persona_templates as pt
+        data = body()
+        try:
+            return ok(pt.set_relationship(str(data.get("kind") or ""), data.get("call")))
+        except ValueError as exc:
+            return bad(str(exc))
+
+    @app.post("/api/persona/channel")
+    def persona_channel():
+        """{channel, template: key | "custom" | null (the main one), kind: relationship | null, call}"""
+        from ai import persona_templates as pt
+        data = body()
+        try:
+            pt.set_channel(str(data.get("channel") or ""), data.get("template") or None, data.get("kind") or None,
+                           data.get("call"))
+        except ValueError as exc:
+            return bad(str(exc))
+        return ok({"channels": _channel_rows(pt)})
 
     # -- 2026-10-30: test mode (ai/test_mode.py) -- on top of the persona, which stays as it is ------------------------
     @app.post("/api/persona/test-mode")

@@ -601,7 +601,8 @@ def _run_pipeline(
     errors: dict[str, str] = {}
 
     # Step 0 (phase 9.2): the external tools that are really available now -- Intent decides with this list
-    from ai.tool_manager import Catalog, chat_note, discover, intent_note, plan_for_turn, tool_results_from
+    from ai.tool_manager import (Catalog, chat_note, direct_note, direct_tools, discover, intent_note, plan_for_turn,
+                                 tool_results_from)
     try:
         catalog = discover()
     except Exception:
@@ -746,6 +747,7 @@ def _run_pipeline(
         _ps.node_done("Intent", "Chat", output_data={"messages": intent_result.get("messages", []), "content": intent_json})
         _ps.node_skip("Performer")
 
+    direct = direct_tools(catalog) if reminder is None and forget is None else []
     # Step 2: 对话生成
     visualize_step("Chat Generation", "生成回复消息")
     chat_input = {"user_message": user_message, "performer_result": bool(performer_result), "recalled_memories_count": len(recalled_memories)}
@@ -765,7 +767,10 @@ def _run_pipeline(
         # phase 9.2: the turn's tool plan (ChatAgent offers / forces the tools from it), what Chat must know about
         # it, and the external data the Performer's tools returned (to answer from, not only a task log)
         "tool_plan": plan,
-        "tool_note": chat_note(plan, catalog),
+        "tool_note": chat_note(plan, catalog) or direct_note(direct),
+        # 2026-10-30 (rework step 2, "他不会用工具"): the read-only tools go to Chat on every turn, it decides itself;
+        # Intent's tool_query still makes the named one come first. Off: VIOLET_CHAT_TOOLS_DIRECT=0 (only when planned)
+        "direct_tools": direct,
         "tool_results": tool_results_from((performer_result or {}).get("messages") or []),
     }
     try:

@@ -64,6 +64,7 @@ class Setting:
     def public(self) -> dict[str, Any]:
         out = {k: getattr(self, k) for k in ("key", "label", "group", "kind", "effect", "help", "default", "min", "max",
                                               "optional")}
+        out["common"] = self.key in COMMON_KEYS
         if self.kind == "prompt_version":
             out["choices"] = prompt_versions(self.key.split(".")[1])
         elif self.kind == "choice":
@@ -128,6 +129,9 @@ SETTINGS: list[Setting] = [
             "开启后 Violet 在需要实时信息时可以搜索（需要下面的 SearXNG 地址，或在 .env 里配置其他搜索服务）", False),
     Setting("VIOLET_WEB_SEARXNG_URL", "SearXNG 地址", "features", "url", "now",
             "自建 SearXNG 的地址，例如 http://127.0.0.1:18089（部署方法见 deploy/searxng/README.md）", optional=True),
+    Setting("VIOLET_CHAT_TOOLS_DIRECT", "查询工具直接交给回复", "features", "bool", "now",
+            "开：每一轮回复都能直接用连上的只读工具（联网搜索、课表、手机状态等），自己判断要不要查；"
+            "关：只在意图识别判断要查时才给（以前的做法，少一点 token，但容易漏查）", True),
     Setting("VIOLET_SCHEDULE_ENABLED", "课表查询（violet-schedule）", "features", "bool", "now",
             "Violet 可以查你在“课表”页录入的课表", False),
     Setting("VIOLET_SCHEDULE_CONTEXT", "聊天时考虑课表", "features", "bool", "now", "聊天时知道你现在是不是在上课", False),
@@ -154,6 +158,9 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_SOCIAL_PRIVATE", "别人私聊她", "social", "choice", "now",
             "不是你的人私聊 Violet 时：不理 / 只回群里认识的人 / 谁都回（她仍然自己决定说不说）", "all",
             choices=(("off", "不理"), ("known", "只回群里认识的人"), ("all", "谁都回"))),
+    Setting("VIOLET_SOCIAL_OBEY_OWNER", "群里听主人的话", "social", "bool", "now",
+            "开：你（绑定的主人）在群里或私聊里让她说话、发表情包、收藏表情包、别说了，她照做，做不到会说原因；"
+            "别人的话仍然只当聊天。你们私聊的事、链接和联系方式，就算你在群里让她说也不会说。关：你的话也只当聊天", True),
     Setting("VIOLET_SOCIAL_MODEL", "群聊用的模型", "social", "model", "now",
             "决定在群里说不说、说什么用的模型；留空 = 和 Chat 一样。群消息多时可以换便宜一点的模型", optional=True),
     Setting("VIOLET_SOCIAL_QUIET_SECONDS", "等群里安静几秒再决定", "social", "float", "now",
@@ -271,6 +278,16 @@ SETTINGS: list[Setting] = [
             choices=(("auto", "自动更新"), ("notify", "自动检查，只提醒"), ("manual", "手动检查"))),
 ]
 BY_KEY = {s.key: s for s in SETTINGS}
+# 2026-10-30 (user: "很多开关，现在给我的感觉就是很冗余"): what the settings page shows by default; everything else is under
+# a folded "高级设置" (timeouts, retries, sizes, check models, prompt versions...). Nothing is removed: a value saved
+# before keeps working.
+COMMON_KEYS = frozenset({
+    "VIOLET_ONBOARDING", "VIOLET_FOLLOW_UP_CHECK", "DEBOUNCE_NORMAL", "VIOLET_SIMULATE_TYPING",
+    "proactive.enabled", "proactive.quiet_start", "proactive.quiet_end", "proactive.daily_limit",
+    "VIOLET_LIFE_ENGINE", "VIOLET_DAILY_LIFE", "VIOLET_PROFILE_STORE_SENSITIVE", "VIOLET_COMMITMENT_DEFAULT_TIME",
+    "VIOLET_WEB_ENABLED", "VIOLET_SCHEDULE_ENABLED", "VIOLET_SOCIAL_PRIVATE", "VIOLET_SOCIAL_OBEY_OWNER",
+    "VIOLET_STICKERS", "VIOLET_QZONE_ENABLED", "VIOLET_TIMEZONE", "VIOLET_UPDATE_MODE", "VIOLET_TRACE",
+})
 GROUPS = {"api": "接口", "models": "模型与 Agent", "prompts": "提示词版本", "messages": "消息发送", "proactive": "主动联系",
           "life": "生活引擎", "behavior": "聊天行为", "memory": "记忆与提醒", "guard": "回复检查", "features": "功能开关",
           "images": "图片", "social": "QQ 群聊、表情包与动态", "mcp": "MCP 工具调用", "system": "系统", "logs": "日志与排查", "updates": "版本更新"}

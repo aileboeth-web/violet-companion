@@ -335,9 +335,9 @@ class ContextEngine:
         """Messages of the current conversation: back from now until a quiet gap (VIOLET_CONTEXT_SESSION_GAP_HOURS)."""
         from ai.memory_model import parse_time
         gap = timedelta(hours=env_float("VIOLET_CONTEXT_SESSION_GAP_HOURS", 3.0))
-        from ai import test_mode
+        from ai import context_cut
         out, later = [], parse_time(self.db.now())
-        for row in reversed(test_mode.after_since(self.db.get_recent_messages(limit=30))):
+        for row in reversed(context_cut.owner_rows(self.db.get_recent_messages(limit=30))):
             at = parse_time(row["created_at"]) if row.get("created_at") else None
             if at is None or later - at >= gap:
                 break
@@ -435,16 +435,99 @@ class ContextEngine:
             return []
         core_lines = core.render().splitlines()
         sections = [_Section("persona_core", 0, core_lines[0], core_lines[1:], trim_from_end=False)]
+        sections.append(self._relationship_role_section())                      # 2026-10-30: the second layer
         dynamic = PersonaDynamics(self.db).render()
         if dynamic:
             lines = dynamic.splitlines()
             sections.append(_Section("persona_dynamic", 3, lines[0], lines[1:]))
-        sections.append(self._life_section(mode, user_message, call_context, LifeStore(self.db)))
+        if core.is_ai:
+            # 2026-10-30: an AI that knows it is one has no virtual life -- its real experiences and abilities instead
+            sections.append(self._ai_experience_section())
+            sections.append(self._ai_ability_section())
+        else:
+            sections.append(self._life_section(mode, user_message, call_context, LifeStore(self.db)))
         if mode == "chat":
             sections.append(self._web_section(user_message, call_context))
             sections.append(self._social_section())
             sections.append(self._sticker_section())
         return sections
+
+    def _relationship_role_section(self) -> _Section:
+        """2026-10-30: how she relates to the owner (persona_templates.RELATIONSHIPS), per channel."""
+        try:
+            from ai.channels.context import current
+            from ai.persona_templates import RELATIONSHIPS, relationship
+            rel = relationship(current().channel)
+        except Exception:                                   # noqa: BLE001
+            logger.exception("relationship unavailable")
+            return _Section("relationship_role", 1, "", [])
+        if rel["kind"] == "close" and not rel["call"]:
+            return _Section("relationship_role", 1, "", [])        # the default adds nothing (as before 2026-10-30)
+        call = f"你称呼对方“{rel['call']}”（偶尔叫，不要句句带）。" if rel["call"] else ""
+        return _Section("relationship_role", 1, f"【你们的关系：{rel['label']}】", [RELATIONSHIPS[rel['kind']][1] + call],
+                        trim_from_end=False)
+
+    def _ai_experience_section(self) -> _Section:
+        """What really happened lately, from Violet's own records (the AI persona's "life")."""
+        from ai.memory_model import parse_time
+        lines: list[str] = []
+        now = parse_time(self.db.now())
+        day = now.date().isoformat()
+        since = (now - timedelta(hours=24)).isoformat(timespec="seconds")
+        try:
+            talk = self.db.fetch_one("SELECT COUNT(*) AS n FROM messages WHERE created_at >= ?", (day,))["n"]
+            if talk:
+                lines.append(f"- 今天你和主人一共聊了 {talk} 条消息")
+            for r in self.db.fetch_all("SELECT c.title, c.peer_id, c.kind, COUNT(*) AS n FROM social_messages m JOIN "
+                                       "social_conversations c ON c.id = m.conversation_id WHERE m.is_self = 1 AND "
+                                       "m.created_at >= ? GROUP BY c.id ORDER BY n DESC LIMIT 3", (since,)):
+                where = f"QQ 群「{r['title'] or r['peer_id']}」" if r["kind"] == "group" else f"和 {r['title'] or r['peer_id']} 私聊时"
+                lines.append(f"- 最近一天你在{where}说了 {r['n']} 句话")
+            kept = self.db.fetch_one("SELECT COUNT(*) AS n FROM stickers WHERE created_at >= ?", (since,))["n"]
+            if kept:
+                lines.append(f"- 最近一天你收藏了 {kept} 个表情包")
+            searched = self.db.fetch_one("SELECT COUNT(*) AS n FROM web_requests WHERE created_at >= ?", (since,))["n"]
+            if searched:
+                lines.append(f"- 最近一天你上网查了 {searched} 次")
+        except Exception:                                   # noqa: BLE001 -- a table an old database does not have
+            logger.debug("experience lines unavailable", exc_info=True)
+        from ai import context_cut, persona_templates
+        info = persona_templates.current()
+        if info.get("switched_at"):
+            what = "清除了记忆、换了设定" if info.get("memory") == "clear" else "换了设定（记忆保留）"
+            lines.append(f"- {str(info['switched_at'])[:16].replace('T', ' ')} 主人给你{what}")
+        cut = context_cut.status().get("owner")
+        if cut:
+            lines.append(f"- {str(cut)[:16].replace('T', ' ')} 翻过一次篇：那之前的聊天你看不到了")
+        if not lines:
+            lines.append("- 最近没有什么特别的记录")
+        return _Section("ai_experience", 2, "【你最近真实的经历（系统记录，都是真的）】", lines)
+
+    def _ai_ability_section(self) -> _Section:
+        """What the AI persona can really do right now (switches that are on, channels that exist)."""
+        from ai.settings import env_bool, env_str
+        able = []
+        if env_bool("VIOLET_WEB_ENABLED", False):
+            able.append("上网搜索、读网页")
+        if env_bool("VIOLET_SCHEDULE_ENABLED", False):
+            able.append("查主人录入的课表")
+        if env_bool("VIOLET_IMAGE_ENABLED", False) and env_str("VIOLET_IMAGE_GEN_MODEL", "").strip():
+            able.append("画图")
+        able.append("看懂发来的图片")
+        if env_bool("VIOLET_STICKERS", True):
+            able.append("发自己收藏的表情包")
+        try:
+            from ai.tool_manager import tool_store
+            if any(s.get("name") == "android-phone" for s in tool_store().custom_servers()):
+                able.append("查看主人手机的一些状态（前台应用、电量等，只读）")
+        except Exception:                                   # noqa: BLE001
+            pass
+        if self.db.fetch_one("SELECT COUNT(*) AS n FROM social_conversations WHERE mode != 'off'")["n"]:
+            able.append("在主人允许的 QQ 群里聊天")
+        if env_bool("VIOLET_QZONE_ENABLED", False):
+            able.append("偶尔发 QQ 空间动态")
+        able.append("记住和主人聊过的事、按约定提醒主人")
+        return _Section("ai_abilities", 2, "【你现在能做的事（按现在打开的功能）】", ["- " + "、".join(able)])
 
     def _sticker_section(self) -> _Section:
         """0.7.9: her sticker collection and how to send one (ai/stickers.py)."""
@@ -678,8 +761,8 @@ class ContextEngine:
         limit = limit or max(env_int("VIOLET_CONTEXT_HISTORY_MESSAGES", 20), turn_limit * 3 if turn_limit > 0 else 0)
         max_chars = env_int("VIOLET_CONTEXT_HISTORY_MAX_CHARS", 4000)
         turns, times = [], {}
-        from ai import test_mode
-        for row in test_mode.after_since(self.db.get_recent_messages(limit=limit)):     # test mode: since it began
+        from ai import context_cut
+        for row in context_cut.owner_rows(self.db.get_recent_messages(limit=limit)):   # 翻篇 / test mode
             content = row.get("content") or ""
             if row["message_type"] != "text":
                 content = f"[{row['message_type']}] {content}".strip()
@@ -782,6 +865,9 @@ class ContextEngine:
             onboarding_section, onboarding_key = self._onboarding_section(user_message, call_context)
             sections.append(onboarding_section)
         sections.append(self._base_section())
+        # 2026-10-30 (token use): the persona -- the part that changes least -- right after the fixed instructions, so
+        # the provider's prefix cache (DeepSeek, OpenAI) can serve the same beginning of every call; order kept otherwise
+        sections.sort(key=lambda s: 0 if s.name == "persona_core" else 1)
 
         budget = env_int("VIOLET_CONTEXT_MAX_CHARS", 4000)
         trimmed = self._fit(sections, budget)

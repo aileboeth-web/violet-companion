@@ -58,7 +58,7 @@
 
   function render(d) {
     const box = $("#phone-mcp");
-    const head = h("div", { class: "row phone-head" }, h("h3", { text: "手机 MCP（Violet MCP App）" }), statusPill(d),
+    const head = h("div", { class: "row phone-head" }, h("h3", { text: "手机（Violet MCP App）" }), statusPill(d),
       h("button", { class: "ghost", type: "button", text: "刷新", onclick: load }));
     const intro = h("p", { class: "note", text: "让 Violet 能看手机上的一些状态（前台应用、屏幕、电量等，只读）。手机主动连到这台服务器上的中继，不需要手机有公网 IP。" });
     const running = taskRunning(d);
@@ -76,7 +76,9 @@
             : h("div", { class: "stack" }, h("p", { class: "note", text: "这种安装方式不能在网页上安装，请以 root 在服务器上运行：" }),
               h("div", { class: "kv" }, h("code", { class: "v", text: d.install_command }),
                 h("span", { class: "kv-actions" }, h("button", { type: "button", text: "复制", onclick: () => copyText(d.install_command) })))))
-            : h("p", { class: "note", text: "这份 Violet 不是用安装器装的：请按 Violet MCP 的 DEPLOY_RELAY.md 部署中继。" })));
+            : h("p", { class: "note", text: "这份 Violet 不是用安装器装的：请按 Violet MCP 的 DEPLOY_RELAY.md 部署中继。" })),
+        h("div", { id: "phone-tools" }));
+      window.renderPhoneTools();
       return;
     }
     const r = d.relay;
@@ -102,20 +104,29 @@
           : h("div", { class: "kv" }, h("code", { class: "v", text: d.set_port_command }),
             h("span", { class: "kv-actions" }, h("button", { type: "button", text: "复制", onclick: () => copyText(d.set_port_command) })))) : null),
       step(3, "把手机的访问令牌填到这里",
-        h("p", { class: "note", text: "手机上打开“安全”页，复制访问令牌，粘贴到下面。Violet 会添加名为 android-phone 的工具服务器，并按模板把这些工具设为只读、交给 Chat 使用。" }),
+        h("p", { class: "note", text: "手机上打开“安全”页，复制访问令牌，粘贴到下面。连上后手机提供的工具都列在这里，可以逐个停用。" }),
         h("div", { class: "phone-token" }, token, h("button", { type: "button", text: server ? "替换令牌并检查" : "连接", onclick: async () => {
           result.textContent = "正在连接…";
           try {
             const res = await api("POST", "/api/control/phone-mcp/connect", { token: token.value });
             token.value = "";
             const s = res.server || {};
-            result.textContent = s.status === "connected" ? `已连接，手机提供了 ${s.tools} 个工具。` : "已保存，但现在还连不上：确认手机已连接中继后，在下面 android-phone 卡片里点“检查连接”。";
+            result.textContent = s.status === "connected" ? `已连接，手机提供了 ${s.tools} 个工具。` : "已保存，但现在还连不上：确认手机已连接中继后，点页面上方的“检查连接”。";
             loaders.tools();
           } catch (e) { result.textContent = "失败：" + e.message; }
         } })), result,
-        server ? h("p", { class: "note" }, `android-phone：${server.status === "connected" ? "已连接" : "未连接"}，${server.tools} 个工具。 `,
-          h("a", { href: "#tools", text: "查看工具和权限", onclick: (ev) => { ev.preventDefault(); scrollToAnchor("tool-srv-android-phone"); } })) : null));
+        server ? h("p", { class: "note", text: `手机工具：${server.status === "connected" ? "已连接" : "未连接"}，${server.tools} 个工具。` }) : null,
+        h("div", { id: "phone-tools" })));
+    window.renderPhoneTools();
   }
+
+  // the phone's tools and their switches (the MCP server the "连接" button made; not listed again below)
+  window.renderPhoneTools = () => {
+    const box = document.getElementById("phone-tools");
+    if (!box) return;
+    const s = window.phoneToolServer;
+    box.replaceChildren(...(s ? [toolServerCard(s, "手机提供的工具")] : []));
+  };
 
   async function load() {
     try { render(await api("GET", "/api/control/phone-mcp")); }

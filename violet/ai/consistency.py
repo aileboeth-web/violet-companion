@@ -261,6 +261,16 @@ def guard_mode() -> str:
     return env_str("VIOLET_PERSONA_REPLY_GUARD", "enforce").lower()     # enforce | flag | off
 
 
+def _owner_call() -> str:
+    """What she calls the owner in the relationship of this channel ("" when nothing set)."""
+    try:
+        from ai.channels.context import current
+        from ai.persona_templates import relationship
+        return relationship(current().channel).get("call") or ""
+    except Exception:                                     # noqa: BLE001
+        return ""
+
+
 class ConsistencyGuard:
     def __init__(self, db, core: PersonaCore | None = None, config: dict[str, Any] | None = None):
         self.db = db
@@ -289,8 +299,12 @@ class ConsistencyGuard:
     # ------------------------------------------------------------------
     def _persona_violations(self, text: str) -> list[Violation]:
         found = []
+        call = _owner_call()
         for pattern in self.core.forbidden_backstory():
-            if pattern.search(text):
+            match = pattern.search(text)
+            # 2026-10-30: with the relationship "女儿" she calls the owner 爸爸 -- "我爸爸" is the owner, not a backstory
+            kin = re.sub(r"^我(们家|们|的|和|跟|家)?", "", match.group(0)) if match else ""
+            if match and not (call and kin and kin in call and call in text):
                 found.append(Violation("forbidden_backstory", f"matches {pattern.pattern}"))
         if not found:
             claim = owned_role_claim(text)                 # phase 9.4 real run: "我们英语老师要是也这样就好了"
@@ -417,6 +431,10 @@ class ConsistencyGuard:
                 violations.append(persona)
             if CAMERA_CLAIM_RE.search(line) and not CAMERA_NEGATED_RE.search(line):
                 violations.append(Violation("camera_claim", "an AI-generated picture told as a photo", line))
+            if getattr(self.core, "is_ai", False):
+                # 2026-10-30: the AI persona's experiences are its real records, not virtual life events; what it must
+                # not claim (a body, a family, human days) is in its own forbidden patterns, checked above
+                continue
             # hedges ("想", "下次") and references to the user ("你") only count inside the claiming clause:
             # "我昨天去了海边，下次带你去" is still a claim
             claims = _claims(line)

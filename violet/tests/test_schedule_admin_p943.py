@@ -20,6 +20,13 @@ from tests.test_phase2_scenarios import make_world, say  # noqa: F401
 from tests.test_schedule_mcp_p942 import FIND, clock, result_of, wants  # noqa: F401
 from tests.test_web_p93 import chat_plays, offered
 
+
+@pytest.fixture(autouse=True)
+def _planned_tools_only(monkeypatch):
+    """These tests describe the tools offered only when Intent plans them (VIOLET_CHAT_TOOLS_DIRECT=0); the default
+    since 2026-10-30 (every read-only tool on every turn) is tested in tests/test_chat_polish_violet.py."""
+    monkeypatch.setenv("VIOLET_CHAT_TOOLS_DIRECT", "0")
+
 SH = timezone(timedelta(hours=8))
 B = "/api/control/schedule"
 TEACHER, ROOM, SEAT, NOTE = "虚构老师丙", "虚构楼甲301", "虚构座位42", "虚构的私人备注"

@@ -492,3 +492,10 @@ def test_free_chat_traces_every_tool_step_and_switches_the_fictional_tools(tmp_p
 
 from tests.test_control_center_p90 import admin, app, env_guard, made  # noqa: E402,F401  (fixtures)
 from tests.test_phase2_scenarios import make_world  # noqa: E402,F401  (fixture)
+
+
+@pytest.fixture(autouse=True)
+def _planned_tools_only(monkeypatch):
+    """These tests describe the tools offered only when Intent plans them (VIOLET_CHAT_TOOLS_DIRECT=0); the default
+    since 2026-10-30 (every read-only tool on every turn) is tested in tests/test_chat_polish_violet.py."""
+    monkeypatch.setenv("VIOLET_CHAT_TOOLS_DIRECT", "0")

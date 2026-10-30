@@ -32,6 +32,22 @@ def adapt_messages_for_channel(messages: list[dict[str, Any]], is_proactive: boo
     return out
 
 
+# 2026-10-30 (rework step 2: "加一个页面看这次给了她什么规则"): what the last reply was built from, for the admin page
+LAST_PROMPT: dict[str, Any] = {}
+
+
+def remember_prompt(messages: list[dict[str, Any]]) -> None:
+    from ai.settings import CURRENT_TURN
+    parts = []
+    for m in messages:
+        text = m.get("content") if isinstance(m.get("content"), str) else str(m.get("content"))
+        first = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
+        parts.append({"role": m.get("role"), "title": first[:60], "chars": len(text or ""), "text": text})
+    LAST_PROMPT.clear()
+    LAST_PROMPT.update(at=violetdb.now(), turn=CURRENT_TURN.get(), parts=parts,
+                       chars=sum(p["chars"] for p in parts))
+
+
 class ChatAgent(BaseAgent):
     """
     对话 agent。
@@ -43,7 +59,9 @@ class ChatAgent(BaseAgent):
     model_env_key = "CHAT_LLM_MODEL"
     default_model = "gpt-4o"
     system_prompt_env_key = "CHAT_LLM_PROMPT"
-    default_prompt_file = "persona/chat_prompt_versions/chat.v1.txt"      # the stable version (violet_setup DEFAULT_PROMPTS)
+    # 2026-10-30: v3 = v1 without a built-in identity ("你是 Violet，一个虚构的女孩…"): who she is and how close you are
+    # come from the persona and the relationship sections, so every persona / relationship really applies
+    default_prompt_file = "persona/chat_prompt_versions/chat.v3.txt"
     temperature_env_key = "CHAT_LLM_MODEL_TEMPERATURE"
     default_system_prompt = (
         "You are Violet, a warm and helpful AI assistant. "
@@ -85,6 +103,7 @@ class ChatAgent(BaseAgent):
             from ai.tool_manager import always_offered_servers, apply_tool_settings, mcp_tool_names
             plan = self._call_context.get("tool_plan") or {}
             planned = set(plan.get("tools") or []) if plan.get("mode") == "chat" else set()
+            planned |= set(self._call_context.get("direct_tools") or [])     # 2026-10-30: read-only tools, every turn
             always = always_offered_servers(apply_tool_settings(list(self._config.mcp_servers or [])))
             hidden |= {n for n in mcp_tool_names(tools) if n not in planned and n.split("__", 1)[0] not in always}
         if not images_enabled():
@@ -107,8 +126,11 @@ class ChatAgent(BaseAgent):
         # phase 9.2.2 (p921 A-E): through the current relay, "required" with two or more tools answered HTTP 502 every
         # time (A, D, E) while "auto" returned both calls (B) and "required" with one tool worked (C). So "required"
         # only when exactly one planned tool is offered; with several, "auto" + _lookup_reminder for what is left out.
+        # 2026-10-30: with the read-only tools offered on every turn, "required" only when that one tool is ALL that is
+        # offered (the relay's 502 came from "required" with several tools, whichever was planned)
+        offered_mcp = [t["function"]["name"] for t in tools or [] if "__" in t["function"]["name"]]
         if (round_index == 0 and plan.get("mode") == "chat" and env_bool("VIOLET_TOOL_CHOICE_REQUIRED", True)
-                and len(planned) == 1):
+                and len(planned) == 1 and len(offered_mcp) == 1):
             return "required"
         return super()._tool_choice_for_round(round_index, tools)
 
@@ -122,6 +144,8 @@ class ChatAgent(BaseAgent):
             return True
         from ai.tool_manager import apply_tool_settings
         if any(s.get("offer") == "always" and s.get("enabled", True) is not False for s in apply_tool_settings(servers)):
+            return True
+        if any(str(t).startswith("violet-web__") for t in self._call_context.get("direct_tools") or []):
             return True
         plan = self._call_context.get("tool_plan") or {}
         return plan.get("mode") == "chat" and any(str(t).startswith("violet-web__") for t in plan.get("tools") or [])
@@ -246,7 +270,8 @@ class ChatAgent(BaseAgent):
                     "请根据主动触达决策、近期上下文和任务结果，直接输出要发送给用户的文本。"
                     "每条微信消息单独占一行，不要输出 JSON，不要输出 Markdown。"
                     "禁止使用这些主动陪伴套话：我在这儿陪着你、我一直在、我在这、想聊会儿吗、要不要和我聊聊、我会陪着你。"
-                    "主动消息要像真实女友随手发微信，短、具体、有生活感；通常 1 到 2 条，不要为了显得温柔而加陪伴服务式收尾。"
+                    "主动消息要像你们平时那样随手发一条（按“你自己”和“你们的关系”），短、具体、自然；通常 1 到 2 条，"
+                    "不要为了显得温柔而加陪伴服务式收尾。"
                     # phase 8.9.5: every real proactive message ended "…今天过得怎么样/吃得怎么样/准备怎么过？"
                     "不一定要提问：只说你想说的那件事、一句想念或一句撒娇也很好，不用每次都问对方今天怎么样、吃了吗、在干嘛。"
                     + ("" if commitment else
@@ -255,4 +280,7 @@ class ChatAgent(BaseAgent):
             })
         else:
             messages.append({"role": "user", "content": user_message})
-        return adapt_messages_for_channel(messages, is_proactive)
+        adapted = adapt_messages_for_channel(messages, is_proactive)
+        if not is_proactive:
+            remember_prompt(adapted)
+        return adapted

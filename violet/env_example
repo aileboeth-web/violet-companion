@@ -229,6 +229,9 @@ VIOLET_WEB_SEARCH_CACHE_SECONDS=600
 # 内置只读课表 MCP（violet-schedule：get_day_schedule / get_schedule_range / get_current_status / find_course），
 # 只给 ChatAgent、按需提供（Intent 决定），主动联系不调用。默认关闭。课表数据在 Violet 自己的数据库里。
 VIOLET_SCHEDULE_ENABLED=0
+# 查询工具直接交给回复：1 = 每一轮都把连上的只读工具（联网、课表、手机状态等）交给 Chat，它自己决定查不查；
+# 0 = 只在意图识别判断要查时才给（以前的做法）
+VIOLET_CHAT_TOOLS_DIRECT=1
 VIOLET_SCHEDULE_TOOL_TIMEOUT_SECONDS=10
 # 哪些个人字段可以在对方明确问到时返回（地点 / 老师 / 考试座位号）；去掉某项就永远不返回
 VIOLET_SCHEDULE_DETAIL_FIELDS=location,teacher,seat
@@ -264,6 +267,8 @@ VIOLET_WEB_EXPLORER_LLM_MODEL=
 # ── QQ 群聊与其他人（渠道“QQ”，SnowLuma；后台“设置 → QQ 群聊与其他人”）────────────────
 # 别人私聊她：off 不理 / known 只回群里认识的人 / all 谁都回
 VIOLET_SOCIAL_PRIVATE=all
+# 群里听主人的话：你（绑定的主人）让她说话、发表情包、收藏表情包，她照做，做不到会说原因；别人的话仍只当聊天
+VIOLET_SOCIAL_OBEY_OWNER=1
 # 决定在群里说不说用的模型；留空 = 和 Chat 一样
 VIOLET_SOCIAL_MODEL=
 # 等群里安静几秒再决定（被 @ 或私聊时只等 3 秒）

@@ -613,6 +613,8 @@ class VioletRuntime:
         self._poll_stop = threading.Event()
         from ai.channels.identity import IdentityStore
         self.identities = IdentityStore(db)
+        from ai import permissions                      # 2026-10-30: approvals tell the owner through this runtime
+        permissions.attach_runtime(self)
         self.media_executor = ThreadPoolExecutor(max_workers=env_int("VIOLET_MEDIA_WORKERS", 2), thread_name_prefix="violet-media")
         self.poll_timeout = env_int("VIOLET_POLL_TIMEOUT_SECONDS", 3)
         self.poll_interval = env_float("VIOLET_POLL_INTERVAL_SECONDS", 1.0)
@@ -1127,6 +1129,8 @@ class VioletRuntime:
             sender = None                       # the channel was removed while this turn waited
         if sender is not None:
             sender.typing(TYPING_OFF)
+            if self._answer_approval(turn, combined, conversation, sender):
+                return "done"
         status, error = "done", None
         pipeline: dict[str, Any] | None = None
         try:
@@ -1247,6 +1251,30 @@ class VioletRuntime:
         if self.proactive_scheduler is not None and hasattr(self.proactive_scheduler, "on_user_engagement"):
             self.proactive_scheduler.on_user_engagement(category != "disengaged" or result["user_initiated"])
 
+    def _answer_approval(self, turn: Turn, combined: str, conversation: tuple[str, str], sender: "MessageSender") -> bool:
+        """2026-10-30 (ai/permissions.py): "同意 3" / "不同意 3" from the owner answers an approval -- carried out
+        here, the outcome is the reply; no model call. False: not such a message (or no such approval)."""
+        from ai import permissions
+        command = permissions.owner_command(combined)
+        if command is None:
+            return False
+        approve, number = command
+        if not self.db.fetch_one("SELECT 1 FROM approvals WHERE id = ?", (number,)):
+            return False                                  # "好 3" that is not about an approval: normal chat
+        try:
+            outcome = permissions.decide(self.db, number, approve)["result"]
+        except ValueError as exc:
+            outcome = str(exc)
+        from ai.channels.outbound import fixed_text
+        try:
+            self.db.add_user_message("text", combined, created_at=turn.received_at, channel=conversation[0])
+            sender.send_messages(fixed_text(outcome), origin="reply", turn_id=turn.turn_id)
+        except Exception:
+            logger.exception("approval answer of turn %s not sent", turn.turn_id)
+        self.db.update_inbound_messages(turn.inbound_ids, status="done")
+        self._bump("turns_processed")
+        return True
+
     def _send_test_diagnosis(self, sender: "MessageSender", turn: Turn, steps: list, report, status: str,
                              error: str | None, pipeline: dict[str, Any] | None) -> None:
         """Test mode: after the reply, one message with what the code saw this turn (ai/test_mode.py). It is not
@@ -1269,6 +1297,14 @@ class VioletRuntime:
                 extra.append(f"- 没发出：{what}（{m.get('error') or '跳过'}）")
         if status != "done" or error:
             extra.append(f"- 这一轮：{status}" + (f"（{error}）" if error else ""))
+        try:
+            from ai import usage
+            u = usage.turn(self.db, turn.turn_id)
+            if u["calls"]:
+                extra.append(f"- 用量：{u['calls']} 次模型调用（{'、'.join(u['sources'])}），输入 {u['prompt']} token"
+                             f"（命中缓存 {u['cached']}），输出 {u['completion']} token")
+        except Exception:                                # noqa: BLE001
+            pass
         try:
             text = test_mode.diagnosis(steps, extra, db=self.db)
             sender.send_messages(fixed_text(text), origin="test_diagnosis", turn_id=turn.turn_id, record_history=False)

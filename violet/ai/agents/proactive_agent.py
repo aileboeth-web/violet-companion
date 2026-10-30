@@ -24,7 +24,8 @@ class ProactiveAgent(BaseAgent):
     model_env_key = "PROACTIVE_LLM_MODEL"
     default_model = "gpt-5-mini"
     system_prompt_env_key = "PROACTIVE_LLM_PROMPT"
-    default_prompt_file = "persona/proactive_prompt_versions/proactive.v1.txt"   # the stable version (violet_setup)
+    # 2026-10-30: v3 = v1 without the built-in "虚拟女友" (the relationship section says how close she is)
+    default_prompt_file = "persona/proactive_prompt_versions/proactive.v3.txt"
     temperature_env_key = "PROACTIVE_LLM_MODEL_TEMPERATURE"
     default_temperature = 0.2
     default_system_prompt = (

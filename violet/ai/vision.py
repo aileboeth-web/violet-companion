@@ -125,6 +125,8 @@ def describe_image(file_path: str | os.PathLike[str], prompt: str | None = None)
         trace.step("识图", 模型=model, 结果="失败", 原因=reason)
         raise VisionError(f"识图模型 {model} 调用失败：{reason}") from exc
 
+    from ai import usage
+    usage.record("vision", getattr(response, "model", None) or model, getattr(response, "usage", None))
     try:
         description = (response.choices[0].message.content or "").strip()
     except (AttributeError, IndexError, TypeError):

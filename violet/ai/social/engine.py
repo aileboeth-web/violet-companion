@@ -242,8 +242,8 @@ class SocialEngine:
         from ai import test_mode
         testing = test_mode.active()       # 2026-10-30: no persona, no impressions, only the messages since the test began
         history = self.store.messages(conversation_id, limit=max(10, env_int("VIOLET_SOCIAL_CONTEXT_MESSAGES", 30)))
-        if testing:
-            history = test_mode.after_since(history)
+        from ai import context_cut
+        history = context_cut.social_rows(conversation_id, history)      # 翻篇 / test mode
         speakers = sorted({m["sender_id"] for m in history if m.get("sender_id") and not m["is_self"]})
         people = self.store.people(conv["channel"], speakers) if speakers else []
         if testing:                                        # who is who (the owner is marked), but no impressions
@@ -252,8 +252,10 @@ class SocialEngine:
                                  (conversation_id,))
         from ai.social import llm, prompts
         sticker_lines = stickers.prompt_lines(self.db)
-        system = prompts.system_prompt(test_mode.TESTER_SOCIAL if testing else _persona_text(self.db), conv["kind"],
-                                       testing=testing)
+        obey = bool(owner_ids) and env_bool("VIOLET_SOCIAL_OBEY_OWNER", True)
+        system = prompts.system_prompt(test_mode.TESTER_SOCIAL if testing else _persona_text(self.db, conv["channel"]),
+                                       conv["kind"],
+                                       testing=testing, obey_owner=obey)
         user = prompts.user_prompt({**conv, "notes": None} if testing else conv, history=history,
                                    unread_from=int(conv["watermark"] or 0), people=people,
                                    owner_ids=owner_ids, today=today, last_said_at=(said or {}).get("at"),
@@ -291,6 +293,9 @@ class SocialEngine:
             check_back = 0.0
         check_back = max(0.0, min(check_back, 24 * 60))
         reason = str(decision.get("reason") or "")[:300]
+        cannot = str(decision.get("cannot") or "").strip()[:200]
+        if cannot:                                       # what the owner asked for and she could not do (and why)
+            reason = (reason + f"（做不到：{cannot}）").strip()
         error = None
         sticker = None
         wanted = str(decision.get("sticker") or "").strip().lstrip("#")
@@ -447,10 +452,15 @@ class SocialEngine:
                         self.store.set_impression(conv["channel"], uid, impression.strip()[:200])
 
 
-def _persona_text(db) -> str:
+def _persona_text(db, channel: str | None = None) -> str:
+    """The persona of the channel (2026-10-30: a channel may have its own) and the relationship to the owner."""
     try:
         from ai.persona import PersonaCore
-        return PersonaCore.load().render()
+        from ai.persona_templates import RELATIONSHIPS, relationship
+        text = PersonaCore.load(channel=channel).render()
+        rel = relationship(channel)
+        call = f"你称呼主人“{rel['call']}”。" if rel["call"] else ""
+        return text + f"\n【你和你的主人的关系：{rel['label']}】" + RELATIONSHIPS[rel["kind"]][1].replace("对方", "主人") + call
     except Exception:                                 # noqa: BLE001
         logger.exception("persona could not be loaded for the social prompt")
         return "【你自己】一个普通、友善的人。"
@@ -465,6 +475,10 @@ def owner_digest(db, hours: float = 24.0, limit: int = 6) -> str:
                         "AND m.created_at >= ? ORDER BY m.id DESC LIMIT ?", (since, limit))
     posts = db.fetch_all("SELECT content, created_at FROM social_posts WHERE status = 'sent' AND created_at >= ? "
                          "ORDER BY id DESC LIMIT 3", (since,))
+    from ai import context_cut                         # 2026-10-30: nothing from before a 翻篇 / the start of a test
+    cut = max([t for t in (context_cut.owner_since(), context_cut.social_since()) if t] or [""])
+    rows = [r for r in rows if str(r["created_at"]) >= cut]
+    posts = [p for p in posts if str(p["created_at"]) >= cut]
     if not rows and not posts:
         return ""
     lines = [f"- {str(r['created_at'])[5:16]} 在「{r['title'] or r['peer_id']}」说：{(r['content'] or '')[:80]}"

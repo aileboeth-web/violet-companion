@@ -63,8 +63,8 @@ def parse_object(text: str | None) -> dict[str, Any]:
     return value
 
 
-def decide(system: str, user: str) -> tuple[dict[str, Any], str, int]:
-    """(the decision object, model, latency ms). Raises SocialLLMError."""
+def decide(system: str, user: str, source: str = "social") -> tuple[dict[str, Any], str, int]:
+    """(the decision object, model, latency ms). Raises SocialLLMError. source: for the token ledger (ai/usage.py)."""
     from ai.model_params import apply as apply_model_params
     model = model_name()
     if not model:
@@ -75,6 +75,8 @@ def decide(system: str, user: str) -> tuple[dict[str, Any], str, int]:
         response = _client().chat.completions.create(**apply_model_params(
             {"model": model, "messages": messages, "temperature": 0.8, "max_tokens": 700}))
         content = response.choices[0].message.content
+        from ai import usage
+        usage.record(source, getattr(response, "model", None) or model, getattr(response, "usage", None))
     except SocialLLMError:
         raise
     except Exception as exc:                          # noqa: BLE001 -- the engine records it and goes on

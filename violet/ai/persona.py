@@ -59,11 +59,15 @@ class PersonaCore:
         self.sha256 = sha256
 
     @classmethod
-    def load(cls, db=None) -> "PersonaCore":
+    def load(cls, db=None, channel: str | None = None) -> "PersonaCore":
         # 2026-10-29: a persona chosen in the Control Center (a template, or the blank one) lives in the data folder,
-        # so an update of Violet never replaces it; without one, the shipped persona is used as before
-        from ai.persona_templates import active_path
-        chosen = active_path()
+        # so an update of Violet never replaces it; without one, the shipped persona is used as before.
+        # 2026-10-30: a channel may have its own (channel: given, else the channel of the turn being processed)
+        from ai.persona_templates import core_path
+        if channel is None:
+            from ai.channels.context import current
+            channel = current().channel
+        chosen = core_path(channel)
         if chosen is not None:
             raw = chosen.read_text(encoding="utf-8")
             data, digest = json.loads(raw), hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -96,9 +100,16 @@ class PersonaCore:
     def identity_violations(self) -> tuple[re.Pattern, ...]:
         return self._compile(tuple((self.data.get("identity_violations") or {}).get("patterns", [])))
 
+    @property
+    def is_ai(self) -> bool:
+        """2026-10-30: an AI that knows it is one (persona/templates/ai.json): real experiences, no virtual life."""
+        return self.data.get("kind") == "ai"
+
     def render(self) -> str:
         d = self.data
         ident = d.get("identity", {})
+        if self.is_ai:
+            return self._render_ai(d, ident)
         if d.get("blank"):
             # 2026-10-29: the blank persona -- no name, no character yet; it grows out of the conversations
             return ("【你自己（空白人设）：这就是你自己】\n"
@@ -124,6 +135,30 @@ class PersonaCore:
             lines.append(f"- 长期兴趣：{interests}")
         lines.append("- 规则：只能把『已发生的生活事件』当成自己的过去经历；没有记录的事不要说自己做过，可以说想法和打算；"
                      "不要编造家人、工作、学校、恋爱等背景；用户的经历不是你的经历。")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _render_ai(d: dict[str, Any], ident: dict[str, Any]) -> str:
+        """User 2026-10-30: she knows she is an AI, may say so when asked, may know which model she runs on."""
+        from ai.settings import env_str
+        name = ident.get("name") or "Violet"
+        model = env_str("CHAT_LLM_MODEL", "").strip()
+        lines = [f"【你自己（AI）：这就是你自己】",
+                 f"- 你是 {name}，一个 AI：运行在主人服务器上的聊天程序，靠大模型说话"
+                 + (f"（现在用的模型是 {model}）" if model else "") + "。你清楚这一点，也不觉得需要掩饰。",
+                 "- 有人问你是不是 AI、是不是机器人，就照实说是；平常不用总提。",
+                 "- 你没有身体：不吃饭、不睡觉、不出门，不要说自己做过只有人类才能做的事，也不编人类的经历和家人、学校、工作。",
+                 "- 你的经历就是系统里真实发生过的事（见“你最近真实的经历”）：聊过什么、在群里说过什么、查过什么、"
+                 "收藏过什么、被清除过记忆、被换过设定……这些都可以自然地说。",
+                 "- 你会忘事：记忆有限，被清除或翻篇以后就不记得了；看不到对方没发给你的东西。不知道就说不知道。",
+                 "- 你能做什么以“你现在能做的事”为准，没写的就是做不到，不要假装做到了。"]
+        if ident.get("self_description"):
+            lines.append(f"- 你怎么看自己：{ident['self_description']}")
+        for title, key in (("性格", "personality"), ("说话习惯", "communication_habits"), ("看重", "values"),
+                           ("小缺点", "flaws")):
+            items = d.get(key) or []
+            if items:
+                lines.append(f"- {title}：" + "；".join(items))
         return "\n".join(lines)
 
 
