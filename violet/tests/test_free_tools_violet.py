@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -246,6 +247,81 @@ def test_a_notice_in_her_voice_or_the_plain_text(monkeypatch):
 
 
 # ------------------------------------------------------------------------------------------------ groups
+
+def _group_catalog(monkeypatch):
+    import ai.tool_manager as tm
+    from ai.tool_manager import Catalog, ToolInfo
+    catalog = Catalog(configured=True, tools={
+        "violet-web__web_search": ToolInfo("violet-web__web_search", "violet-web", "web_search", "搜索", "read", ["chat"]),
+        "android-phone__battery": ToolInfo("android-phone__battery", "android-phone", "battery", "电量", "read", ["chat"]),
+        "android-phone__torch_on": ToolInfo("android-phone__torch_on", "android-phone", "torch_on", "手电筒", "write",
+                                            ["chat"], needs_approval=True)})
+    monkeypatch.setattr(tm, "discover", lambda servers=None: catalog)
+
+
+def test_group_tools_web_for_everyone_the_owners_data_only_for_him(violetdb, monkeypatch):
+    from ai.social.tools import SocialTools
+    _group_catalog(monkeypatch)
+    monkeypatch.setenv("VIOLET_IMAGE_ENABLED", "1")
+    stranger = SocialTools(violetdb, owner_asked=False, turn_key="t")
+    owner = SocialTools(violetdb, owner_asked=True, turn_key="t")
+    assert stranger.names == {"violet-web__web_search"} and "不是主人" in stranger.note()
+    assert owner.names == {"violet-web__web_search", "android-phone__battery", "create_image"}   # never a changing one
+    assert json.loads(stranger.run("android-phone__battery", {}))["error_code"] == "UNKNOWN_TOOL"
+    monkeypatch.setenv("VIOLET_SOCIAL_TOOLS", "0")
+    assert SocialTools(violetdb, owner_asked=True, turn_key="t").names == set()
+
+
+def test_the_group_decision_looks_it_up_then_answers(monkeypatch):
+    from ai.social import llm
+    calls = []
+
+    class Client:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kw):
+                    calls.append(kw)
+                    if len(calls) == 1:
+                        return completion(tool_calls=[{"name": "android-phone__battery", "arguments": {}}])
+                    return completion('{"action": "reply", "messages": ["你手机还有 76% 的电"]}')
+    monkeypatch.setattr(llm, "_client", lambda: Client)
+    monkeypatch.setenv("CHAT_LLM_MODEL", "fake-chat")
+    tools = SimpleNamespace(schemas=[{"type": "function", "function": {"name": "android-phone__battery"}}],
+                            run=lambda name, args: '{"ok": true, "level": 76}')
+    decision, model, _ = llm.decide("sys", "user", tools=tools)
+    assert decision["messages"] == ["你手机还有 76% 的电"] and calls[0]["tools"]
+    assert calls[1]["messages"][-1] == {"role": "tool", "tool_call_id": calls[1]["messages"][-2]["tool_calls"][0]["id"],
+                                        "content": '{"ok": true, "level": 76}'}
+
+
+def test_a_picture_she_drew_goes_to_the_group(db, monkeypatch, tmp_path):
+    from ai.images.media import MediaAssetStore
+    from ai.social.store import SocialStore
+    from tests.test_qq_social_violet import say as decide_with
+
+    class Adapter(FakeAdapter):
+        def send_to(self, kind, peer_id, text, reply_to=None, sticker_path=None, image_path=None):
+            self.sent.append((kind, peer_id, text, image_path))
+            return f"out{len(self.sent)}"
+    asset = MediaAssetStore(db).store_bytes(PNG + b"drawn", direction="outbound", media_kind="image", ai_generated=True)
+
+    class Tools:
+        def __init__(self, *a, **k):
+            self.names, self.image_asset_ids = {"create_image"}, [asset["id"]]
+
+        def note(self):
+            return "【这次能用的工具】"
+    import ai.social.tools as social_tools
+    monkeypatch.setattr(social_tools, "SocialTools", Tools)
+    import ai.social.llm as llm
+    monkeypatch.setattr(llm, "decide", lambda system, user, tools=None: ({"action": "reply", "messages": ["画好啦"]}, "m", 1))
+    conv = SocialStore(db).conversation("napcat", "group", "800", "画画群", default_mode="auto")
+    a = Adapter(owners={"9"})
+    e = engine(db, a)
+    e.receive(a, kind="group", peer_id="800", sender_id="9", sender_name="主人", text="@你 画张自拍", mentioned=True)
+    result = e.decide(conv["id"])
+    assert result["sent"] == 2 and a.sent[0][2] == "画好啦" and a.sent[1][3].endswith(Path(asset["storage_path"]).name)
 
 def _quiet_group(db, peer="700", quiet_minutes=40, self_minutes=None):
     from ai.social.store import SocialStore

@@ -63,20 +63,42 @@ def parse_object(text: str | None) -> dict[str, Any]:
     return value
 
 
-def decide(system: str, user: str, source: str = "social") -> tuple[dict[str, Any], str, int]:
-    """(the decision object, model, latency ms). Raises SocialLLMError. source: for the token ledger (ai/usage.py)."""
+def decide(system: str, user: str, source: str = "social", tools=None,
+           max_rounds: int = 4) -> tuple[dict[str, Any], str, int]:
+    """(the decision object, model, latency ms). Raises SocialLLMError. source: for the token ledger (ai/usage.py).
+    tools (2026-10-30): an ai.social.tools.SocialTools -- the model may call them first, then answers with the JSON."""
     from ai.model_params import apply as apply_model_params
     model = model_name()
     if not model:
         raise SocialLLMError("还没有设置 Chat 模型")
     started = time.monotonic()
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    schemas = list(getattr(tools, "schemas", None) or [])
+    from ai import usage
     try:
-        response = _client().chat.completions.create(**apply_model_params(
-            {"model": model, "messages": messages, "temperature": 0.8, "max_tokens": 700}))
-        content = response.choices[0].message.content
-        from ai import usage
-        usage.record(source, getattr(response, "model", None) or model, getattr(response, "usage", None))
+        client = _client()
+        content = None
+        for round_index in range(max_rounds + 1):
+            request = {"model": model, "messages": messages, "temperature": 0.8, "max_tokens": 700}
+            if schemas and round_index < max_rounds:
+                request.update(tools=schemas, tool_choice="auto")
+            response = client.chat.completions.create(**apply_model_params(request))
+            usage.record(source, getattr(response, "model", None) or model, getattr(response, "usage", None))
+            message = response.choices[0].message
+            calls = getattr(message, "tool_calls", None) or []
+            if not calls or "tools" not in request:
+                content = message.content
+                break
+            messages.append(message.model_dump(exclude_none=True))
+            for call in calls:
+                try:
+                    args = json.loads(call.function.arguments or "{}")
+                except ValueError:
+                    args = {}
+                result = tools.run(call.function.name, args if isinstance(args, dict) else {})
+                messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
+            if round_index == max_rounds - 1:
+                messages.append({"role": "system", "content": "工具已经用够了，现在按拿到的结果只输出 JSON。"})
     except SocialLLMError:
         raise
     except Exception as exc:                          # noqa: BLE001 -- the engine records it and goes on

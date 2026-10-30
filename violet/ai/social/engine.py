@@ -296,12 +296,26 @@ class SocialEngine:
                                    unread_from=int(conv["watermark"] or 0), people=people,
                                    owner_ids=owner_ids, today=today, last_said_at=(said or {}).get("at"),
                                    now=self.db.now(), trigger=trigger, sticker_lines=sticker_lines)
+        # 2026-10-30: tools here too (ai/social/tools.py) -- the owner's data and drawing only when he is asking
+        owner_asked = (obey or testing) and any(str(m.get("sender_id")) in owner_ids for m in unread)
+        tools = None
         try:
-            decision, model, latency = llm.decide(system, user)
+            from ai.social.tools import SocialTools
+            tools = SocialTools(self.db, owner_asked, turn_key=f"social:{conversation_id}:{newest}")
+        except Exception:                                  # noqa: BLE001 -- the decision runs without tools
+            logger.exception("social tools unavailable")
+        note = tools.note() if tools is not None else None
+        if note:
+            system = system + "\n\n" + note
+        try:
+            decision, model, latency = (llm.decide(system, user, tools=tools) if tools is not None and tools.names
+                                        else llm.decide(system, user))
         except llm.SocialLLMError as exc:
             self.store.record_decision(conversation_id, trigger=trigger, action="error", error=str(exc)[:300])
             trace.step("社交决定", 会话=conv["id"], 结果="失败", 原因=str(exc))
             return None
+        if tools is not None and tools.image_asset_ids:
+            decision = {**decision, "_images": list(tools.image_asset_ids)}
         result = self._act(conv, decision, adapter, today, newest, trigger, model, latency)
         result["mentioned"] = any(m["mentions_self"] for m in unread)
         if testing:
@@ -341,7 +355,10 @@ class SocialEngine:
                 trace.step("发表情包", 编号=wanted, 结果="不能发", 原因=problem)
         elif wanted:
             trace.step("发表情包", 编号=wanted, 结果="不能发", 原因="不是收藏里的编号")
-        if action in ("say", "reply") and not texts and sticker is None:
+        images = [a for a in decision.get("_images") or [] if isinstance(a, int)][:1]
+        if images and action not in ("say", "reply"):
+            action = "say"                               # she drew it to send it
+        if action in ("say", "reply") and not texts and sticker is None and not images:
             action = "silent"
         if action in ("say", "reply") and conv["daily_message_limit"] and today["messages"] >= conv["daily_message_limit"]:
             action, error = "silent", "今天说话的次数到上限了"
@@ -377,6 +394,22 @@ class SocialEngine:
                     except Exception as exc:          # noqa: BLE001
                         error = f"表情包没发出去：{exc}"[:300]
                         trace.step("发表情包", 编号=sticker["id"], 结果="失败", 原因=str(exc))
+                for asset_id in images if error is None else []:
+                    try:                              # 2026-10-30: the picture she drew (ai/social/tools.py)
+                        from ai.images.media import MediaAssetStore
+                        media = MediaAssetStore(self.db)
+                        asset = media.get(asset_id)
+                        msg_id = adapter.send_to(conv["kind"], conv["peer_id"], None,
+                                                 image_path=str(media.path_of(asset)))
+                        media.mark_send(asset_id, "sent")
+                        self.store.add_message(conv["id"], content="[图片：她画的 AI 插画]", is_self=True,
+                                               platform_msg_id=msg_id, message_type="image")
+                        texts.append("[图片]")
+                        sent += 1
+                        trace.step("发图片", 图片=asset_id, 结果="已发出")
+                    except Exception as exc:          # noqa: BLE001
+                        error = f"图片没发出去：{exc}"[:300]
+                        trace.step("发图片", 图片=asset_id, 结果="失败", 原因=str(exc))
         collected = self._collect(conv, decision.get("collect"), adapter)
         if collected:
             reason = (reason + f"（收藏了表情包 {collected}）").strip()
