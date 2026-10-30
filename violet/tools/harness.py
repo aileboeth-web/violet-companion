@@ -180,7 +180,7 @@ def prepare_environment(workdir: Path | None = None, config_file: Path | None = 
         values["_ignored_config_keys"] = ",".join(refused)
     for key in [k for k in environ if k.startswith(("VIOLET_", "LLM_", "MCP_")) or k.endswith("_LLM_MODEL")]:
         if key not in ("VIOLET_TEST_ALLOW_REAL_API", "VIOLET_TEST_API_KEY", "VIOLET_TEST_API_URL", "VIOLET_TEST_SEARCH_API_KEY",
-                       "VIOLET_TEST_CHAT_TOOLS_DIRECT", "VIOLET_TEST_IMAGE_SELF_DECIDE"):
+                       "VIOLET_TEST_CHAT_TOOLS_DIRECT", "VIOLET_TEST_IMAGE_SELF_DECIDE", "VIOLET_TEST_WEB_AUTO_READ"):
             environ.pop(key, None)                        # nothing from the tester's shell leaks into Violet
     environ.update({k: v for k, v in values.items() if not k.startswith("_")})
     if environ.get("VIOLET_TEST_CHAT_TOOLS_DIRECT") in ("0", "1"):
@@ -189,6 +189,9 @@ def prepare_environment(workdir: Path | None = None, config_file: Path | None = 
     if environ.get("VIOLET_TEST_IMAGE_SELF_DECIDE") in ("0", "1"):
         # 2026-10-30: the scripted image rounds (21 / 22) are about the "only when asked" gate
         environ["VIOLET_IMAGE_SELF_DECIDE"] = environ["VIOLET_TEST_IMAGE_SELF_DECIDE"]
+    if (environ.get("VIOLET_TEST_WEB_AUTO_READ") or "").isdigit():
+        # 2026-10-30: a test that counts every web request can switch the automatic page reads off
+        environ["VIOLET_WEB_AUTO_READ"] = environ["VIOLET_TEST_WEB_AUTO_READ"]
     environ.update(FORCED)
     environ.update({
         "VIOLET_ENV_FILE": str(empty_env), "VIOLET_DB_PATH": str(workdir / "violet-test.db"),

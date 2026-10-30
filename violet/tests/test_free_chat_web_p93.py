@@ -115,7 +115,8 @@ with patch("openai.OpenAI", FakeSDK):
 
 def web_launch(argv, lines, dump=None, search_key=SKEY, **extra_env):
     from tools import chat_dialogue as cd
-    env = {**child_env(), **extra_env}
+    # every web request is counted here; the automatic page reads (2026-10-30) would add their own
+    env = {**child_env(), "VIOLET_TEST_WEB_AUTO_READ": "0", **extra_env}
     if search_key:
         env["VIOLET_TEST_SEARCH_API_KEY"] = search_key
     if dump:

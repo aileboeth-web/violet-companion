@@ -154,6 +154,36 @@ def test_a_sticker_may_follow_a_web_answer():
     assert json.loads(guard.check("campus__get_weather", {}))["error_code"] == "DENIED_AFTER_WEB"
 
 
+@pytest.fixture()
+def web():
+    from tests.web_fixtures import LocalWeb
+    w = LocalWeb()
+    yield w
+    w.close()
+
+
+def test_short_search_results_come_with_the_first_pages_read(violetdb, web, monkeypatch):
+    """User: search "没什么用" -- Bing gives "广州天气预报,广州7天天气预报…" and no number; the pages have them."""
+    from ai.web.providers import MockSearchProvider
+    from tests.test_web_security import service
+    data = [{"title": "广州天气预报", "url": "http://news.example.org/gz", "snippet": "广州天气", "keywords": ["广州", "天气"]},
+            {"title": "广州一周天气", "url": "http://books.example.org/gz", "snippet": "一周", "keywords": ["广州", "天气"]},
+            {"title": "广州旅游", "url": "http://music.example.org/gz", "snippet": "景点", "keywords": ["广州"]}]
+    page = "<html><head><title>广州天气</title></head><body><article><p>今天 多云 23~29℃ 东南风 2 级。</p></article></body></html>"
+    web.routes["news.example.org/gz"] = {"body": page}
+    web.routes["books.example.org/gz"] = {"status": 500, "body": "err"}
+    svc = service(violetdb, web, MockSearchProvider(data))
+    out = svc.search_and_read("广州 天气")
+    first = next(r for r in out["results"] if r["url"].endswith("news.example.org/gz"))
+    assert "23~29℃" in first["page_text"] and out["auto_read"] == 1 and "page_text" in out["note"]
+    assert "page_text" not in svc.search("广州 天气")["results"][0]                       # the cache is untouched
+    monkeypatch.setenv("VIOLET_WEB_AUTO_READ", "0")
+    assert "auto_read" not in svc.search_and_read("广州 天气")
+    monkeypatch.setenv("VIOLET_WEB_AUTO_READ", "2")
+    monkeypatch.setenv("VIOLET_WEB_AUTO_READ_SNIPPET_CHARS", "1")                          # long enough summaries
+    assert "auto_read" not in svc.search_and_read("广州 天气")
+
+
 # ------------------------------------------------------------------------------------------------ images, plan, list
 
 def test_she_decides_herself_when_a_picture_fits(violetdb, monkeypatch):

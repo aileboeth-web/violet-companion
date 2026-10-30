@@ -29,11 +29,12 @@ def build_server(service: WebService) -> FastMCP:
 
     @server.tool(annotations=READ_ONLY)
     async def web_search(query: str, recency_days: int | None = None, limit: int = 5) -> str:
-        """联网搜索公开网页，查最新消息、当前版本、实时事件、外部资料。返回标题、链接、来源、摘要和发布时间。
+        """联网搜索公开网页，查最新消息、天气、当前版本、实时事件、外部资料。返回标题、链接、来源、摘要和发布时间；
+        摘要太短时，前几个网页的正文会自动打开放在 page_text 里。
         Use only when the user needs current or external information; not for small talk. query: short keywords
         (no personal data). recency_days: only recent results (e.g. 7). limit: number of results."""
-        result = await anyio.to_thread.run_sync(
-            lambda: service.search(query, origin="chat", recency_days=recency_days, limit=limit))
+        result = await anyio.to_thread.run_sync(            # 2026-10-30: the first pages read too (search_and_read)
+            lambda: service.search_and_read(query, origin="chat", recency_days=recency_days, limit=limit))
         return json.dumps(result, ensure_ascii=False)
 
     @server.tool(annotations=READ_ONLY)

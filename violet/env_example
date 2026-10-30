@@ -244,6 +244,12 @@ VIOLET_NOTICE_VOICE=1
 VIOLET_SOCIAL_INITIATIVE=1
 # 群里也能用工具：联网谁问都行；主人的只读数据工具（手机、课表…）和画图只在主人问时；会改动东西的工具群里永远不给
 VIOLET_SOCIAL_TOOLS=1
+# 搜索结果只有短摘要时（必应直连），自动打开前几个网页、正文跟结果一起给她（0 = 只搜索）
+VIOLET_WEB_AUTO_READ=2
+# 摘要平均短于多少字才自动打开；每页正文最多多少字；每页最多等几秒
+VIOLET_WEB_AUTO_READ_SNIPPET_CHARS=160
+VIOLET_WEB_AUTO_READ_CHARS=1200
+VIOLET_WEB_AUTO_READ_TIMEOUT=12
 VIOLET_SOCIAL_INITIATIVE_CHANCE=0.3
 VIOLET_SCHEDULE_TOOL_TIMEOUT_SECONDS=10
 # 哪些个人字段可以在对方明确问到时返回（地点 / 老师 / 考试座位号）；去掉某项就永远不返回

@@ -141,6 +141,9 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_MCP_AUTO_CLASSIFY", "没分类的 MCP 工具自动处理", "mcp", "bool", "now",
             "开：你加的 MCP 服务器里没分类的工具，声明自己只读的当查询工具用，其余的当“会改动东西”的工具（要你放行或同意）；"
             "关：没分类的工具全部藏起来（以前的做法）", True),
+    Setting("VIOLET_WEB_AUTO_READ", "搜索时自动打开几个网页", "features", "int", "now",
+            "搜索结果只有标题和一句摘要时（必应直连就是这样），自动打开排在前面的几个网页，把正文一起交给她，"
+            "她就能按网页内容回答（比如天气的具体温度）；每打开一个算一次网页读取。0 = 只搜索不打开", 2, 0, 3),
     Setting("VIOLET_SCHEDULE_ENABLED", "课表查询（violet-schedule）", "features", "bool", "now",
             "Violet 可以查你在“课表”页录入的课表", False),
     Setting("VIOLET_SCHEDULE_CONTEXT", "聊天时考虑课表", "features", "bool", "now", "聊天时知道你现在是不是在上课", False),
