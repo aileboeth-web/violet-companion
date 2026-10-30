@@ -320,7 +320,10 @@ def test_only_up_and_upgrade_pull_or_start_and_nothing_installs_docker():
 
 def test_eve_itself_never_runs_docker_and_git_has_no_hooks_to_do_it():
     code = [PROJECT / "main.py", PROJECT / "violet_runtime.py", PROJECT / "start.sh"]
-    code += [p for d in ("ai", "wx_ilink_py", "tools") for p in (PROJECT / d).rglob("*.py")]
+    # the one exception (decisions V24, the user chose Docker for QQ): the root installer of SnowLuma; the running
+    # Violet (ai, wx_ilink_py) still never starts Docker
+    code += [p for d in ("ai", "wx_ilink_py", "tools") for p in (PROJECT / d).rglob("*.py")
+             if p.name != "violet_snowluma.py"]
     run = re.compile(r"docker(-compose|\s+(compose|run|pull|start|exec|create|image|container))|searxng\.sh"
                      r"|[\"']docker[\"']|compose\s+up", re.I)          # running it, not mentioning it in a comment
     hits = [str(p) for p in code if run.search(p.read_text(encoding="utf-8", errors="replace"))]

@@ -18,7 +18,7 @@
   const BOTFATHER_URL = "https://t.me/BotFather";
   const PLATFORMS = [
     { key: "wechat", type: "wechat_ilink", name: "微信", intro: "用要给 Violet 用的微信扫一下码就行，不用申请任何东西。" },
-    { key: "napcat", type: "napcat", name: "QQ", intro: "用一个 QQ 号（建议小号）扫码登录。私聊和你聊天，还能进群、认识别人。在服务器上一键安装，不用自己装 NapCat。" },
+    { key: "napcat", type: "napcat", name: "QQ", intro: "用一个 QQ 号（建议小号）扫码登录。私聊和你聊天，还能进群、认识别人。在服务器上一键安装（SnowLuma），不用自己装。" },
     { key: "qq", type: "qqbot", name: "QQ（机器人）", intro: "在 QQ 开放平台免费创建一个官方机器人，填两项就能用。只能私聊，不会被封号。" },
     { key: "telegram", type: "telegram", name: "Telegram", intro: "找 @BotFather 创建一个机器人，填一个 Token 就能用。" },
   ];
@@ -316,42 +316,71 @@
     } }));
   }
 
-  // ---------------------------------------------------------------- 2026-10-29: "QQ" = a personal account via NapCat
-  // Not installed: one-click install (root task, progress dialog). Installed: QR login (NapCat's management API through
-  // Violet), then the usual channel parts; the groups and other people are managed below the cards (control_social.js).
-  let ncTimer = null;
-  function napcatCard(p, ch) {
+  // ---------------------------------------------------------------- 2026-10-29: "QQ" = a personal account via SnowLuma
+  // Not installed: one-click install (root task, progress dialog). Installed: QQ's own window as a picture (SnowLuma
+  // has no QR code API: the code is scanned in that window; a click on the picture clicks in QQ), then the usual
+  // channel parts; the groups and other people are managed below the cards (control_social.js).
+  let qqTimer = null;
+  let qqView = null;
+  function qqCard(p, ch) {
     const body = h("div", { class: "stack" });
     const foot = h("div", { class: "row" });
     const card = platformCard(p, ch, null, [body], [foot]);
-    loadNapcat(body, foot, ch, card);
+    loadQQ(body, foot, ch, card);
     return card;
   }
-  function watchNapcat(title) {
+  function watchQQ(title) {
     progressDialog({ title, url: "/api/control/progress/task", onFinish: (pr, extra) => {
       if (pr.notes && pr.notes.length) extra.replaceChildren(h("ul", { class: "note" }, ...pr.notes.map((n) => h("li", { text: n }))));
       loaders.channels();
     } });
   }
-  async function napcatTask(action, title) {
-    try { await api("POST", `/api/control/napcat/${action}`, action === "uninstall" ? { confirm: true } : {}); }
+  async function qqTask(action, title) {
+    try { await api("POST", `/api/control/qq/${action}`, action === "uninstall" ? { confirm: true } : {}); }
     catch (e) { toast(e.message, false); return; }
-    watchNapcat(title);
+    watchQQ(title);
   }
-  async function loadNapcat(body, foot, ch, card) {
-    clearTimeout(ncTimer);
+  function qqWindow(holder) {                // QQ's window in `holder`; refresh() takes a new picture
+    const img = h("img", { class: "qq-screen", alt: "QQ 窗口" });
+    const box = h("div", { class: "qq-screen-box" }, img);
+    const note = h("p", { class: "note", text: "正在读取 QQ 窗口…" });
+    let shot = null;
+    async function refresh() {
+      try {
+        shot = await api("GET", "/api/control/qq/screen");
+        img.src = shot.image;
+        // the window could not be cut out (the whole screen came back): real size in a scrolling box, so the QR code
+        // stays big enough for a phone
+        img.classList.toggle("full", shot.width > 720);
+        note.textContent = "这是服务器上 QQ 的窗口，点画面就等于点 QQ 窗口。";
+      } catch (e) { note.textContent = e.message; }
+    }
+    img.addEventListener("click", async (ev) => {
+      if (!shot) return;
+      const r = img.getBoundingClientRect();
+      const x = Math.round(shot.x + (ev.clientX - r.left) * shot.width / r.width);
+      const y = Math.round(shot.y + (ev.clientY - r.top) * shot.height / r.height);
+      try { await api("POST", "/api/control/qq/click", { x, y }); setTimeout(refresh, 700); } catch (e) { toast(e.message, false); }
+    });
+    holder.replaceChildren(box, note, h("div", { class: "row" },
+      h("button", { class: "ghost", type: "button", text: "刷新画面", onclick: () => refresh() })));
+    refresh();
+    return { refresh };
+  }
+  async function loadQQ(body, foot, ch, card) {
+    clearTimeout(qqTimer);
     let s;
-    try { s = await api("GET", "/api/control/napcat"); } catch (e) { body.replaceChildren(h("p", { class: "err", text: e.message })); return; }
+    try { s = await api("GET", "/api/control/qq"); } catch (e) { body.replaceChildren(h("p", { class: "err", text: e.message })); return; }
     const running = s.progress && (s.progress.state === "queued" || s.progress.state === "running");
-    const again = (ms) => { ncTimer = setTimeout(() => { if (body.isConnected && $("#tab-channels").classList.contains("active") && !document.hidden) loadNapcat(body, foot, ch, card); }, ms); };
+    const again = (ms) => { qqTimer = setTimeout(() => { if (body.isConnected && $("#tab-channels").classList.contains("active") && !document.hidden) loadQQ(body, foot, ch, card); }, ms); };
     if (!s.installed) {
       setIntro(card, true);
       const failed = s.progress && s.progress.state === "failed" ? h("p", { class: "err", text: "上次安装失败：" + (s.progress.message || "") }) : null;
-      body.replaceChildren(...[failed, h("p", { class: "note", text: "会在服务器上安装 Linux QQ 和 NapCat（几分钟，大约 400 MB），只在本机通信，不开放任何端口。这是非官方的接入方式，QQ 号有被风控的可能，建议用小号。" })].filter(Boolean));
-      foot.replaceChildren(running ? h("button", { type: "button", text: "正在安装…查看进度", onclick: () => watchNapcat("安装 QQ") })
+      body.replaceChildren(...[failed, h("p", { class: "note", text: "会在服务器上用 Docker 安装 SnowLuma 和它自带的 Linux QQ（第一次下载约 740 MB，几分钟到十几分钟；没有 Docker 会先装上）。只在本机通信，不开放任何端口。这是非官方的接入方式，QQ 号有被风控的可能，建议用小号。" })].filter(Boolean));
+      foot.replaceChildren(running ? h("button", { type: "button", text: "正在安装…查看进度", onclick: () => watchQQ("安装 QQ") })
         : s.available ? h("button", { type: "button", text: "一键安装 QQ", onclick: async () => {
-          if (!(await confirmBox("在服务器上安装 Linux QQ 和 NapCat？大约需要几分钟。"))) return;
-          napcatTask("install", "安装 QQ");
+          if (!(await confirmBox("在服务器上安装 SnowLuma 和 Linux QQ（Docker）？第一次要下载约 740 MB。"))) return;
+          qqTask("install", "安装 QQ");
         } }) : h("code", { text: s.install_command }));
       if (!s.available) body.append(h("p", { class: "note", text: "这种安装方式不能在网页上安装，请在服务器上运行上面的命令。" }));
       return;
@@ -359,34 +388,31 @@
     const login = s.login || {};
     if (!login.logged_in) {
       setIntro(card, false);
-      setHead(card, login.starting ? "正在启动" : "等待扫码", "warn");
-      const key = login.qr || "";
-      if (body.dataset.qr !== key || !key) {
-        body.dataset.qr = key;
-        body.replaceChildren(login.qr
-          ? step(1, "用要给 Violet 用的 QQ 扫一扫", h("img", { class: "wx-qr", src: login.qr, alt: "QQ 登录二维码" }),
-            h("p", { class: "note", text: "用手机 QQ 扫码并确认。建议用小号；登录后 Violet 会记住这个号，重启后自动登录。" }))
-          : h("p", { class: "note", text: login.starting ? "QQ 正在启动，几十秒后这里会出现二维码…" : "正在获取二维码…" }),
-          ...(login.error && !login.starting ? [h("p", { class: "err", text: login.error })] : []));
-      }
-      foot.replaceChildren(
-        h("button", { class: "ghost", type: "button", text: "换一个二维码", onclick: async () => {
-          try { await api("POST", "/api/control/napcat/refresh-qr"); body.dataset.qr = ""; loadNapcat(body, foot, ch, card); } catch (e) { toast(e.message, false); }
-        } }),
-        h("button", { class: "ghost", type: "button", text: "重启 QQ", onclick: () => napcatTask("restart", "重启 QQ") }));
-      again(3000);
+      setHead(card, login.desktop ? "等待扫码" : "正在启动", "warn");
+      if (!body.dataset.window) {            // the picture stays; only the state is polled
+        body.dataset.window = "1";
+        const holder = h("div", { class: "stack" });
+        body.replaceChildren(step(1, "用手机 QQ 扫 QQ 窗口里的二维码", holder,
+          h("p", { class: "note", text: "用要给 Violet 用的 QQ 号（建议小号）扫码，并在手机上确认。窗口里要点“登录”之类的按钮时，直接点画面。QQ 刚启动时要等几十秒才有窗口。" })));
+        qqView = qqWindow(holder);
+      } else if (qqView) qqView.refresh();
+      foot.replaceChildren(h("button", { class: "ghost", type: "button", text: "重启 QQ", onclick: () => qqTask("restart", "重启 QQ") }));
+      again(4000);
       return;
     }
+    body.dataset.window = "";
     if (!s.channel) { loaders.channels(); return; }        // logged in just now: the channel was created
     ch = s.channel;
     setIntro(card, false);
     const parts = channelParts(ch, "你自己的 QQ");
-    body.replaceChildren(...parts.body.filter(Boolean));
+    const holder = h("div", { class: "stack" });
+    body.replaceChildren(...parts.body.filter(Boolean), holder);
     foot.replaceChildren(...parts.foot,
-      h("button", { class: "ghost", type: "button", text: "重启 QQ", onclick: () => napcatTask("restart", "重启 QQ") }),
+      h("button", { class: "ghost", type: "button", text: "看 QQ 窗口", onclick: () => { qqView = qqWindow(holder); } }),
+      h("button", { class: "ghost", type: "button", text: "重启 QQ", onclick: () => qqTask("restart", "重启 QQ") }),
       h("button", { class: "danger", type: "button", text: "卸载", onclick: async () => {
-        if (!(await confirmBox("卸载 QQ（NapCat）？这个 QQ 号会退出登录，群聊和其他人的聊天记录保留。"))) return;
-        napcatTask("uninstall", "卸载 QQ");
+        if (!(await confirmBox("卸载 QQ（SnowLuma）？这个 QQ 号会退出登录，群聊、表情包和聊天记录保留。"))) return;
+        qqTask("uninstall", "卸载 QQ");
       } }));
   }
 
@@ -402,7 +428,7 @@
       if (ch) used.add(ch.id); return ch; };
     $("#ch-list").replaceChildren(...PLATFORMS.map((p) => { const ch = pick(p);
       if (p.key === "wechat") return wechatCard(p, ch || { id: "wechat", enabled: true, status: { state: "stopped" } });
-      return p.key === "napcat" ? napcatCard(p, ch) : botCard(p, ch); }));
+      return p.key === "napcat" ? qqCard(p, ch) : botCard(p, ch); }));
     watchConnecting(data.channels);
     // channels added by hand in older versions (OneBot, a second bot) stay usable as cards
     $("#ch-extra").replaceChildren(...data.channels.filter((c) => !used.has(c.id)).map(extraCard));

@@ -1,7 +1,7 @@
 """QQ 空间 posts ("说说") of the channel "QQ" (0.7.9, user: "也不可以发动态").
 
-  publish()   the logged-in account's web cookies from NapCat (get_cookies, never logged or shown) -> QQ 空间's own
-              publish address (emotion_cgi_publish_v6, the request the web page sends) -> the post's id
+  publish()   SnowLuma's own action send_qzone_msg (visible to everyone) -> the post's id (0.7.9 sent QQ 空间's web
+              request itself with the account's cookies; SnowLuma does that inside QQ)
   compose()   one model call: her persona + what happened in her (virtual) life lately + her last posts -> a JSON
               {"post": true/false, "text": "..."}; she may decide there is nothing worth posting
   tick()      the social engine calls it every ~25 minutes: only when VIOLET_QZONE_ENABLED is on, between 09:00 and
@@ -15,21 +15,15 @@ page; the owner's chat learns about her posts through the owner digest.
 
 from __future__ import annotations
 
-import json
 import logging
 import random
-import re
 from datetime import datetime, timedelta
 from typing import Any
-
-import requests
 
 from ai import trace
 from ai.settings import env_bool, env_int
 
 logger = logging.getLogger("violet.social.qzone")
-PUBLISH_URL = "https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_publish_v6"
-UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 MIN_GAP_HOURS = 4
 CHANCE = 0.3
 
@@ -49,51 +43,18 @@ def enabled() -> bool:
     return env_bool("VIOLET_QZONE_ENABLED", False)
 
 
-def gtk(key: str) -> int:
-    """QQ 空间's request token, computed from the p_skey cookie (the same function its web page runs)."""
-    value = 5381
-    for ch in key:
-        value += (value << 5) + ord(ch)
-    return value & 0x7fffffff
-
-
-def publish(adapter, text: str, session: requests.Session | None = None) -> str:
-    """Post `text` as the logged-in account. Returns the post id; raises QzoneError (without cookie values)."""
+def publish(adapter, text: str) -> str:
+    """Post `text` as the logged-in account (SnowLuma's send_qzone_msg). Returns the post id; raises QzoneError."""
     text = (text or "").strip()
     if not text:
         raise QzoneError("动态内容是空的")
-    cookies = adapter.cookies("qzone.qq.com")
-    uin = re.sub(r"\D", "", cookies.get("uin") or cookies.get("p_uin") or str(getattr(adapter, "self_id", "") or ""))
-    uin = str(int(uin)) if uin else ""                     # the cookie writes "o0012345"
-    key = cookies.get("p_skey") or cookies.get("skey")
-    if not uin or not key:
-        raise QzoneError("没拿到 QQ 空间的登录信息（QQ 可能需要重新扫码登录）")
-    jar = {k: v for k, v in cookies.items() if not k.startswith("_")}
-    form = {"syn_tweet_verson": "1", "paramstr": "1", "who": "1", "con": text[:1000], "feedversion": "1", "ver": "1",
-            "ugc_right": "1", "to_sign": "0", "hostuin": uin, "code_version": "1", "format": "json",
-            "qzreferrer": f"https://user.qzone.qq.com/{uin}"}
-    headers = {"User-Agent": UA, "Referer": f"https://user.qzone.qq.com/{uin}", "Origin": "https://user.qzone.qq.com"}
-    http = session or requests.Session()
     try:
-        response = http.post(PUBLISH_URL, params={"g_tk": gtk(key), "uin": uin}, data=form, cookies=jar,
-                             headers=headers, timeout=(10, 30))
-    except requests.RequestException as exc:
-        raise QzoneError(f"连不上 QQ 空间：{exc.__class__.__name__}") from None
-    body = response.text or ""
-    match = re.search(r"\{.*\}", body, re.S)
-    try:
-        data = json.loads(match.group(0)) if match else {}
-    except ValueError:
-        data = {}
-    if not isinstance(data, dict):
-        data = {}
-    if response.status_code != 200 or data.get("code") not in (0, "0"):
-        message = str(data.get("message") or data.get("msg") or f"HTTP {response.status_code}")[:120]
-        raise QzoneError(f"QQ 空间没有接受：{message}")
-    return str(data.get("tid") or data.get("t1_tid") or "")
+        return adapter.publish_qzone(text[:1000])
+    except Exception as exc:                               # noqa: BLE001 -- the channel's error says what QQ answered
+        raise QzoneError(f"QQ 空间没有接受：{str(exc)[:160]}") from None
 
 
-def _napcat(runtime):
+def _qq(runtime):
     manager = getattr(runtime, "channels", None)
     if manager is None:
         return None
@@ -104,7 +65,7 @@ def _napcat(runtime):
     for channel_id, entry in entries.items():
         if entry.get("type") == "napcat" and entry.get("enabled", True):
             adapter = manager.get(channel_id)
-            if adapter is not None and hasattr(adapter, "cookies"):
+            if adapter is not None and hasattr(adapter, "publish_qzone"):
                 return adapter
     return None
 
@@ -142,7 +103,7 @@ def record(db, channel: str, content: str, *, status: str, origin: str, tid: str
 
 
 def post_now(runtime, text: str, origin: str = "manual", reason: str | None = None) -> dict[str, Any]:
-    adapter = _napcat(runtime)
+    adapter = _qq(runtime)
     if adapter is None or not adapter.is_running():
         raise QzoneError("QQ 没有连接")
     try:
@@ -184,7 +145,7 @@ def tick(runtime, rng: random.Random | None = None) -> dict[str, Any] | None:
     try:
         if due(runtime.db) or (rng or random).random() >= CHANCE:
             return None
-        adapter = _napcat(runtime)
+        adapter = _qq(runtime)
         if adapter is None or not adapter.is_running():
             return None
         idea = compose(runtime.db)

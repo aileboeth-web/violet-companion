@@ -85,7 +85,8 @@ def _bool_field(value: Any) -> Any:
 
 
 def _ws_field(value: Any) -> Any:
-    """A NapCat set up by hand: ws://127.0.0.1:<port> (local only; empty = the one Violet installed)."""
+    """A SnowLuma (OneBot v11 WebSocket) set up by hand: ws://127.0.0.1:<port> (local only; empty = the one Violet
+    installed)."""
     if value in (None, ""):
         return ""
     if not isinstance(value, str) or not re.match(r"^ws://(127\.0\.0\.1|localhost|\[::1\]):\d{1,5}/?$", value.strip()):
@@ -128,15 +129,16 @@ def _app_id_field(value: Any) -> Any:
 
 
 def channel_types() -> dict[str, dict[str, Any]]:
-    from ai.channels.napcat import NapCatChannel
+    from ai.channels.snowluma import SnowLumaChannel
     from ai.channels.onebot11 import OneBotChannel
     from ai.channels.qqbot import QQBotChannel
     from ai.channels.telegram import TOKEN_RE, TelegramChannel
     return {
-        # 2026-10-29: a personal QQ account through NapCat, installed from the channels page (tools/violet_napcat.py);
-        # needs no fields -- the installer leaves the local address and token in <data>/control/napcat.json
+        # 2026-10-29: a personal QQ account through SnowLuma (NapCat before; the type keeps that name), installed
+        # from the channels page (tools/violet_snowluma.py); needs no fields -- the installer leaves the local address
+        # and token in <data>/control/snowluma.json
         "napcat": {
-            "class": NapCatChannel, "label": "QQ",
+            "class": SnowLumaChannel, "label": "QQ",
             "config": {"ws_url": _ws_field},
             "defaults": {"ws_url": ""},
             "secrets": {"ws_token": (False, _token_field(None, "访问令牌不能为空、不能有空格"))},
@@ -150,7 +152,7 @@ def channel_types() -> dict[str, dict[str, Any]]:
             "secrets": {"app_secret": (True, _token_field(re.compile(r"^[A-Za-z0-9]{8,128}$"),
                                                           "AppSecret 是 QQ 开放平台“开发设置”里的密钥（字母和数字）"))},
             "help": "QQ 开放平台（q.qq.com）创建机器人后，在“开发设置”里找到 AppID 和 AppSecret 填在这里，并在“沙箱配置”"
-                    "或正式上线后把你的 QQ 加为可用成员。不需要 NapCat。添加后在后台生成绑定码，用你的 QQ 给机器人发“/bind 绑定码”。"
+                    "或正式上线后把你的 QQ 加为可用成员。不需要另外安装软件。添加后在后台生成绑定码，用你的 QQ 给机器人发“/bind 绑定码”。"
                     "注意：QQ 只允许在你发消息后 60 分钟内回复，之后 Violet 主动发的消息可能被 QQ 拒绝。",
         },
         "telegram": {
@@ -161,13 +163,13 @@ def channel_types() -> dict[str, dict[str, Any]]:
             "help": "在 Telegram 里找 @BotFather 创建机器人，把 Token 填在这里。添加后在后台生成绑定码，用你自己的账号给机器人发“/bind 绑定码”。",
         },
         "onebot11": {
-            "class": OneBotChannel, "label": "QQ（OneBot v11，可选，需要 NapCat 等）",
+            "class": OneBotChannel, "label": "QQ（OneBot v11，可选，需要 SnowLuma 等）",
             "config": {"api_base": _url_field(True), "webhook_loopback_only": _bool_field,
                        "check_interval": _int_field(10, 600)},
             "defaults": {"api_base": "http://127.0.0.1:3000", "webhook_loopback_only": True, "check_interval": 30},
             "secrets": {"access_token": (False, _token_field(None, "访问令牌不能为空、不能有空格")),
                         "webhook_secret": (True, _token_field(re.compile(r"^.{16,}$"), "签名密钥至少 16 个字符"))},
-            "help": "QQ 通过 NapCat 等 OneBot v11 实现接入：在 NapCat 里开启 HTTP 服务（填到“接口地址”）和 HTTP 上报"
+            "help": "QQ 通过 SnowLuma 等 OneBot v11 实现接入：在里面开启 HTTP 服务（填到“接口地址”）和 HTTP 上报"
                     "（上报地址填后台显示的 Webhook 地址，签名密钥填这里的密钥）。",
         },
     }
@@ -444,7 +446,7 @@ class ChannelManager:
         factory = self._factory_overrides.get(kind) or channel_types()[kind]["class"]
         adapter = factory(channel_id, entry.get("config") or {}, self.store.secrets(channel_id), data_dir=self.data_dir)
         adapter.label = entry.get("label") or adapter.label
-        if hasattr(adapter, "runtime"):         # 2026-10-29: QQ (NapCat) hands groups / other people to ai/social
+        if hasattr(adapter, "runtime"):         # 2026-10-29: QQ (SnowLuma) hands groups / other people to ai/social
             adapter.runtime = self.runtime
         return adapter
 

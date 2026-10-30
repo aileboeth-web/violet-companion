@@ -1,4 +1,4 @@
-// Violet Control Center: QQ groups and other people (2026-10-29), under the channel cards when "QQ" (NapCat) is used.
+// Violet Control Center: QQ groups and other people (2026-10-29), under the channel cards when "QQ" (SnowLuma) is used.
 // Per group: how she takes part (关闭 / 只看不说 / 被 @ 才说 / 自己决定), daily limits (0 = no limit, the default), her
 // impression of the group, and her recent decisions (why she spoke or stayed silent). Then other people's private
 // chats and the people she knows. Everything saves through /api/control/social/*. DOM nodes only.

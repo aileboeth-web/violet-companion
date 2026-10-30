@@ -1,4 +1,4 @@
-"""OneBot v11 channel (phase 10): QQ through NapCat / Lagrange / go-cqhttp style implementations.
+"""OneBot v11 channel (phase 10): QQ through SnowLuma / NapCat / Lagrange / go-cqhttp style implementations.
 
 Two directions, both plain HTTP:
   * events -> Violet: the OneBot implementation POSTs every event to Violet's webhook
@@ -67,7 +67,7 @@ def parse_cq_string(message: str) -> list[dict[str, Any]]:
 
 
 def is_sticker(data: dict[str, Any]) -> bool:
-    """QQ marks a sticker picture with sub_type 1 (NapCat) or the summary [动画表情]."""
+    """QQ marks a sticker picture with sub_type 1 (SnowLuma, NapCat) or the summary [动画表情]."""
     return str(data.get("sub_type") if data.get("sub_type") is not None else data.get("subType") or "") == "1" \
         or "动画表情" in str(data.get("summary") or "")
 

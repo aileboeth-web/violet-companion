@@ -1,5 +1,5 @@
 """0.7.9: stickers (her collection, sending in the owner's chat and in groups, keeping what others send), QQ 空间 posts,
-the settings page's "清除数据", the persona preview. Fakes only: no network, no model, no NapCat."""
+the settings page's "清除数据", the persona preview. Fakes only: no network, no model, no QQ."""
 
 from __future__ import annotations
 
@@ -76,14 +76,14 @@ def test_owner_chat_context_lists_the_collection(db):
     assert f"{s['id']}：摸摸头" in text and "[[表情:编号]]" in text
 
 
-def test_napcat_marks_stickers_and_sends_them_as_stickers(tmp_path):
-    from ai.channels.napcat import NapCatChannel
+def test_qq_marks_stickers_and_sends_them_as_stickers(tmp_path):
+    from ai.channels.snowluma import SnowLumaChannel
     from ai.channels.onebot11 import segment_parts
     parts = segment_parts([{"type": "image", "data": {"url": "http://x/1", "file": "a.gif", "sub_type": 1}},
                            {"type": "image", "data": {"url": "http://x/2", "summary": "[动画表情]"}},
                            {"type": "image", "data": {"url": "http://x/3"}}])
     assert [p.data["sticker"] for p in parts] == [True, True, False]
-    ch = NapCatChannel("napcat", {}, {}, data_dir=tmp_path)
+    ch = SnowLumaChannel("napcat", {}, {}, data_dir=tmp_path)
     calls = []
     ch.call = lambda action, params=None, timeout=20.0: calls.append((action, params)) or {"message_id": 5}
     pic = tmp_path / "s.png"
@@ -173,32 +173,26 @@ class QzoneAdapter:
     def is_running(self):
         return True
 
-    def cookies(self, domain):
-        assert domain == "qzone.qq.com"
-        return {"uin": "o0012345", "p_skey": "abc", "skey": "@x", "_bkn": "1"}
+    def publish_qzone(self, text):
+        return "t-1"
 
 
-class FakeHTTP:
-    def __init__(self, body, status=200):
-        self.body, self.status, self.calls = body, status, []
-
-    def post(self, url, params=None, data=None, cookies=None, headers=None, timeout=None):
-        self.calls.append(SimpleNamespace(url=url, params=params, data=data, cookies=cookies))
-        return SimpleNamespace(status_code=self.status, text=self.body)
-
-
-def test_qzone_publish_request_and_errors():
+def test_qzone_publish_through_snowluma_and_errors(tmp_path):
+    from ai.channels.snowluma import QQError, SnowLumaChannel
     from ai.social import qzone
-    http = FakeHTTP('_Callback({"code":0,"tid":"t-1","message":""});')
-    assert qzone.publish(QzoneAdapter(), "今天读完一本书 📖", session=http) == "t-1"
-    call = http.calls[0]
-    assert call.params == {"g_tk": qzone.gtk("abc"), "uin": "12345"} and call.data["con"] == "今天读完一本书 📖"
-    assert "_bkn" not in call.cookies and call.data["hostuin"] == "12345"
-    assert qzone.gtk("abc") == qzone.gtk("abc") and 0 < qzone.gtk("abc") < 2 ** 31
-    with pytest.raises(qzone.QzoneError, match="没有接受：请先登录"):
-        qzone.publish(QzoneAdapter(), "x", session=FakeHTTP('{"code":-3000,"message":"请先登录"}'))
-    with pytest.raises(qzone.QzoneError):
-        qzone.publish(QzoneAdapter(), "  ", session=http)
+    ch = SnowLumaChannel("napcat", {}, {}, data_dir=tmp_path)
+    calls = []
+    ch.call = lambda action, params=None, timeout=20.0: calls.append((action, params)) or {"tid": "t-1", "time": 1}
+    assert qzone.publish(ch, "  今天读完一本书 📖 ") == "t-1"
+    assert calls == [("send_qzone_msg", {"content": "今天读完一本书 📖", "ugc_right": 1})]   # everyone may see it
+
+    def refused(action, params=None, timeout=20.0):
+        raise QQError("send_qzone_msg: retcode=-3000 请先登录")
+    ch.call = refused
+    with pytest.raises(qzone.QzoneError, match="没有接受：.*请先登录"):
+        qzone.publish(ch, "x")
+    with pytest.raises(qzone.QzoneError, match="空的"):
+        qzone.publish(ch, "  ")
 
 
 def test_qzone_tick_decides_records_and_respects_limits(db, monkeypatch):
@@ -207,7 +201,7 @@ def test_qzone_tick_decides_records_and_respects_limits(db, monkeypatch):
     runtime = SimpleNamespace(db=db, channels=SimpleNamespace(entries=lambda: {"napcat": {"type": "napcat"}},
                                                               get=lambda cid: adapter))
     published = []
-    monkeypatch.setattr(qzone, "publish", lambda a, text, session=None: published.append(text) or "t-9")
+    monkeypatch.setattr(qzone, "publish", lambda a, text: published.append(text) or "t-9")
     seen = {}
 
     def fake(system, user):
@@ -257,7 +251,19 @@ def test_qzone_routes_need_confirmation(admin, db):
     assert r.status_code == 400 and "QQ 没有连接" in r.get_json()["error"]
 
 
-def test_reset_memory_and_or_config(admin, db, monkeypatch):
+@pytest.fixture()
+def env_guard():
+    """The settings saved below change os.environ (CHAT_LLM_MODEL=cys): put it back, or later tests talk to "cys"."""
+    import ai.control_config as cc
+    saved = dict(os.environ)
+    yield
+    os.environ.clear()
+    os.environ.update(saved)
+    cc._ORIGINALS.clear()
+    cc._DEFAULT_STORE = None
+
+
+def test_reset_memory_and_or_config(env_guard, admin, db, monkeypatch):
     from ai.control_config import store
     from ai.social.store import SocialStore
     db.execute("INSERT INTO core_memories (memory_key, category, content, created_at, updated_at) "

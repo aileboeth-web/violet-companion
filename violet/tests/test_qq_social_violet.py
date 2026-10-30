@@ -1,6 +1,6 @@
 """2026-10-29, the "QQ" work: chat history per channel, Violet's social life (groups / other people) with one
-fixed-format decision per look, the NapCat channel and its one-click install, persona templates, pictures over the
-official QQ bot. Fakes only: no network, no model, no NapCat."""
+fixed-format decision per look, the QQ channel (SnowLuma, NapCat before) with its one-click install and QQ's window,
+persona templates, pictures over the official QQ bot. Fakes only: no network, no model, no QQ, no Docker."""
 
 from __future__ import annotations
 
@@ -220,12 +220,15 @@ def test_social_settings_routes(admin, db):
     assert d["groups"][0]["peer_id"] == "800" and [m["value"] for m in d["modes"]] == ["off", "observe", "mention", "auto"]
 
 
-def test_napcat_page_state_without_install(admin):
-    d = admin.get("/api/control/napcat").get_json()["data"]
-    assert d["installed"] is False and "napcat install" in d["install_command"]
+def test_qq_page_state_without_install(admin):
+    d = admin.get("/api/control/qq").get_json()["data"]
+    assert d["installed"] is False and "violet qq install" in d["install_command"]
+    assert admin.get("/api/control/qq/screen").status_code == 400
+    assert admin.post("/api/control/qq/click", json={"x": 1, "y": 2}, headers=SAME).status_code == 400
+    assert admin.post("/api/control/qq/nope", json={}, headers=SAME).status_code == 404
 
 
-# ------------------------------------------------------------------------------------------------ NapCat channel
+# ------------------------------------------------------------------------------------------------ SnowLuma channel
 
 class FakeWS:
     def __init__(self, answers):
@@ -245,10 +248,10 @@ class FakeWS:
         pass
 
 
-def test_napcat_routes_owner_to_the_chat_and_groups_to_the_social_engine(monkeypatch):
-    from ai.channels.napcat import NapCatChannel
+def test_qq_routes_owner_to_the_chat_and_groups_to_the_social_engine(monkeypatch):
+    from ai.channels.snowluma import SnowLumaChannel
     ws = FakeWS([])
-    ch = NapCatChannel("napcat", {"ws_url": "ws://127.0.0.1:3001"}, {"ws_token": "t"}, ws_factory=lambda *a, **k: ws)
+    ch = SnowLumaChannel("napcat", {"ws_url": "ws://127.0.0.1:3001"}, {"ws_token": "t"}, ws_factory=lambda *a, **k: ws)
     got, social = [], []
     ch.runtime = SimpleNamespace(identities=SimpleNamespace(bound_peers=lambda c: ["9"]))
     ch._sink = lambda m: got.append(m) or True
@@ -269,8 +272,8 @@ def test_napcat_routes_owner_to_the_chat_and_groups_to_the_social_engine(monkeyp
     assert g["sender_name"] == "阿凯" and "来玩吗" in g["text"]
 
 
-def test_napcat_actions_wait_for_their_echo():
-    from ai.channels.napcat import NapCatChannel
+def test_qq_actions_wait_for_their_echo():
+    from ai.channels.snowluma import SnowLumaChannel
 
     class WS(FakeWS):
         def send_text(self, text):
@@ -279,7 +282,7 @@ def test_napcat_actions_wait_for_their_echo():
             threading.Timer(0.05, lambda: ch._answer({"status": "ok", "retcode": 0, "data": {"message_id": 77},
                                                       "echo": msg["echo"]})).start()
     ws = WS([])
-    ch = NapCatChannel("napcat", ws_factory=lambda *a, **k: ws)
+    ch = SnowLumaChannel("napcat", ws_factory=lambda *a, **k: ws)
     ch._ws = ws
     assert ch.send_to("group", "614", "大家好", reply_to="33") == "77"
     action = ws.sent[0]
@@ -287,96 +290,291 @@ def test_napcat_actions_wait_for_their_echo():
     assert action["params"]["message"][0] == {"type": "reply", "data": {"id": "33"}}
 
 
-def test_webui_login_hash_and_qr():
-    import hashlib
-    from ai.channels import napcat_webui
-    assert napcat_webui.qr_image("data:image/png;base64,AA") == "data:image/png;base64,AA"
-    assert napcat_webui.qr_image("https://txz.qq.com/p?k=x").startswith("data:image/svg+xml;base64,")
+def test_login_probe_and_the_account_token(tmp_path):
+    from ai.channels.snowluma import account_token, probe_login
     seen = {}
 
-    def fake_post(base, path, body=None, credential=None, timeout=10.0):
-        seen.setdefault("calls", []).append((path, body, credential))
-        if path == "/api/auth/login":
-            return {"Credential": "cred"}
-        return {"isLogin": False, "qrcodeurl": "https://txz.qq.com/p?k=y"}
-    napcat_webui._CACHE.update(credential=None, until=0)
-    import unittest.mock as mock
-    with mock.patch.object(napcat_webui, "_post", fake_post):
-        state = napcat_webui.login_state({"webui_url": "http://127.0.0.1:6099", "webui_token": "tok"})
-    login = seen["calls"][0]
-    assert login[1]["hash"] == hashlib.sha256(b"tok.napcat").hexdigest()
-    assert seen["calls"][1] == ("/api/QQLogin/CheckLoginStatus", None, "cred") and state["qr"].startswith("data:image/svg")
+    def factory(url, timeout=None, headers=None):
+        seen.update(url=url, headers=headers)
+        return FakeWS([{"post_type": "meta_event"}])
+    assert probe_login({"ws_url": "ws://127.0.0.1:3001", "ws_token": "tok"}, ws_factory=factory, timeout=1) == \
+        {"uin": "2860001234", "nick": "Violet"}
+    assert seen["headers"] == {"Authorization": "Bearer tok"}
+
+    def refused(*a, **k):
+        raise ConnectionRefusedError()
+    assert probe_login({"ws_url": "ws://127.0.0.1:3001"}, ws_factory=refused) is None     # not logged in yet
+    config = tmp_path / "config"
+    config.mkdir()
+    assert account_token(str(config)) is None and account_token("relative/dir") is None
+    (config / "onebot_1.json").write_text(json.dumps({"networks": {"wsServers": [
+        {"port": 3001, "accessToken": "old"}]}}), encoding="utf-8")
+    os.utime(config / "onebot_1.json", (1, 1))
+    (config / "onebot_2.json").write_text(json.dumps({"networks": {"wsServers": [
+        {"port": 3002, "accessToken": "other"}, {"port": 3001, "accessToken": "new"}]}}), encoding="utf-8")
+    assert account_token(str(config)) == "new"
+
+
+# ------------------------------------------------------------------------------------------------ QQ's window (VNC)
+
+def _recv_all(conn, n):
+    buf = b""
+    while len(buf) < n:
+        part = conn.recv(n - len(buf))
+        if not part:
+            raise ConnectionError("closed")
+        buf += part
+    return buf
+
+
+def fake_vnc_server(password, sessions=2, w=64, h=40):
+    """An RFB 3.8 server with VNC authentication: a dark screen, a white "window" (x 20-29, y 10-17) and a grey bar
+    over the whole width at the bottom; records pointer events."""
+    import socket
+    import struct
+    from ai.channels import vnc
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(sessions)
+    events: list = []
+
+    def serve():
+        for _ in range(sessions):
+            conn, _ = srv.accept()
+            with conn:
+                conn.sendall(b"RFB 003.008\n")
+                assert _recv_all(conn, 12) == b"RFB 003.008\n"
+                conn.sendall(bytes([2, 1, 2]))                    # None and VNC authentication offered
+                assert _recv_all(conn, 1) == b"\x02"
+                challenge = bytes(range(16))
+                conn.sendall(challenge)
+                good = _recv_all(conn, 16) == vnc.vnc_response(password, challenge)
+                conn.sendall(struct.pack(">I", 0 if good else 1))
+                if not good:
+                    conn.sendall(struct.pack(">I", 3) + b"bad")
+                    continue
+                _recv_all(conn, 1)
+                conn.sendall(struct.pack(">HH", w, h) + b"\0" * 16 + struct.pack(">I", 2) + b"qq")
+                _recv_all(conn, 20 + 8)                          # SetPixelFormat, SetEncodings
+                first = _recv_all(conn, 1)
+                if first == b"\x03":
+                    _recv_all(conn, 9)
+                    px = bytearray(b"\x10\x10\x10\x00" * w * h)
+                    for y in range(10, 18):
+                        for x in range(20, 30):
+                            px[(y * w + x) * 4:(y * w + x) * 4 + 4] = b"\xff\xff\xff\x00"
+                    for y in (h - 2, h - 1):
+                        px[y * w * 4:(y + 1) * w * 4] = b"\x50\x50\x50\x00" * w
+                    conn.sendall(b"\x02")                        # a bell first: skipped
+                    conn.sendall(struct.pack(">BxH", 0, 1) + struct.pack(">HHHHi", 0, 0, w, h, 0) + bytes(px))
+                else:
+                    rest = first + _recv_all(conn, 17)
+                    events.extend(struct.unpack(">BBHH", rest[i:i + 6]) for i in range(0, 18, 6))
+        srv.close()
+    threading.Thread(target=serve, daemon=True).start()
+    return srv.getsockname()[1], events
+
+
+def test_vnc_screenshot_cuts_out_the_window_and_clicks_land_on_the_screen():
+    import struct
+    import time
+    import zlib
+    from ai.channels import vnc
+    port, events = fake_vnc_server("pa55word")
+    shot = vnc.screenshot(port, "pa55word", timeout=5)
+    assert (shot["screen_width"], shot["screen_height"]) == (64, 40)
+    assert (shot["x"], shot["y"], shot["width"], shot["height"]) == (4, 0, 40, 30)     # window + margin, no bar
+    data = shot["png"]
+    assert data.startswith(b"\x89PNG\r\n\x1a\n") and struct.unpack(">II", data[16:24]) == (40, 30)
+    idat = data.index(b"IDAT")
+    raw = zlib.decompress(data[idat + 4:idat + 4 + struct.unpack(">I", data[idat - 4:idat])[0]])
+    row = raw[12 * (1 + 40 * 3):13 * (1 + 40 * 3)]                 # screen row 12
+    assert row[1 + 21 * 3:1 + 22 * 3] == b"\xff\xff\xff" and row[1:4] == b"\x10\x10\x10"
+    vnc.click(port, "pa55word", 25, 99, timeout=5)
+    for _ in range(50):
+        if events:
+            break
+        time.sleep(0.05)
+    assert events == [(5, 0, 25, 39), (5, 1, 25, 39), (5, 0, 25, 39)]    # clamped into the screen
+
+
+def test_vnc_wrong_password_and_nothing_listening():
+    from ai.channels import vnc
+    port, _ = fake_vnc_server("right", sessions=1)
+    with pytest.raises(vnc.VNCError, match="密码不对"):
+        vnc.screenshot(port, "wrong", timeout=5)
+    with pytest.raises(vnc.VNCError, match="连不上"):
+        vnc.screenshot(port, "right", timeout=2)                   # the server is gone
+    assert vnc.reachable(port) is False
+    assert vnc.content_box(b"\0\0\0\0" * 16, 4, 4) == (0, 0, 4, 4)  # an empty screen: all of it
+    w, h = 64, 40                                                  # X's default weave behind a window
+    px = bytearray(b"".join((b"\xff\xff\xff\x00" if (x + y) % 2 else b"\0\0\0\x00") for y in range(h) for x in range(w)))
+    for y in range(5, 9):
+        px[(y * w + 40) * 4:(y * w + 50) * 4] = b"\x80\x80\x80\x00" * 10
+    assert vnc.content_box(bytes(px), w, h) == (32 - 12, 0, 64, 9 + 12)
+
+
+def test_qq_screen_and_click_routes(admin, tmp_path, monkeypatch):
+    from ai import root_tasks
+    from ai.channels import vnc
+    monkeypatch.setattr(root_tasks, "control_dir", lambda: tmp_path)
+    (tmp_path / "snowluma.json").write_text(json.dumps({"ws_url": "ws://127.0.0.1:1", "ws_token": "t", "vnc_port": 5,
+                                                       "vnc_password": "pw"}), encoding="utf-8")
+    clicks = []
+    monkeypatch.setattr(vnc, "screenshot", lambda port, pw: {"png": b"PNG", "x": 1, "y": 2, "width": 3, "height": 4,
+                                                             "screen_width": 9, "screen_height": 9})
+    monkeypatch.setattr(vnc, "click", lambda port, pw, x, y: clicks.append((port, pw, x, y)))
+    monkeypatch.setattr(vnc, "reachable", lambda port: True)
+    from ai.channels import snowluma
+    monkeypatch.setattr(snowluma, "probe_login", lambda info: None)
+    d = admin.get("/api/control/qq/screen").get_json()["data"]
+    assert d["image"] == "data:image/png;base64,UE5H" and d["x"] == 1 and "png" not in d
+    assert admin.post("/api/control/qq/click", json={"x": 10, "y": 20}, headers=SAME).status_code == 200
+    assert clicks == [(5, "pw", 10, 20)]
+    assert admin.post("/api/control/qq/click", json={"x": "a"}, headers=SAME).status_code == 400
+    state = admin.get("/api/control/qq").get_json()["data"]
+    assert state["installed"] and state["login"] == {"logged_in": False, "desktop": True}
 
 
 # ------------------------------------------------------------------------------------------------ installer
 
-def test_napcat_install_and_uninstall_with_fakes(tmp_path):
-    from tools import violet_napcat as nc
+class FakeHost:
+    """run / stream / which of a Linux server: apt, no Docker until installed, Docker Hub blocked, a mirror works."""
+    def __init__(self, containers=None):
+        self.ran, self.streamed, self.containers = [], [], dict(containers or {})
+
+    def which(self, name):
+        return "/usr/bin/apt-get" if name == "apt-get" else ("/usr/bin/docker" if name == "docker" and
+                                                            any(c[:3] == ["apt-get", "install", "-y"] for c in self.streamed)
+                                                            else None)
+
+    def run(self, cmd, **kw):
+        from tools import violet_snowluma as sl
+        self.ran.append(cmd)
+        out, code = "", 0
+        if cmd[0] == "getent":
+            code = 2
+        elif cmd[:2] == ["docker", "version"]:
+            out = "27.5.1"
+        elif cmd[:2] == ["docker", "inspect"]:
+            if sl.CONTAINER in self.containers:
+                out = self.containers[sl.CONTAINER] or "<no value>"
+            else:
+                code = 1
+        elif cmd[:2] == ["docker", "run"]:
+            self.containers[sl.CONTAINER] = sl.LABEL_VALUE
+        elif cmd[:3] == ["docker", "rm", "-f"]:
+            self.containers.pop(sl.CONTAINER, None)
+        return SimpleNamespace(returncode=code, stdout=out, stderr="")
+
+    def stream(self, cmd, on_line, env):
+        self.streamed.append(cmd)
+        on_line("Pull complete")
+        if cmd[:2] == ["docker", "pull"] and not cmd[2].startswith("docker.1ms.run/"):
+            return 1, "Get https://registry-1.docker.io/v2/: timeout"
+        return 0, "ok"
+
+
+def test_snowluma_install_reinstall_and_uninstall_with_fakes(tmp_path):
+    from tools import violet_snowluma as sl
     layout = SimpleNamespace(root=tmp_path / "opt", data=tmp_path / "opt" / "data")
-    unit = tmp_path / "violet-napcat.service"
-    ran = []
+    old_unit = tmp_path / "violet-napcat.service"                  # what 0.7.9 left: NapCat
+    old_unit.write_text(f"[Unit]\n{sl.NAPCAT_MARK}\n", encoding="utf-8")
+    (layout.root / "napcat" / "Napcat").mkdir(parents=True)
+    (layout.data / "control").mkdir(parents=True)
+    (layout.data / "control" / "napcat.json").write_text("{}", encoding="utf-8")
+    config = sl.folder(layout) / "data" / "config"
+    config.mkdir(parents=True)
+    (config / "onebot_123.json").write_text(json.dumps({"mode": "overlay", "statusCommand": {"x": 1}, "networks": {
+        "httpServers": [{"port": 3000}], "wsServers": [{"port": 3001, "accessToken": "theirs"}]}}), encoding="utf-8")
+    host = FakeHost()
+    state: dict = {"user": None, "napcat": {"managed": True}}
+    result = sl.install(layout, state, port_free=lambda p, h: True, run=host.run, stream=host.stream,
+                        which=host.which, wait=0, check_desktop=lambda port: True, napcat_unit=old_unit,
+                        fetch=lambda url, limit: pytest.fail("apt worked: no get.docker.com"))
+    info = state["snowluma"]
+    assert result["started"] and info["ws_port"] == 3001 and info["vnc_port"] == 5900 and len(info["vnc_password"]) == 8
+    assert not old_unit.exists() and not (layout.root / "napcat").exists() and "napcat" not in state
+    assert not (layout.data / "control" / "napcat.json").exists()
+    assert any("NapCat" in n for n in result["notes"]) and any("docker.io" in n for n in result["notes"])
+    assert ["apt-get", "install", "-y", "-qq", "docker.io"] in host.streamed
+    assert ["docker", "tag", "docker.1ms.run/" + sl.IMAGE, sl.IMAGE] in host.ran and info["source"] == "docker.1ms.run"
+    args = next(c for c in host.ran if c[:2] == ["docker", "run"])
+    assert "127.0.0.1:3001:3001" in args and "127.0.0.1:5900:5900" in args and f"VNC_PASSWD={info['vnc_password']}" in args
+    assert "SYS_PTRACE" in args and f"{sl.LABEL_KEY}={sl.LABEL_VALUE}" in args and args[-1] == sl.IMAGE
+    assert not any(a.endswith(":5099") or a.endswith(":6081") or a.endswith(":3000") for a in args)
+    ob = json.loads((config / "onebot.json").read_text(encoding="utf-8"))
+    assert ob["networks"]["httpServers"] == [] and ob["networks"]["wsServers"][0]["accessToken"] == info["ws_token"]
+    acct = json.loads((config / "onebot_123.json").read_text(encoding="utf-8"))
+    assert acct["networks"]["wsServers"][0]["accessToken"] == info["ws_token"] and acct["statusCommand"] == {"x": 1}
+    assert acct["networks"]["httpServers"] == []
+    export = json.loads(sl.export_path(layout.data).read_text(encoding="utf-8"))
+    assert export["ws_url"] == "ws://127.0.0.1:3001" and export["vnc_port"] == 5900
+    assert export["config_dir"] == str(config) and export["vnc_password"] == info["vnc_password"]
+
+    again = dict(state)
+    sl.install(layout, again, port_free=lambda p, h: False, run=host.run, stream=host.stream, which=host.which,
+               wait=0, check_desktop=lambda port: True, napcat_unit=old_unit, fetch=lambda url, limit: b"")
+    assert again["snowluma"]["ws_token"] == info["ws_token"] and again["snowluma"]["vnc_port"] == 5900
+    assert ["docker", "rm", "-f", sl.CONTAINER] in host.ran                # the old container replaced
+
+    removed = sl.uninstall(layout, again, run=host.run, which=host.which, napcat_unit=old_unit)
+    assert f"容器 {sl.CONTAINER}" in removed and f"镜像 {sl.IMAGE}" in removed
+    assert not sl.folder(layout).exists() and "snowluma" not in again and not sl.export_path(layout.data).exists()
+
+
+def test_snowluma_leaves_a_foreign_container_alone(tmp_path):
+    from tools import violet_snowluma as sl
+    layout = SimpleNamespace(root=tmp_path / "opt", data=tmp_path / "opt" / "data")
+    host = FakeHost({sl.CONTAINER: ""})
+    host.streamed.append(["apt-get", "install", "-y"])                 # docker is there already
+    with pytest.raises(sl.SnowlumaError, match="不是 Violet 建的"):
+        sl.install(layout, {"user": None}, port_free=lambda p, h: True, run=host.run, stream=host.stream,
+                   which=host.which, wait=0, check_desktop=lambda port: True, napcat_unit=tmp_path / "none")
+    assert not any(c[:2] == ["docker", "run"] for c in host.ran)
+    sl.uninstall(layout, {}, run=host.run, which=host.which, napcat_unit=tmp_path / "none")
+    assert sl.CONTAINER in host.containers and not any(c[:2] == ["docker", "rmi"] for c in host.ran)
+
+
+def test_docker_from_its_script_when_there_is_no_apt(tmp_path):
+    from tools import violet_snowluma as sl
+    streamed, ready = [], []
 
     def run(cmd, **kw):
-        ran.append(cmd)
-        # apt has a candidate for libglib2.0-0t64 only (like Ubuntu 24.04); getent: no violet-qq account yet
-        stdout = "  Candidate: 2.80\n" if cmd[:2] == ["apt-cache", "policy"] and cmd[2] == "libglib2.0-0t64" else \
-            "  Candidate: (none)\n"
-        return SimpleNamespace(returncode=0 if cmd[0] != "getent" else 2, stdout=stdout, stderr="")
-    script = b"#!/bin/bash\n# NapCat installer --docker\n"
-    streamed = []
+        ok = bool(ready) or cmd[:2] != ["docker", "version"]
+        return SimpleNamespace(returncode=0 if ok else 1, stdout="27" if ok else "", stderr="")
 
-    def stream(cmd, on_line, env, cwd):
+    def stream(cmd, on_line, env):
         streamed.append(cmd)
-        if cmd[0] == "apt-get":
-            return 0, "ok"
-        qq = nc.qq_dir(Path(env["HOME"])) / "qq"
-        qq.parent.mkdir(parents=True, exist_ok=True)
-        qq.write_text("")
-        on_line("安装 LinuxQQ")
-        assert cmd[-5:] == ["--docker", "n", "--cli", "n", "--skip-deps"] and env["DEBIAN_FRONTEND"] == "noninteractive"
-        return 0, "ok"
-    state: dict = {"user": None}
-    result = nc.install(layout, state, port_free=lambda p, h: True, run=run, fetch=lambda url, limit: script,
-                        stream=stream, unit_path=unit, wait=0, check_webui=lambda port: True)
-    assert result["started"] and state["napcat"]["ws_port"] == 3001 and state["napcat"]["webui_port"] == 6099
-    apt = next(c for c in streamed if c[:2] == ["apt-get", "install"])
-    assert "libglib2.0-0t64" in apt and "libatk1.0-0" in apt and "libatk1.0-0t64" not in apt
-    config = nc.napcat_dir(nc.folder(layout)) / "config"
-    ob = json.loads((config / "onebot11.json").read_text(encoding="utf-8"))
-    server = ob["network"]["websocketServers"][0]
-    assert server["host"] == "127.0.0.1" and server["token"] == state["napcat"]["ws_token"]
-    assert json.loads((config / "webui.json").read_text(encoding="utf-8"))["host"] == "127.0.0.1"
-    text = unit.read_text(encoding="utf-8")
-    assert nc.MARK in text and "User=violet-qq" in text and "xvfb-run -a" in text
-    export = json.loads(nc.export_path(layout.data).read_text(encoding="utf-8"))
-    assert export["ws_url"] == "ws://127.0.0.1:3001" and export["webui_url"] == "http://127.0.0.1:6099"
-    again = dict(state)
-    nc.install(layout, again, port_free=lambda p, h: False, run=run, fetch=lambda url, limit: script, stream=stream,
-               unit_path=unit, wait=0, check_webui=lambda port: True)
-    assert again["napcat"]["ws_token"] == state["napcat"]["ws_token"]         # a reinstall keeps ports and tokens
-    removed = nc.uninstall(layout, again, run=run, unit_path=unit)
-    assert not unit.exists() and not nc.folder(layout).exists() and "napcat" not in again and removed
+        ready.append(True)
+        return 0, ""
+    fetched = []
 
-
-def test_napcat_script_must_be_the_real_one():
-    from tools import violet_napcat as nc
-    with pytest.raises(nc.NapcatError):
-        nc.fetch_script(lambda url, limit: b"<html>blocked</html>")
-    data, url = nc.fetch_script(lambda url, limit: (_ for _ in ()).throw(OSError()) if "raw.githubusercontent.com/Nap" in
-                                url[:40] else b"#!/bin/bash\nNapCat --docker")
-    assert "ghfast.top" in url and data.startswith(b"#!")
+    def fetch(url, limit):
+        fetched.append(url)
+        if "get.docker.com" in url:
+            return b"<html>blocked</html>"
+        return b"#!/bin/sh\n# docker install script\n"
+    how = sl.ensure_docker(run, stream, lambda line: None, {}, fetch, tmp_path / "w", which=lambda name: None)
+    assert "get.docker.com" in how and fetched == list(sl.DOCKER_SCRIPTS)
+    assert streamed == [["sh", str(tmp_path / "w" / "get-docker.sh"), "--mirror", "Aliyun"]]
 
 
 def test_task_words_are_known_everywhere():
     from ai import root_tasks
     from tools import violet_installer
-    for word in ("napcat-install", "napcat-uninstall", "napcat-restart"):
-        assert word in root_tasks.TASKS and violet_installer.TASK_ACTIONS[word][0] == "napcat"
+    for word in ("qq-install", "qq-uninstall", "qq-restart"):
+        assert word in root_tasks.TASKS and violet_installer.TASK_ACTIONS[word][0] == "qq"
+    assert not any("napcat" in w for w in root_tasks.TASKS)
+    assert "TimeoutStartSec=3600" in violet_installer.updater_units(
+        violet_installer.Layout(Path("/opt/violet")))["violet-task.service"]
 
 
 def test_channel_type_and_labels():
     from ai.channels.manager import channel_types
+    from ai.channels.snowluma import SnowLumaChannel
     types = channel_types()
+    assert types["napcat"]["class"] is SnowLumaChannel and SnowLumaChannel.channel_type == "napcat"
     assert types["napcat"]["label"] == "QQ" and types["qqbot"]["label"] == "QQ（机器人）"
     check = types["napcat"]["config"]["ws_url"]
     assert check("ws://127.0.0.1:3001") == "ws://127.0.0.1:3001"

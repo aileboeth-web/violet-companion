@@ -241,8 +241,8 @@ def create_app(
         from .channel_routes import register_channel_routes        # phase 10: chat channels
         register_channel_routes(app, runtime)
     if violetdb is not None:
-        from .napcat_routes import register_napcat_routes          # 2026-10-29: QQ (NapCat) + Violet's social life
-        register_napcat_routes(app, violetdb, runtime)
+        from .qq_routes import register_qq_routes                  # 2026-10-29: QQ (SnowLuma) + Violet's social life
+        register_qq_routes(app, violetdb, runtime)
     from .setup_routes import register_setup_routes                # phase 10.3: first-run setup
     register_setup_routes(app, all_agents=all_agents, runtime=runtime)
 

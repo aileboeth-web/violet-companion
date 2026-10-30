@@ -1,12 +1,13 @@
-"""Control Center routes of the channel "QQ" (a personal account through NapCat) and of Violet's social life
-(2026-10-29). Behind the admin authentication like every route.
+"""Control Center routes of the channel "QQ" (a personal account through SnowLuma; NapCat until 2026-10-29) and of
+Violet's social life (2026-10-29). Behind the admin authentication like every route.
 
-  GET  /api/control/napcat                    installed? login state + QR code, the channel, the install progress
-  POST /api/control/napcat/<install|uninstall|restart>   root task (one-click install from the page)
-  POST /api/control/napcat/refresh-qr         a new QR code
-  GET  /api/control/social                    groups (NapCat's list + what Violet stored), private chats, settings
+  GET  /api/control/qq                        installed? logged in (and as whom), the channel, the install progress
+  POST /api/control/qq/<install|uninstall|restart>   root task (one-click install from the page)
+  GET  /api/control/qq/screen                 QQ's window as a PNG data URL (the QR code is scanned there) + where it is
+  POST /api/control/qq/click                  {x, y}: a click in QQ's window (screen coordinates)
+  GET  /api/control/social                    groups (QQ's list + what Violet stored), private chats, settings
   POST /api/control/social/conversation/<id>  {mode, daily_message_limit, daily_decision_limit, notes}
-  POST /api/control/social/group              {group_id, mode}: a group from NapCat's list (created on first use)
+  POST /api/control/social/group              {group_id, mode}: a group from QQ's list (created on first use)
   GET  /api/control/social/conversation/<id>/decisions   her last decisions there (why she spoke / stayed silent)
   GET  /api/control/social/people             the people she knows; POST .../people/<id> {impression}
   0.7.9:
@@ -26,11 +27,11 @@ from typing import Any
 
 from flask import Flask, Response, jsonify, request
 
-logger = logging.getLogger("violet.napcat")
-CHANNEL_ID = "napcat"
+logger = logging.getLogger("violet.qq")
+CHANNEL_ID = "napcat"                    # the stored id of the channel "QQ" since 0.7.8 (ai/channels/snowluma.py)
 
 
-def register_napcat_routes(app: Flask, violetdb, runtime) -> None:
+def register_qq_routes(app: Flask, violetdb, runtime) -> None:
     from ai.social.store import GROUP_MODES, MODE_TEXT, SocialStore
 
     def ok(data: Any = None, status: int = 200) -> Response:
@@ -52,66 +53,95 @@ def register_napcat_routes(app: Flask, violetdb, runtime) -> None:
         if mgr is None:
             return
         if mgr.entry(CHANNEL_ID) is None:
-            mgr.add("napcat", CHANNEL_ID, "QQ", {}, {}, enabled=True, actor="system:napcat-login")
+            mgr.add("napcat", CHANNEL_ID, "QQ", {}, {}, enabled=True, actor="system:qq-login")
         elif mgr.entry(CHANNEL_ID).get("enabled", True) and adapter() is not None and not adapter().is_running() \
                 and mgr.runtime_started():
             mgr.apply(CHANNEL_ID)
 
-    @app.get("/api/control/napcat")
-    def control_napcat():
+    def login_state(info: dict[str, Any]) -> dict[str, Any]:
+        """Logged in when the channel runs, or when SnowLuma answers on its WebSocket (it opens it after the login)."""
+        a = adapter()
+        if a is not None and a.is_running() and getattr(a, "self_id", ""):
+            return {"logged_in": True, "uin": a.self_id, "nick": getattr(a, "nickname", "") or None}
+        from ai.channels.snowluma import probe_login
+        account = probe_login(info)
+        if account:
+            ensure_channel()
+            return {"logged_in": True, **account}
+        from ai.channels.vnc import reachable
+        return {"logged_in": False, "desktop": reachable(int(info["vnc_port"]))}
+
+    @app.get("/api/control/qq")
+    def control_qq():
         from ai import root_tasks
-        info = root_tasks.napcat_export()
+        from ai.channels.snowluma import connection
+        info = connection()
         progress = root_tasks.read_progress("task")
         out: dict[str, Any] = {"available": root_tasks.available(), "installed": info is not None,
-                               "progress": progress if str(progress.get("task") or "").startswith("napcat") else None,
-                               "install_command": "/opt/violet/violet napcat install"}
+                               "progress": progress if str(progress.get("task") or "").startswith("qq-") else None,
+                               "install_command": "/opt/violet/violet qq install"}
         if info is not None:
-            from ai.channels import napcat_webui
-            try:
-                state = napcat_webui.login_state(info)
-                out["login"] = state
-                if state.get("logged_in"):
-                    ensure_channel()
-                    if state.get("uin"):
-                        try:
-                            napcat_webui.remember_account(info, state["uin"])
-                        except napcat_webui.WebUIError:
-                            pass
-            except napcat_webui.WebUIError as exc:
-                out["login"] = {"logged_in": False, "error": str(exc), "starting": True}
+            out["login"] = login_state(info)
         mgr = manager()
         if mgr is not None and mgr.entry(CHANNEL_ID) is not None:
             out["channel"] = mgr.describe_one(CHANNEL_ID)
         return ok(out)
 
-    @app.post("/api/control/napcat/<action>")
-    def control_napcat_action(action: str):
+    @app.get("/api/control/qq/screen")
+    def control_qq_screen():
+        import base64
+        from ai.channels import vnc
+        from ai.channels.snowluma import connection
+        info = connection()
+        if info is None:
+            return bad("还没有安装 QQ（SnowLuma）")
+        try:
+            shot = vnc.screenshot(int(info["vnc_port"]), str(info.get("vnc_password") or ""))
+        except vnc.VNCError as exc:
+            return bad(str(exc), 503)
+        image = "data:image/png;base64," + base64.b64encode(shot.pop("png")).decode("ascii")
+        response = jsonify({"ok": True, "data": {**shot, "image": image}})
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.post("/api/control/qq/click")
+    def control_qq_click():
+        from ai.channels import vnc
+        from ai.channels.snowluma import connection
+        info = connection()
+        if info is None:
+            return bad("还没有安装 QQ（SnowLuma）")
+        body = request.get_json(silent=True) or {}
+        try:
+            x, y = int(body.get("x")), int(body.get("y"))
+        except (TypeError, ValueError):
+            return bad("点击位置不对")
+        if not (0 <= x < 10000 and 0 <= y < 10000):
+            return bad("点击位置不对")
+        try:
+            vnc.click(int(info["vnc_port"]), str(info.get("vnc_password") or ""), x, y)
+        except vnc.VNCError as exc:
+            return bad(str(exc), 503)
+        return ok({"clicked": [x, y]})
+
+    @app.post("/api/control/qq/<action>")
+    def control_qq_action(action: str):
         from ai import root_tasks
-        if action == "refresh-qr":
-            from ai.channels import napcat_webui
-            info = root_tasks.napcat_export()
-            if info is None:
-                return bad("还没有安装 QQ（NapCat）")
-            try:
-                napcat_webui.refresh_qr(info)
-            except napcat_webui.WebUIError as exc:
-                return bad(str(exc))
-            return ok({"refreshed": True})
         if action not in ("install", "uninstall", "restart"):
             return bad("不支持的操作", 404)
         if action == "uninstall" and (request.get_json(silent=True) or {}).get("confirm") is not True:
             return bad("卸载需要确认（confirm: true）")
         try:
-            entry = root_tasks.request_task(f"napcat-{action}")
+            entry = root_tasks.request_task(f"qq-{action}")
         except PermissionError as exc:
-            return bad(str(exc) + f"：/opt/violet/violet napcat {action}", 409)
+            return bad(str(exc) + f"：/opt/violet/violet qq {action}", 409)
         except (ValueError, RuntimeError) as exc:
             return bad(str(exc), 409)
         if action == "uninstall":
             mgr = manager()
             if mgr is not None and mgr.entry(CHANNEL_ID) is not None:
                 try:
-                    mgr.update(CHANNEL_ID, enabled=False, actor="system:napcat-uninstall")
+                    mgr.update(CHANNEL_ID, enabled=False, actor="system:qq-uninstall")
                 except Exception:
                     logger.exception("switching the QQ channel off failed")
         return ok(entry)

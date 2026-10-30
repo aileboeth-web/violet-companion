@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 TASKS = ("relay-install", "relay-set-port", "searxng-install", "searxng-uninstall", "searxng-tune",
-         "searxng-configure", "napcat-install", "napcat-uninstall", "napcat-restart")
+         "searxng-configure", "qq-install", "qq-uninstall", "qq-restart")
 NAMES = ("task", "update")
 STALE_SECONDS = 1800           # a running entry this old belongs to a helper that was killed
 
@@ -86,16 +86,19 @@ def searxng_export() -> dict[str, Any] | None:
     return data if url.startswith("http://127.0.0.1:") else None
 
 
-def napcat_export() -> dict[str, Any] | None:
-    """What root wrote after installing QQ (NapCat) (<data>/control/napcat.json): local addresses and tokens."""
+def snowluma_export() -> dict[str, Any] | None:
+    """What root wrote after installing QQ (SnowLuma) (<data>/control/snowluma.json): the local WebSocket address and
+    token, the VNC port and password of QQ's window, SnowLuma's config folder."""
     try:
-        data = json.loads((control_dir() / "napcat.json").read_text(encoding="utf-8"))
+        data = json.loads((control_dir() / "snowluma.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     if not isinstance(data, dict):
         return None
-    ok = str(data.get("ws_url") or "").startswith("ws://127.0.0.1:") and \
-        str(data.get("webui_url") or "").startswith("http://127.0.0.1:")
+    try:
+        ok = str(data.get("ws_url") or "").startswith("ws://127.0.0.1:") and 0 < int(data.get("vnc_port") or 0) < 65536
+    except (TypeError, ValueError):
+        ok = False
     return data if ok else None
 
 

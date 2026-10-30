@@ -11,7 +11,7 @@ on:
     branches: [main]
     paths: ["violet/install.sh", "violet/tools/violet_installer.py", "violet/tools/violet_setup.py",
             "violet/tools/violet_service.py", "violet/tools/violet_relay.py", "violet/tools/violet_searxng.py",
-            "violet/tools/violet_napcat.py",
+            "violet/tools/violet_snowluma.py",
             "violet/requirements.txt", "violet/deploy/linux-e2e/**", ".github/workflows/install-linux.yml"]
 jobs:
   systemd:

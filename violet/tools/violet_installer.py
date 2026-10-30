@@ -979,9 +979,8 @@ TASK_NAME = f"{SERVICE_NAME}-task"
 TASK_ACTIONS = {"relay-install": ("relay", "install"), "relay-set-port": ("relay", "set-port"),
                 "searxng-install": ("searxng", "install"), "searxng-uninstall": ("searxng", "uninstall"),
                 "searxng-tune": ("searxng", "tune"), "searxng-configure": ("searxng", "configure"),
-                # 2026-10-29: QQ on a personal account (NapCat), channel "QQ"
-                "napcat-install": ("napcat", "install"), "napcat-uninstall": ("napcat", "uninstall"),
-                "napcat-restart": ("napcat", "restart")}
+                # 2026-10-29: QQ on a personal account (SnowLuma in Docker; NapCat before), channel "QQ"
+                "qq-install": ("qq", "install"), "qq-uninstall": ("qq", "uninstall"), "qq-restart": ("qq", "restart")}
 PROGRESS_STALE_SECONDS = 1800
 
 
@@ -1060,7 +1059,8 @@ def updater_units(layout: Layout) -> dict[str, str]:
         f"{TASK_NAME}.service": "\n".join([
             "[Unit]", "Description=Violet task requested from the Control Center", "After=network-online.target",
             "Wants=network-online.target", "", "[Service]", "Type=oneshot",
-            f"ExecStart={layout.root / 'violet'} root-task --json", "TimeoutStartSec=900", ""]),
+            # 3600: installing QQ downloads a ~740 MB image, slow from some servers
+            f"ExecStart={layout.root / 'violet'} root-task --json", "TimeoutStartSec=3600", ""]),
         f"{TASK_NAME}.path": "\n".join([
             "[Unit]", "Description=Violet task requested from the Control Center", "", "[Path]",
             f"PathExists={task}", f"Unit={TASK_NAME}.service", "", "[Install]", "WantedBy=paths.target", ""]),
@@ -1994,20 +1994,20 @@ def root_task(opts: Options, run: Callable[..., Any] = subprocess.run) -> dict[s
     try:
         if tool == "relay":
             result = mcp_relay(opts, action, run=run, progress=progress)
-        elif tool == "napcat":
-            result = napcat_command(opts, action, run=run, progress=progress)
+        elif tool == "qq":
+            result = qq_command(opts, action, run=run, progress=progress)
         else:
             result = searxng_command(opts, action, run=run, progress=progress)
     except InstallError as exc:
         progress.failed(str(exc))
         raise
     port = result.get("device_port")
-    if task == "napcat-install":
-        message = "QQ（NapCat）已安装" + ("，正在启动：回到渠道页扫码登录" if result.get("started") else "，还在启动中，稍后刷新渠道页")
-    elif task == "napcat-uninstall":
-        message = "QQ（NapCat）已卸载"
-    elif task == "napcat-restart":
-        message = "QQ（NapCat）已重启"
+    if task == "qq-install":
+        message = "QQ（SnowLuma）已安装" + ("，正在启动：回到渠道页扫码登录" if result.get("started") else "，还在启动中，稍后刷新渠道页")
+    elif task == "qq-uninstall":
+        message = "QQ（SnowLuma）已卸载"
+    elif task == "qq-restart":
+        message = "QQ 已重启"
     elif task == "searxng-install":
         message = f"联网搜索已安装：{result.get('url')}"
     elif task == "searxng-uninstall":
@@ -2106,8 +2106,8 @@ def purge_system(layout: Layout, state: dict, run: Callable[..., Any] = subproce
         removed += _searxng_module().uninstall(layout, state, run=run)
     except Exception:                       # noqa: BLE001
         pass
-    try:                                    # 2026-10-29: QQ on a personal account (`violet napcat install`)
-        removed += _napcat_module().uninstall(layout, state, run=run)
+    try:                                    # 2026-10-29: QQ on a personal account (`violet qq install`; also an old NapCat)
+        removed += _snowluma_module().uninstall(layout, state, run=run)
     except Exception:                       # noqa: BLE001
         pass
     for rule in state.get("firewall_rules") or []:
@@ -2161,7 +2161,7 @@ def purge_leftovers(layout: Layout, run: Callable[..., Any] = subprocess.run,
     installed, marked firewall rules, our system account, Violet's own folders in <root>) -- never anything else."""
     removed = purge_system(layout, {"user": SERVICE_USER}, run=run, linux_root=linux_root)
     known = ("app", "app.previous", "app.failed", "app.new", "venv", "config", "data", "backups", "logs", "mcp-relay",
-             "searxng", "napcat")
+             "searxng", "snowluma", "napcat")
     if layout.root.exists() and ((layout.root / "app" / "tools" / "violet_installer.py").exists()
                                  or (layout.root / "config" / "violet.env").exists()
                                  or (layout.root / "data" / "control").exists()):
@@ -2278,29 +2278,29 @@ def searxng_command(opts: Options, action: str, run: Callable[..., Any] = subpro
     return {"ok": True, **result}
 
 
-def _napcat_module():
+def _snowluma_module():
     try:
-        import violet_napcat                 # run as a script: <app>/tools is on sys.path
+        import violet_snowluma               # run as a script: <app>/tools is on sys.path
     except ImportError:
-        from tools import violet_napcat
-    return violet_napcat
+        from tools import violet_snowluma
+    return violet_snowluma
 
 
-NAPCAT_ACTIONS = ("install", "uninstall", "status", "restart")
+QQ_ACTIONS = ("install", "uninstall", "status", "restart")
 
 
-def napcat_command(opts: Options, action: str, run: Callable[..., Any] = subprocess.run,
-                   progress: Callable[[int, str], None] | None = None) -> dict[str, Any]:
-    """`violet napcat install | uninstall | status | restart` (tools/violet_napcat.py): QQ on a personal account."""
-    mod = _napcat_module()
-    if action not in NAPCAT_ACTIONS:
-        raise InstallError("用法：violet napcat install | uninstall | status | restart")
+def qq_command(opts: Options, action: str, run: Callable[..., Any] = subprocess.run,
+               progress: Callable[[int, str], None] | None = None) -> dict[str, Any]:
+    """`violet qq install | uninstall | status | restart` (tools/violet_snowluma.py): QQ on a personal account."""
+    mod = _snowluma_module()
+    if action not in QQ_ACTIONS:
+        raise InstallError("用法：violet qq install | uninstall | status | restart")
     layout = Layout(opts.root)
     state = load_state(layout)
     if not state:
         raise InstallError(f"{layout.root} 没有安装 Violet")
     if action != "status" and (os.name == "nt" or not _is_root()):
-        raise InstallError("QQ（NapCat）要以 root 在 Linux 上安装（/opt/violet/violet 会自动切换到 root）")
+        raise InstallError("QQ（SnowLuma）要以 root 在 Linux 上安装（/opt/violet/violet 会自动切换到 root）")
     try:
         if action == "install":
             result = mod.install(layout, state, port_free=port_free, run=run, progress=progress)
@@ -2309,15 +2309,13 @@ def napcat_command(opts: Options, action: str, run: Callable[..., Any] = subproc
             result = {"ok": True, "removed": mod.uninstall(layout, state, run=run)}
             save_state(layout, state)
         elif action == "restart":
-            if not (state.get("napcat") or {}).get("managed"):
-                raise InstallError("还没有安装 QQ（NapCat）")
             if progress is not None:
                 progress(30, "重启 QQ")
-            run(["systemctl", "restart", f"{mod.UNIT_NAME}.service"], capture_output=True)
+            mod.restart(state, run=run)
             result = {"ok": True}
         else:
-            result = mod.status(state)
-    except mod.NapcatError as exc:
+            result = mod.status(state, run=run)
+    except mod.SnowlumaError as exc:
         raise InstallError(str(exc)) from None
     return {"ok": True, **result}
 
@@ -2453,7 +2451,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", choices=["install", "upgrade", "update", "rollback", "status", "backup", "restore",
                                             "uninstall", "doctor", "start", "stop", "restart", "info",
                                             "reset-password", "reset-entrance", "set-port", "auto-update",
-                                            "firewall-apply", "mcp-relay", "root-task", "searxng", "napcat"])
+                                            "firewall-apply", "mcp-relay", "root-task", "searxng", "qq"])
     parser.add_argument("--update-feed", help=argparse.SUPPRESS)  # install: a release.json instead of GitHub
     parser.add_argument("--update-repo", help="install: GitHub owner/repo to update from (a fork)")
     parser.add_argument("--check", action="store_true", help="update: only report whether a newer release exists")
@@ -2536,8 +2534,8 @@ def main(argv: list[str] | None = None) -> int:
             result = root_task(opts)
         elif args.command == "searxng":
             result = searxng_command(opts, args.archive or "status")
-        elif args.command == "napcat":
-            result = napcat_command(opts, args.archive or "status",
+        elif args.command == "qq":
+            result = qq_command(opts, args.archive or "status",
                                     progress=None if args.json else (lambda pct, step: out(f"[{pct:3d}%] {step}")))
         elif args.command == "mcp-relay":
             action = args.archive or "status"

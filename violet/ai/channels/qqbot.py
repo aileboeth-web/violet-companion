@@ -1,7 +1,7 @@
 """QQ official bot channel (phase 10.5): QQ 开放平台机器人, AppID + AppSecret, official API over WebSocket.
 
 This is the QQ access that works without any third-party client (the same protocol the official qq-botpy SDK uses);
-OneBot v11 (onebot11.py, NapCat and similar) stays as a separate, optional channel.
+OneBot v11 (onebot11.py, SnowLuma and similar) stays as a separate, optional channel.
 
   * credentials: AppID (config) + AppSecret (secret) -> ``POST https://bots.qq.com/app/getAppAccessToken`` gives an
     access token (about 2 hours; renewed a minute before it ends, and at once when the API answers 401);

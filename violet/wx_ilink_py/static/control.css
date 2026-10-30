@@ -262,6 +262,9 @@ pre.note{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%}   /* phase 
 .wx-qr-wrap{display:flex;flex-wrap:wrap;gap:18px;align-items:center}
 .wx-qr-wrap .stack{align-items:flex-start;flex:1;min-width:220px}
 .wx-qr{width:180px;height:180px;border-radius:14px;background:#fff;padding:8px;box-shadow:var(--shadow);animation:pop .3s both}
+.qq-screen-box{max-width:100%;max-height:560px;overflow:auto;border-radius:10px}
+.qq-screen{display:block;max-width:100%;height:auto;border-radius:10px;border:1px solid var(--line);cursor:pointer;background:#000}
+.qq-screen.full{max-width:none}
 .wx-qr-wait{background:linear-gradient(90deg,var(--panel) 25%,var(--panel-hover) 50%,var(--panel) 75%);background-size:200% 100%;
   animation:shimmer 1.2s linear infinite}
 @keyframes shimmer{to{background-position:-200% 0}}

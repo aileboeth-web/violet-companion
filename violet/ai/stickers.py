@@ -4,7 +4,7 @@ Where stickers come from:
   * the owner sends one (QQ marks it as a sticker) -- collected automatically (VIOLET_STICKER_AUTO_COLLECT), with the
     description the picture recognition already made for the chat;
   * someone in a group / private chat sends one and she decides to keep it (the social decision's "collect");
-  * the admin uploads one, or imports the QQ account's own favourites (NapCat fetch_custom_face), on the 图片 page.
+  * the admin uploads one, or imports the QQ account's own favourites (SnowLuma fetch_custom_face), on the 图片 page.
 
 Sending: in the owner's chat she writes "[[表情:N]]" on its own line (ai/chat_output.py); in groups the social decision
 names a number. Only stickers of this collection can be sent -- the number is looked up here, never a path or an URL
