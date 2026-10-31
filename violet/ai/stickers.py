@@ -236,6 +236,30 @@ def parse_description(text: str) -> tuple[str | None, str]:
     return _clean(body), kind
 
 
+LABEL_WORDS = {"开心": ("开心", "高兴", "笑", "嘿嘿", "好耶"), "卖萌": ("卖萌", "可爱", "撒娇", "萌"),
+               "生气": ("生气", "愤怒", "凶", "哼"), "委屈": ("委屈", "难过", "哭", "伤心"),
+               "无语": ("无语", "翻白眼", "离谱"), "嘲讽": ("嘲讽", "嫌弃", "得意", "鄙视"),
+               "疑惑": ("疑惑", "问号", "不懂", "思考"), "早晚安": ("早安", "晚安", "睡", "困")}
+
+
+def by_label(db, label: str) -> dict[str, Any] | None:
+    """2026-10-31: a usable sticker for a mood label (<sticker:开心> in the Aurabot persona), or None: the one whose
+    description matches the label's words best, then the one she used most."""
+    if not enabled():
+        return None
+    words = LABEL_WORDS.get(label.strip(), (label.strip(),))
+    best, score = None, 0
+    for row in db.fetch_all("SELECT * FROM stickers WHERE enabled = 1 AND description IS NOT NULL AND description != '' "
+                            "AND description NOT LIKE '【不雅】%' AND description NOT LIKE '【质量差】%' "
+                            "ORDER BY use_count DESC, id DESC LIMIT 300"):
+        hit = sum(1 for w in words if w and w in row["description"])
+        if hit > score:
+            best, score = row, hit
+    if best is not None and not path_of(best).is_file():
+        return None
+    return best
+
+
 def describe(path: str | os.PathLike[str]) -> str | None:
     """About the sticker, with the picture-recognition model; None when it is not available or fails. A vulgar or
     low-quality one starts with 【不雅】 / 【质量差】 (verdict_of)."""

@@ -110,6 +110,9 @@ class PersonaCore:
         ident = d.get("identity", {})
         if self.is_ai:
             return self._render_ai(d, ident)
+        if d.get("prompt_text"):
+            # 2026-10-31 (user: "原样搬过来的人设"): a template that is one whole prompt (persona/templates/dafeiyu.json)
+            return f"【{ident.get('name') or '你'}：这就是你自己】\n" + str(d["prompt_text"]).strip()
         if d.get("blank"):
             # 2026-10-29: the blank persona -- no name, no character yet; it grows out of the conversations
             return ("【你自己（空白人设）：这就是你自己】\n"

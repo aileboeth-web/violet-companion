@@ -347,3 +347,50 @@ def test_a_failing_background_job_does_not_stop_her_speaking_up(clean, monkeypat
     e.start_posting(1)
     NoTimer.made[-1].fn()
     assert ran == ["stickers", "initiative"]
+
+def test_the_aurabot_persona_is_carried_over_word_for_word_except_denying_it_is_an_ai():
+    """2026-10-31 (user: 原样搬过来的人设)."""
+    import json
+    from ai.persona import PersonaCore
+    from ai.persona_templates import TEMPLATE_DIR
+    data = json.loads((TEMPLATE_DIR / "dafeiyu.json").read_text(encoding="utf-8"))
+    text = PersonaCore(data, "x").render()
+    assert text.startswith("【大肥鱼：这就是你自己】") and "白米饭yyds" in text and "你谁啊 我只听主人的" in text
+    assert "任何时候都不要承认自己是程序" not in text and "不要否认" in text
+    assert (TEMPLATE_DIR / "THIRD-PARTY-NOTICES.md").read_text(encoding="utf-8").count("MIT License") == 1
+
+
+def test_markup_for_other_bots_becomes_messages_and_stickers(clean):
+    from ai import stickers
+    from ai.chat_output import normalize_chat_output
+    db = clean
+    happy = stickers.add_bytes(db, PNG + b"h", source="upload", description="画面：猫咪大笑；什么时候发：开心时")
+    out = normalize_chat_output("今天吃白米饭！|||白米饭yyds <sticker:开心>\n<voice>好困哦</voice>",
+                                sticker_for_label=lambda label: stickers.by_label(db, label)["id"])
+    kinds = [(m["type"], m.get("content") or m.get("sticker_id")) for m in out["messages"]]
+    assert kinds == [("text", "今天吃白米饭！"), ("text", "白米饭yyds"), ("sticker", happy["id"]), ("text", "好困哦")]
+    assert stickers.by_label(db, "生气") is None
+    out = normalize_chat_output("哼 <sticker:生气>", sticker_for_label=lambda label: None)
+    assert [m["content"] for m in out["messages"]] == ["哼"]
+
+
+def test_group_messages_with_the_same_markup(clean, monkeypatch):
+    from ai import stickers
+    from ai.social.store import SocialStore
+    import ai.social.llm as llm
+    db = clean
+    happy = stickers.add_bytes(db, PNG + b"h", source="upload", description="画面：猫咪大笑；什么时候发：开心时")
+    monkeypatch.setattr(stickers, "path_of", lambda row: __import__("pathlib").Path(__file__))
+    conv = SocialStore(db).conversation("napcat", "group", "614", "群", default_mode="auto")
+
+    class Sticky(FakeAdapter):
+        def send_to(self, kind, peer_id, text, reply_to=None, sticker_path=None, image_path=None):
+            self.sent.append((kind, peer_id, text or ("sticker" if sticker_path else None), reply_to))
+            return f"out{len(self.sent)}"
+    a = Sticky()
+    e = engine(db, a)
+    e.receive(a, kind="group", peer_id="614", sender_id="1", sender_name="阿凯", text="吃啥", platform_msg_id="1")
+    monkeypatch.setattr(llm, "decide", lambda system, user, tools=None: (
+        {"action": "say", "messages": ["白米饭！|||必须的 <sticker:开心>"]}, "f", 1))
+    e.decide(conv["id"])
+    assert [s[2] for s in a.sent] == ["白米饭！", "必须的", "sticker"]

@@ -384,6 +384,17 @@ class SocialEngine:
         texts = decision.get("messages")
         if isinstance(texts, str):
             texts = [texts]
+        labelled: list[str] = []
+        if any(isinstance(t, str) and ("|||" in t or "<" in t) for t in texts or []):
+            from ai.chat_output import expand_markup     # 2026-10-31: prompts written for other bots (Aurabot)
+            split = []
+            for t in texts or []:
+                split += expand_markup(str(t or ""), lambda label: labelled.append(label)).splitlines()
+            texts = split
+            if labelled and not decision.get("sticker"):
+                row = stickers.by_label(self.db, labelled[0])
+                if row is not None:
+                    decision = {**decision, "sticker": str(row["id"])}
         texts = [re.sub(r"\s+\n", "\n", str(t)).strip()[:500] for t in (texts or []) if str(t or "").strip()][:3]
         reply_to = str(decision.get("reply_to") or "").lstrip("#").strip() or None
         try:

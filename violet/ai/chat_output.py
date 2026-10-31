@@ -45,11 +45,42 @@ def strip_stray_brackets(line: str) -> str:
     return "".join(ch for ch, k in zip(line, keep) if k).strip()
 
 
-def normalize_chat_output(raw_content: str) -> dict[str, Any]:
+VOICE_TAG_RE = re.compile(r"<voice>(.*?)</voice>", re.S | re.I)
+STICKER_TAG_RE = re.compile(r"<sticker[:：]\s*([^>\s]{1,12})\s*>", re.I)
+
+
+def expand_markup(text: str, sticker_for_label=None) -> str:
+    """2026-10-31: the markup of prompts written for other bots (the Aurabot persona, persona/templates/dafeiyu.json):
+    "|||" = a new message, <voice>…</voice> = its words (said as text until voice exists), <sticker:开心> = a sticker of
+    her collection that fits the label ([[表情:N]]), dropped when none fits."""
+    text = VOICE_TAG_RE.sub(lambda m: "\n" + m.group(1).strip() + "\n", text or "")
+
+    def sticker(m: re.Match) -> str:
+        number = None
+        if sticker_for_label is not None:
+            try:
+                number = sticker_for_label(m.group(1))
+            except Exception:                                # noqa: BLE001 -- a sticker is never worth an error
+                number = None
+        return f"\n[[表情:{number}]]\n" if number else ""
+    text = STICKER_TAG_RE.sub(sticker, text)
+    return text.replace("|||", "\n")
+
+
+def _owner_sticker_for_label(label: str):
+    from ai import stickers
+    from ai.chat import violetdb
+    row = stickers.by_label(violetdb, label)
+    return row["id"] if row else None
+
+
+def normalize_chat_output(raw_content: str, sticker_for_label=_owner_sticker_for_label) -> dict[str, Any]:
     """ChatAgent now emits plain text; each non-empty line is one message."""
     text = (raw_content or "").strip()
     if not text:
         return {"should_send": False, "messages": []}
+    if "|||" in text or "<voice" in text.lower() or "<sticker" in text.lower():
+        text = expand_markup(text, sticker_for_label).strip()
 
     text = re.sub(r"^```(?:text)?\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\s*```$", "", text).strip()
