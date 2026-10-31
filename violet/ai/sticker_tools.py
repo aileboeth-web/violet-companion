@@ -89,7 +89,8 @@ def find(db, args: dict[str, Any]) -> str:
     shown = [{"number": r["id"], "description": r.get("description") or "（还没有说明，看不到画面）",
               "used": r.get("use_count") or 0} for r in rows[:20]]
     return _answer(ok=True, count=len(rows), stickers=shown,
-                   message="用 send_sticker 填编号就能发。" + ("没有完全对得上的，按说明挑一个接近的，或者不发。" if words and not score(rows[0]) else ""))
+                   message="用 send_sticker 填编号就能发。" + ("没有对得上的：这次就不发表情包，不要硬配一个意思不对的。"
+                                                          if words and not score(rows[0]) else ""))
 
 
 def send(db, ctx: dict[str, Any], args: dict[str, Any]) -> str:

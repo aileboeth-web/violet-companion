@@ -124,7 +124,7 @@ class SocialStore:
 
     def update(self, conversation_id: int, **fields: Any) -> None:
         allowed = {"title", "mode", "daily_message_limit", "daily_decision_limit", "watermark", "next_wake_at", "notes",
-                   "member_count"}
+                   "member_count", "style"}
         sets = {k: v for k, v in fields.items() if k in allowed}
         if not sets:
             return

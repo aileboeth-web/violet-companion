@@ -138,6 +138,8 @@ _TABLES = (
     "channel_pairing_codes", "channel_identities",
     # 0.7.9: stickers, pictures in social messages, QQ 空间 posts
     "stickers", "social_media", "social_posts",
+    # 2026-10-30: her mood, deleted stickers
+    "mood_state", "sticker_blocklist",
 )
 
 

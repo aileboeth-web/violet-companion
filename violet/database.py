@@ -165,6 +165,9 @@ class VioletDatabase:
         # 2026-10-29: Violet's social life (QQ groups, other people) in its own tables -- ai/social/store.py
         from ai.social.store import SCHEMA as social_schema
         self.conn.executescript(social_schema)
+        # 2026-10-30: how she talks in a group / with a person (the social decision's remember.style)
+        self._ensure_column("social_people", "style", "TEXT")
+        self._ensure_column("social_conversations", "style", "TEXT")
         # 0.7.9: her sticker collection (ai/stickers.py)
         from ai.stickers import SCHEMA as sticker_schema
         self.conn.executescript(sticker_schema)
@@ -174,6 +177,9 @@ class VioletDatabase:
         # 2026-10-30: what waits for the owner's approval (ai/permissions.py)
         from ai.permissions import SCHEMA as approval_schema
         self.conn.executescript(approval_schema)
+        # 2026-10-30: her own mood (ai/mood.py)
+        from ai.mood import SCHEMA as mood_schema
+        self.conn.executescript(mood_schema)
         self.conn.commit()
 
     def _create_tables_locked(self) -> None:

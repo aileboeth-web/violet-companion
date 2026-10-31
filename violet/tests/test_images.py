@@ -468,7 +468,7 @@ def test_visual_identity_and_references_by_capability(violetdb, monkeypatch, tmp
     scene = scene_for_eve(violetdb)
     result = svc.violet_picture(scene)
     prompt = calls()[-1]["prompt"]
-    assert result.ok and "深色及肩短发" in prompt and "不是照片" in prompt and "想象的画面" in prompt
+    assert result.ok and "深色及肩短发" in prompt and "真实生活照" in prompt and "动漫" in prompt and "想象的画面" in prompt
     assert calls()[-1]["references"] == 0                                  # mock: reference_images not declared
     seen = http(lambda r: httpx.Response(200, json={"choices": [{"message": {
         "images": [{"image_url": {"url": f"data:image/png;base64,{PNG_B64}"}}]}}]}))
@@ -489,7 +489,7 @@ def test_life_scenes_follow_the_recorded_life(violetdb):
     assert current["kind"] == "current_thread" and "进行中，还没有完成" in current["description"]
     event = happened(store, "又往后读了几章《边城》", hours_ago=2, thread=thread)
     current = scene_for_eve(violetdb)
-    assert current["life_event_id"] == event and not current["hypothetical"] and caption_for(current) == "AI 生成的插画"
+    assert current["life_event_id"] == event and not current["hypothetical"] and caption_for(current) == "AI 生成的图片"
     plan = store.create_plan(thread, "这周想把《边城》读完", violetdb.now())
     with pytest.raises(SceneError):
         scene_for_eve(violetdb, "life_event", life_event_id=99999)
@@ -500,7 +500,7 @@ def test_life_scenes_follow_the_recorded_life(violetdb):
         with pytest.raises(SceneError):
             scene_for_eve(violetdb, "life_event", life_event_id=bad)
     imagined = scene_for_eve(violetdb, "hypothetical", imagined="在海边读完《边城》")
-    assert imagined["hypothetical"] and caption_for(imagined) == "AI 生成的插画（想象的画面）"
+    assert imagined["hypothetical"] and caption_for(imagined) == "AI 生成的图片（想象的画面）"
     svc = service(violetdb, only(config(), "mockA/img-1"))
     pic = svc.violet_picture(scene_for_eve(violetdb, "life_event", life_event_id=event))
     asset = svc.media.get(pic.asset_ids[0])

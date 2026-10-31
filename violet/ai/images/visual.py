@@ -32,6 +32,49 @@ from ai.memory_model import parse_time
 from ai.persona import persona_dir
 
 CAPTION_AI = "AI 生成的插画"
+CAPTION_AI_PHOTO = "AI 生成的图片"
+
+# 2026-10-30 (user: 生的图没有规则，很像 AI 生的那种动漫图，尽量靠近现实的情境): VIOLET_IMAGE_STYLE
+#   photo (default)  like a life photo taken with a phone, in a real setting and the real time of day
+#   illustration     the soft digital illustration of the visual profile (the old default)
+#   anime            Japanese anime style
+STYLES = ("photo", "illustration", "anime")
+STYLE_RULES = {
+    "photo": ("像用手机随手拍的真实生活照：真实的光源（窗外天光、台灯、路灯、屏幕光），光线和时间、天气一致；"
+              "普通手机镜头的视角和景深，轻微噪点，构图随意、不摆拍；真实材质（布料褶皱、木纹、纸张、玻璃反光）、"
+              "真实而普通的生活环境，东西有一点乱也没关系；人物是普通人的真实长相，皮肤有自然纹理，不磨皮、不完美对称。",
+              ["动漫或二次元画风", "插画或 CG 渲染感", "过度磨皮和塑料感", "影棚灯光和完美构图", "过饱和的颜色",
+               "水印、文字、相机参数", "真实品牌标志", "夸张身材或性感化", "影视或游戏角色的样子"]),
+    "anime": ("日系动漫画风：干净的线条和赛璐璐上色，背景是具体的生活场景，光线和时间一致。",
+              ["照片级写实", "水印或文字", "真实品牌标志", "夸张身材或性感化", "影视或游戏角色的样子"]),
+}
+SHOTS = {
+    "selfie": "她用手机前置摄像头自拍：手臂长度的距离，略微俯拍或平视，画面里看得到她身后的真实环境",
+    "candid": "像朋友在旁边随手拍下她的样子：她没看镜头或刚转过头，自然的动作",
+    "scene": "只拍她眼前的东西或场景（桌上的东西、窗外、路上看到的），画面里没有她本人",
+}
+
+
+def image_style() -> str:
+    value = (os.environ.get("VIOLET_IMAGE_STYLE") or "photo").strip().lower()
+    return value if value in STYLES else "photo"
+
+
+def moment_line(now_iso: str) -> str:
+    """The real time of day and season, so the light and the clothes match (a 10 pm picture is not a sunny park)."""
+    from datetime import datetime
+    try:
+        now = datetime.fromisoformat(now_iso[:19])
+    except ValueError:
+        return ""
+    h = now.hour
+    part = ("深夜" if h < 5 else "清晨" if h < 8 else "上午" if h < 11 else "中午" if h < 13 else "下午" if h < 17
+            else "傍晚" if h < 19 else "晚上" if h < 23 else "深夜")
+    season = {12: "冬天", 1: "冬天", 2: "冬天", 3: "春天", 4: "春天", 5: "春天", 6: "夏天", 7: "夏天", 8: "夏天"}.get(
+        now.month, "秋天")
+    light = {"深夜": "室内灯光或屏幕光，窗外是黑的", "清晨": "清晨偏冷的天光", "晚上": "室内灯光，窗外天黑",
+             "傍晚": "傍晚的暖色天光"}.get(part, "白天的自然光")
+    return f"时间：{now.month} 月{season}，{part} {now:%H:%M}，{light}；衣服和环境要符合这个季节"
 
 
 class SceneError(ValueError):
@@ -60,20 +103,31 @@ class VisualIdentityManager:
     def reference_asset_ids(self) -> list[int]:
         return [int(i) for i in self.load().get("reference_images") or [] if str(i).isdigit()]
 
-    def prompt_for(self, scene: dict[str, Any], extra: str = "") -> str:
+    def prompt_for(self, scene: dict[str, Any], extra: str = "", shot: str | None = None) -> str:
         p = self.load()
         a, w, s = p.get("appearance", {}), p.get("wardrobe", {}), p.get("art_style", {})
-        lines = [
-            f"画面：{scene['description']}" + ("（这是想象的画面，不是真实发生的事）" if scene.get("hypothetical") else ""),
-            f"人物（Violet，虚拟人物）：{a.get('overall', '')}；发型：{a.get('hair', '')}；{a.get('face', '')}；{a.get('build', '')}",
-            f"服饰：{w.get('style', '')}；颜色：{'、'.join(w.get('colors', []))}；配饰：{w.get('accessories', '')}",
-            f"画风：{s.get('medium', '')}；光线：{s.get('lighting', '')}；构图：{s.get('composition', '')}；"
-            f"整体色调：{'、'.join(p.get('palette', []))}",
-            "这是一张插画，不是照片：不要照片写实效果、相机水印或拍摄参数。避免：" + "、".join(s.get("avoid", [])),
-        ]
+        style = image_style()
+        shot = shot if shot in SHOTS else None
+        lines = [f"画面：{scene['description']}" + ("（这是想象的画面，不是真实发生的事）" if scene.get("hypothetical") else "")]
+        if scene.get("moment"):
+            lines.append(scene["moment"])
+        if shot:
+            lines.append(f"拍法：{SHOTS[shot]}")
+        if shot != "scene":
+            lines += [f"人物（Violet，虚拟人物）：{a.get('overall', '')}；发型：{a.get('hair', '')}；{a.get('face', '')}；"
+                      f"{a.get('build', '')}",
+                      f"服饰：{w.get('style', '')}；颜色：{'、'.join(w.get('colors', []))}；配饰：{w.get('accessories', '')}"]
+        if style == "illustration":
+            lines += [f"画风：{s.get('medium', '')}；光线：{s.get('lighting', '')}；构图：{s.get('composition', '')}；"
+                      f"整体色调：{'、'.join(p.get('palette', []))}",
+                      "这是一张插画，不是照片：不要照片写实效果、相机水印或拍摄参数。避免：" + "、".join(s.get("avoid", []))]
+        else:
+            rule, avoid = STYLE_RULES[style]
+            lines += [f"风格：{rule}", "避免：" + "、".join(avoid)]
         if extra:
-            lines.append(f"补充要求（来自对话，已过滤）：{extra[:200]}")
+            lines.append(f"补充要求（来自对话，已过滤）：{extra[:300]}")
         return "\n".join(lines)
+
 
     def update(self, patch: dict[str, Any], actor: str = "dashboard", note: str = "") -> dict[str, Any]:
         allowed = {"appearance", "wardrobe", "palette", "art_style", "reference_images", "identity_note"}
@@ -102,8 +156,30 @@ class VisualIdentityManager:
         return data
 
 
+def other_prompt(text: str, now_iso: str = "") -> str:
+    """A picture of something else, in the chosen style (2026-10-30: was always "插画风格")."""
+    style = image_style()
+    moment = moment_line(now_iso) if now_iso and style != "illustration" else ""
+    if style == "illustration":
+        return text + "\n（插画风格，不要伪装成照片）"
+    rule, avoid = STYLE_RULES[style]
+    return "\n".join(x for x in [f"画面：{text}", moment, f"风格：{rule}", "避免：" + "、".join(avoid)] if x)
+
+
 def scene_for_eve(db, mode: str = "current", life_event_id: int | None = None, imagined: str | None = None,
                   recent_hours: float = 12) -> dict[str, Any]:
+    scene = _scene(db, mode, life_event_id, imagined, recent_hours)
+    if image_style() != "illustration":                # 2026-10-30: the light and the season of that moment
+        at = db.now()
+        if scene.get("life_event_id") and scene["kind"] == "life_event":
+            from ai.life_store import LifeStore
+            event = LifeStore(db).event(scene["life_event_id"]) or {}
+            at = str(event.get("occurred_at") or at)
+        scene["moment"] = moment_line(at)
+    return scene
+
+
+def _scene(db, mode: str, life_event_id: int | None, imagined: str | None, recent_hours: float) -> dict[str, Any]:
     from ai.life_store import LifeStore
     store = LifeStore(db)
     now = parse_time(db.now())
@@ -134,6 +210,7 @@ def scene_for_eve(db, mode: str = "current", life_event_id: int | None = None, i
 
 
 def caption_for(scene: dict[str, Any] | None) -> str:
+    base = CAPTION_AI if image_style() == "illustration" else CAPTION_AI_PHOTO
     if scene and scene.get("hypothetical"):
-        return f"{CAPTION_AI}（想象的画面）"
-    return CAPTION_AI
+        return f"{base}（想象的画面）"
+    return base

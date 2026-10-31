@@ -137,10 +137,10 @@ def test_show_me_generates_a_life_consistent_picture_and_sends_it(iworld):
               lambda kw: f"在窗边看书呢\n{marker_from_tool(kw)}\n（AI 画的）")
     say(w, "你现在在干嘛？给我看看")
     gen = mock_calls()[-1]
-    assert gen["kind"] == "image_generate" and "又往后读了几章《边城》" in gen["prompt"] and "不是照片" in gen["prompt"]
+    assert gen["kind"] == "image_generate" and "又往后读了几章《边城》" in gen["prompt"] and "真实生活照" in gen["prompt"]
     assert gen["idempotency_key"]
     asset = w.db.fetch_one("SELECT * FROM media_assets WHERE direction = 'outbound'")
-    assert asset["ai_generated"] == 1 and asset["life_event_id"] == event and asset["caption"] == "AI 生成的插画"
+    assert asset["ai_generated"] == 1 and asset["life_event_id"] == event and asset["caption"] == "AI 生成的图片"
     assert asset["send_status"] == "sent"
     sent = w.client.sent
     assert [("text" if "text" in m else "image") for m in sent[-3:]] == ["text", "image", "text"]   # order kept
@@ -148,7 +148,7 @@ def test_show_me_generates_a_life_consistent_picture_and_sends_it(iworld):
     rows = w.db.fetch_all("SELECT message_type, status FROM outbound_messages ORDER BY id")
     assert ("image", "sent") in [(r["message_type"], r["status"]) for r in rows]
     history = w.db.fetch_one("SELECT * FROM messages WHERE role = 'assistant' AND message_type = 'image'")
-    assert "AI 生成的插画" in history["content"]
+    assert "AI 生成的图片" in history["content"]
     task = w.db.fetch_one("SELECT * FROM image_tasks WHERE kind = 'image_generate'")
     assert task["turn_key"].startswith("in:") and task["status"] == "succeeded"
 
@@ -168,7 +168,7 @@ def test_hypothetical_scene_is_marked_and_unplanned_events_are_not_drawn_as_real
               lambda kw: f"想象一下的话大概这样\n{marker_from_tool(kw)}")
     say(w, "那画一张你在海边的样子吧，想象的就行")
     asset = w.db.fetch_one("SELECT * FROM media_assets WHERE direction = 'outbound'")
-    assert asset["scene_kind"] == "hypothetical" and asset["caption"] == "AI 生成的插画（想象的画面）"
+    assert asset["scene_kind"] == "hypothetical" and asset["caption"] == "AI 生成的图片（想象的画面）"
     assert "想象的画面" in mock_calls()[-1]["prompt"]
     assert store.plan(plan)["status"] == "planned"                       # the life database was not touched
 

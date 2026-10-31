@@ -102,7 +102,8 @@ class SocialEngine:
         now = datetime.fromisoformat(self.db.now()[:19])
         if not 9 <= now.hour < 23:
             return []
-        chance = max(0.0, min(1.0, env_float("VIOLET_SOCIAL_INITIATIVE_CHANCE", 0.3)))
+        from ai import mood
+        chance = max(0.0, min(1.0, env_float("VIOLET_SOCIAL_INITIATIVE_CHANCE", 0.3) * mood.initiative_factor(self.db)))
         asked = []
         for conv in self.db.fetch_all("SELECT id FROM social_conversations WHERE kind = 'group' AND mode = 'auto'"):
             row = self.db.fetch_one("SELECT MAX(created_at) AS last_any, MAX(CASE WHEN is_self = 1 THEN created_at END) "
@@ -124,8 +125,13 @@ class SocialEngine:
     # -- receiving --------------------------------------------------------------------------------------------------
     def receive(self, adapter, *, kind: str, peer_id: str, sender_id: str, sender_name: str | None, text: str,
                 mentioned: bool = False, reply_to: str | None = None, platform_msg_id: str | None = None,
-                images: list[dict[str, Any]] | None = None, group_name: str | None = None) -> int | None:
+                images: list[dict[str, Any]] | None = None, group_name: str | None = None,
+                poke: bool = False) -> int | None:
         channel = adapter.channel_id
+        if poke:                                         # 2026-10-30: 拍一拍 counts as calling her
+            text, mentioned = "[拍了拍你]", True
+        elif not mentioned and kind == "group" and called_by_name(text, self_names(adapter, channel)):
+            mentioned = True                             # 2026-10-30: her name in a group message = she is meant
         if kind == "private":
             policy = private_policy()
             known = self.db.fetch_one("SELECT 1 FROM social_people p JOIN social_messages m ON m.sender_id = p.user_id "
@@ -161,6 +167,11 @@ class SocialEngine:
             self.store.add_media(row_id, **item)
         trace.step("社交消息", 渠道=channel, 会话=f"{kind}:{peer_id}", 发送者=sender_name or sender_id,
                    提到她=mentioned or None, 内容=trace.text(content))
+        if mentioned or kind == "private":               # 2026-10-30: words said to her move her mood
+            from ai import mood
+            owners = adapter.owner_ids() if hasattr(adapter, "owner_ids") else set()
+            mood.feel(self.db, content, "主人" if sender_id in owners else (sender_name or "别人"),
+                      1.0 if sender_id in owners else 0.5)
         if conv["mode"] != "observe":
             self.schedule(conv["id"], urgent=mentioned or kind == "private")
         return row_id
@@ -312,6 +323,10 @@ class SocialEngine:
         note = tools.note() if tools is not None else None
         if note:
             system = system + "\n\n" + note
+        from ai import mood
+        feeling = "" if testing else mood.note(self.db)
+        if feeling:
+            system = system + "\n\n" + feeling
         try:
             decision, model, latency = (llm.decide(system, user, tools=tools) if tools is not None and tools.names
                                         else llm.decide(system, user))
@@ -319,6 +334,16 @@ class SocialEngine:
             self.store.record_decision(conversation_id, trigger=trigger, action="error", error=str(exc)[:300])
             trace.step("社交决定", 会话=conv["id"], 结果="失败", 原因=str(exc))
             return None
+        called = conv["kind"] == "group" and any(m["mentions_self"] for m in unread)
+        if called and str(decision.get("action") or "silent").lower() in ("silent", "wait") and not testing \
+                and env_bool("VIOLET_SOCIAL_ANSWER_WHEN_CALLED", True):
+            # 2026-10-30 (user, from dsh-aurabot-qq: 叫名字必回): someone called her by name / @ / poke -- asked once more
+            trace.step("社交决定", 会话=conv["id"], 结果="有人叫她却不说话，再问一次")
+            try:
+                decision, model, latency = llm.decide(system, user + "\n\n（有人直接叫了你、@了你或拍了拍你：这次要回应，"
+                                                      "哪怕一句话或一个表情包；只输出 JSON。）")
+            except llm.SocialLLMError:
+                pass
         if tools is not None and tools.image_asset_ids:
             decision = {**decision, "_images": list(tools.image_asset_ids)}
         result = self._act(conv, decision, adapter, today, newest, trigger, model, latency)
@@ -415,6 +440,13 @@ class SocialEngine:
                     except Exception as exc:          # noqa: BLE001
                         error = f"图片没发出去：{exc}"[:300]
                         trace.step("发图片", 图片=asset_id, 结果="失败", 原因=str(exc))
+        poke = re.sub(r"\D", "", str(decision.get("poke") or ""))
+        if poke and adapter is not None and hasattr(adapter, "poke") and adapter.is_running():
+            try:                                          # 2026-10-30: she pokes back
+                adapter.poke(conv["kind"], conv["peer_id"], poke)
+                trace.step("拍一拍", 会话=conv["id"], QQ=poke, 结果="拍了")
+            except Exception as exc:                      # noqa: BLE001
+                trace.step("拍一拍", 会话=conv["id"], QQ=poke, 结果="失败", 原因=str(exc)[:120])
         collected = self._collect(conv, decision.get("collect"), adapter)
         if collected:
             reason = (reason + f"（收藏了表情包 {collected}）").strip()
@@ -496,7 +528,13 @@ class SocialEngine:
         if path is None:
             failed("下载图片失败（地址可能过期了）")
             return None
-        description = item.get("description") or (str(meaning).strip()[:60] if meaning else None) or stickers.describe(path)
+        # 2026-10-30: looked at once more with the verdict -- vulgar or low-quality ones are not collected
+        looked = item.get("description") or stickers.describe(path)       # looked at once (_look_at_stickers)
+        verdict = stickers.verdict_of(looked)
+        if verdict != "ok":
+            failed("不雅的表情包" if verdict == "dirty" else "质量差 / 不是表情包")
+            return None
+        description = looked or item.get("description") or (str(meaning).strip()[:60] if meaning else None)
         try:
             row = stickers.add_file(self.db, path, source="group" if conv["kind"] == "group" else "private",
                                     description=description, file_key=item.get("file_key"),
@@ -515,6 +553,16 @@ class SocialEngine:
         group = remember.get("group")
         if conv["kind"] == "group" and isinstance(group, str) and group.strip():
             self.store.update(conv["id"], notes=group.strip()[:300])
+        style = remember.get("style")                    # 2026-10-30: how she talks here / with whom
+        if isinstance(style, dict):
+            here = style.get("group") or style.get("here")
+            if isinstance(here, str) and here.strip():
+                self.store.update(conv["id"], style=here.strip()[:120])
+            for uid, how in list((style.get("people") or {}).items())[:8] if isinstance(style.get("people"), dict) else []:
+                uid = re.sub(r"\D", "", str(uid))
+                if uid and isinstance(how, str) and how.strip():
+                    self.db.execute("UPDATE social_people SET style = ? WHERE channel = ? AND user_id = ?",
+                                    (how.strip()[:120], conv["channel"], uid))
         people = remember.get("people")
         if isinstance(people, dict):
             for uid, impression in list(people.items())[:8]:
@@ -524,6 +572,24 @@ class SocialEngine:
                                                (conv["channel"], uid))
                     if exists:
                         self.store.set_impression(conv["channel"], uid, impression.strip()[:200])
+
+
+def self_names(adapter, channel: str | None = None) -> list[str]:
+    """What she is called: the persona's name and the QQ nickname."""
+    names = []
+    try:
+        from ai.persona import PersonaCore
+        name = (PersonaCore.load(channel=channel).data.get("identity") or {}).get("name")
+        names.append(str(name or ""))
+    except Exception:                                   # noqa: BLE001
+        pass
+    names.append(str(getattr(adapter, "nickname", "") or ""))
+    return [n for n in dict.fromkeys(n.strip() for n in names) if len(n) >= 2]
+
+
+def called_by_name(text: str, names: list[str]) -> bool:
+    low = (text or "").lower()
+    return any(n.lower() in low for n in names)
 
 
 def _persona_text(db, channel: str | None = None) -> str:

@@ -45,13 +45,24 @@ CREATE TABLE IF NOT EXISTS stickers (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_stickers_file_key ON stickers(file_key);
+-- 2026-10-30: a deleted sticker is not collected again (the admin's own upload still works)
+CREATE TABLE IF NOT EXISTS sticker_blocklist (
+    sha256 TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL
+);
 """
 
 MAX_BYTES = 5 * 1024 * 1024
 SOURCES = {"owner": "你发的", "group": "群里收藏的", "private": "私聊里收藏的", "qq": "QQ 收藏导入", "upload": "后台上传"}
 MARKER_RE = re.compile(r"\[\[表情[:：]\s*(\d+)\]\]")
-STICKER_PROMPT = ("这是一张聊天用的表情包。用一句中文（25 字以内）说清：画面是什么、表达什么情绪、适合在什么时候发。"
-                  "图里有文字就照抄文字。只输出这一句。")
+# 2026-10-30 (from dsh-sticker-library): three short parts -- what it shows (text in it copied exactly, the meaning
+# often IS the text), when to send it, keywords -- and a verdict, so vulgar or low-quality ones are kept out at intake
+STICKER_PROMPT = ("这是一张聊天用的表情包。只输出四行，不要别的：\n"
+                  "画面：画面里是什么（图里有文字就一字不差地照抄）\n"
+                  "什么时候发：适合在聊天的什么情况下发，表达什么情绪\n"
+                  "关键词：3 到 5 个词，用顿号隔开\n"
+                  "判断：正常 / 脏（脏话、性暗示、低俗、恶心、血腥）/ 烂（看不清、截图或普通照片、没有意义的烂梗）")
+DESCRIPTION_LIMIT = 120
 _MAGIC = ((b"\x89PNG", "image/png", ".png"), (b"\xff\xd8", "image/jpeg", ".jpg"), (b"GIF8", "image/gif", ".gif"))
 
 
@@ -80,7 +91,7 @@ def _kind(data: bytes) -> tuple[str, str]:
     raise StickerError("不是能用的图片（只收 PNG / JPG / GIF / WEBP）")
 
 
-def _clean(text: Any, limit: int = 60) -> str | None:
+def _clean(text: Any, limit: int = DESCRIPTION_LIMIT) -> str | None:
     value = " ".join(str(text or "").split())[:limit]
     return value or None
 
@@ -94,6 +105,10 @@ def add_bytes(db, data: bytes, *, source: str, description: str | None = None, f
         raise StickerError("图片太大了（最多 5 MB）")
     mime, ext = _kind(data)
     digest = hashlib.sha256(data).hexdigest()
+    if db.fetch_one("SELECT 1 FROM sticker_blocklist WHERE sha256 = ?", (digest,)):
+        if source != "upload":
+            raise StickerError("这个表情包删过，不再收藏")
+        db.execute("DELETE FROM sticker_blocklist WHERE sha256 = ?", (digest,))     # the admin wants it back
     row = db.fetch_one("SELECT * FROM stickers WHERE sha256 = ?", (digest,))
     if row is not None:
         updates, params = ["enabled = 1"], []
@@ -173,6 +188,7 @@ def delete(db, sticker_id: int) -> bool:
     if row is None:
         return False
     db.execute("DELETE FROM stickers WHERE id = ?", (row["id"],))
+    db.execute("INSERT OR IGNORE INTO sticker_blocklist (sha256, created_at) VALUES (?, ?)", (row["sha256"], db.now()))
     try:
         path_of(row).unlink(missing_ok=True)
     except OSError:
@@ -185,12 +201,44 @@ def prompt_lines(db, limit: int = 30) -> list[str]:
     if not enabled():
         return []
     rows = db.fetch_all("SELECT id, description FROM stickers WHERE enabled = 1 AND description IS NOT NULL "
-                        "AND description != '' ORDER BY use_count DESC, id DESC LIMIT ?", (int(limit),))
+                        "AND description != '' AND description NOT LIKE '【不雅】%' AND description NOT LIKE '【质量差】%' "
+                        "ORDER BY use_count DESC, id DESC LIMIT ?", (int(limit),))
     return [f"- {r['id']}：{r['description']}" for r in rows]
 
 
+BAD_MARKS = {"dirty": "【不雅】", "junk": "【质量差】"}
+
+
+def verdict_of(description: str | None) -> str:
+    """"ok" / "dirty" / "junk": describe() puts the mark in front of a sticker that should not be used."""
+    for kind, mark in BAD_MARKS.items():
+        if (description or "").startswith(mark):
+            return kind
+    return "ok"
+
+
+def parse_description(text: str) -> tuple[str | None, str]:
+    """The recognition's answer -> ("画面…；什么时候发…；关键词…", verdict "ok" / "dirty" / "junk"). An answer in the old
+    one-line form is kept as it is (verdict ok)."""
+    parts: dict[str, str] = {}
+    for line in (text or "").splitlines():
+        line = line.strip().lstrip("-* ")
+        for key in ("画面", "什么时候发", "关键词", "判断"):
+            for colon in ("：", ":"):
+                if line.startswith(key + colon):
+                    parts[key] = line[len(key) + 1:].strip()
+    if not parts:
+        first = (text or "").strip().splitlines()
+        return _clean(first[0] if first else ""), "ok"
+    verdict = parts.get("判断", "")
+    kind = "dirty" if verdict.startswith("脏") else "junk" if verdict.startswith("烂") else "ok"
+    body = "；".join(f"{k}：{parts[k]}" for k in ("画面", "什么时候发", "关键词") if parts.get(k))
+    return _clean(body), kind
+
+
 def describe(path: str | os.PathLike[str]) -> str | None:
-    """One line about the sticker with the picture-recognition model; None when it is not available or fails."""
+    """About the sticker, with the picture-recognition model; None when it is not available or fails. A vulgar or
+    low-quality one starts with 【不雅】 / 【质量差】 (verdict_of)."""
     try:
         from ai.vision import describe_image
         text = describe_image(path, prompt=STICKER_PROMPT)
@@ -199,7 +247,10 @@ def describe(path: str | os.PathLike[str]) -> str | None:
         return None
     from ai.web.content import neutralize
     text, _ = neutralize(text)
-    return _clean(text.splitlines()[0] if text else "")
+    description, verdict = parse_description(text or "")
+    if description and verdict != "ok":
+        description = _clean(BAD_MARKS[verdict] + description)
+    return description
 
 
 QQ_SYNC_SECONDS = 6 * 3600
@@ -216,9 +267,14 @@ def describe_pending(db, limit: int = DESCRIBE_PER_RUN) -> int:
         if not path_of(row).is_file():
             continue
         text = describe(path_of(row))
+        verdict = verdict_of(text)
         if not text:
             break                                            # recognition not available now: try again next time
-        update(db, row["id"], description=text)
+        # vulgar / low-quality ones stay in the list (the 图片 page shows them) but are switched off; the admin decides
+        update(db, row["id"], description=text, enabled_flag=None if verdict == "ok" else False)
+        if verdict != "ok":
+            from ai import trace
+            trace.step("表情包没启用", 编号=row["id"], 原因="不雅" if verdict == "dirty" else "质量差", 说明=text)
         done += 1
     return done
 
@@ -276,4 +332,5 @@ def chat_section(db) -> str:
         return ""
     # 2026-10-30: sending is the send_sticker tool (ai/sticker_tools.py); the marker line still works
     return ("【你收藏的表情包】聊到合适的时候可以发一个：调用 send_sticker 填编号（或单独一行写 [[表情:编号]]）。"
-            "不用每次都发，一次最多一个。下面是常用的，全部的用 find_stickers 看。\n" + "\n".join(lines))
+            "不用每次都发，一次最多一个；按说明里“什么时候发”挑，没有真正合适的就不发，不要硬配一个意思不对的。"
+            "下面是常用的，全部的用 find_stickers 看。\n" + "\n".join(lines))

@@ -17,6 +17,7 @@ from typing import Any
 
 GROUP_RULES = """【你现在在一个 QQ 群里】
 - 你是群里普通的一员，不是客服，也不是群里的机器人助手。不用每句都接，大多数时候安静看着就好。
+- 有人叫你名字、@ 你、拍了拍你，一定要回应（一句话或一个表情包都行）。
 - 这些时候可以开口：有人 @ 你或回复你；有人问的事你正好知道或感兴趣；话题和你有关；你真心有想说的；群里冷场时你自己想起个话题。
 - 说话像群聊：短，一两句，口语；不要长篇大论，不要列清单，不要每次都提问。
 - 别刷屏：刚说过话、别人在互相聊、话题和你无关时，就不说。
@@ -42,13 +43,16 @@ OUTPUT_FORMAT = """【你的回答】只输出一个 JSON 对象，不要输出�
   "check_back_minutes": 0,
   "sticker": "（可选）配一个你收藏的表情包：填它的编号；messages 可以为空，只发表情包",
   "collect": {"message": "（可选）想收藏的表情包所在的消息编号", "meaning": "这个表情包适合什么时候用，20 字以内"},
+  "poke": "（可选）想拍一拍谁就填他的 QQ 号，比如别人拍了你、你想拍回去",
   "reason": "一句话：为什么这样决定（只给管理员看）",
-  "remember": {"group": "（可选）更新后的对这个群的印象，60 字以内", "people": {"QQ号": "（可选）对这个人的新印象，40 字以内"}}
+  "remember": {"group": "（可选）更新后的对这个群的印象，60 字以内", "people": {"QQ号": "（可选）对这个人的新印象，40 字以内"},
+               "style": {"group": "（可选）你在这里习惯怎么说话，30 字以内", "people": {"QQ号": "（可选）你和这个人怎么说话，30 字以内"}}}
 }
 - silent：这次不说话。say：说话。reply：引用某条消息说话。wait：先不说，过一会儿再来看（check_back_minutes 填几分钟）。
-- 表情包：像真人一样偶尔用，一次最多一个，只用“你收藏的表情包”里有的编号；别人发了你喜欢的表情包，可以用 collect 收藏（不用每个都收）。
+- 表情包：像真人一样偶尔用，一次最多一个，只用“你收藏的表情包”里有的编号，按说明里“什么时候发”挑；没有真正合适的就不发，不要硬配；别人发了你喜欢的表情包，可以用 collect 收藏（不用每个都收）。
 - 说完话想过一会儿看看大家的反应，也可以在 say / reply 时填 check_back_minutes。
-- remember 只在你对群或某个人有了新的、值得记住的认识时才写，写你自己的印象，不要抄聊天原文。"""
+- remember 只在你对群或某个人有了新的、值得记住的认识时才写，写你自己的印象，不要抄聊天原文。
+- remember.style 记的是你自己的说话方式（比如“和他互损、说话很随便”“这个群比较正经，少开玩笑”），以后在这里照着说；有变化时再更新。"""
 
 
 TEST_RULES = """【测试模式的规则】（代替平时的群聊规则；用户 2026-10-30：测试时她不听话，也说不出原因）
@@ -105,8 +109,12 @@ def user_prompt(conv: dict[str, Any], *, history: list[dict[str, Any]], unread_f
         lines.append(f"【群】{conv.get('title') or conv['peer_id']}（群号 {conv['peer_id']}）")
         if conv.get("notes"):
             lines.append(f"你对这个群的印象：{conv['notes']}")
+        if conv.get("style"):
+            lines.append(f"你在这个群说话的方式：{conv['style']}")
     else:
         lines.append(f"【私聊】对方 QQ {conv['peer_id']}" + (f"（{conv['title']}）" if conv.get("title") else ""))
+        if conv.get("style"):
+            lines.append(f"你和对方说话的方式：{conv['style']}")
         if conv["peer_id"] in admin_ids:
             lines.append("对方是你主人设的管理员：主人信任的人，但不是你的主人。")
     lines.append(f"现在是 {now[:16].replace('T', ' ')}（{['周一', '周二', '周三', '周四', '周五', '周六', '周日'][datetime.fromisoformat(now[:19]).weekday()]}）；"
@@ -121,7 +129,8 @@ def user_prompt(conv: dict[str, Any], *, history: list[dict[str, Any]], unread_f
     for p in people:
         mark = "（你的主人）" if p["user_id"] in owner_ids else "（管理员）" if p["user_id"] in admin_ids else ""
         impression = p.get("impression") or "还没有特别的印象"
-        cards.append(f"- {p.get('nickname') or '某人'}（QQ {p['user_id']}）{mark}：{impression}")
+        how = f"；你和 TA 说话：{p['style']}" if p.get("style") else ""
+        cards.append(f"- {p.get('nickname') or '某人'}（QQ {p['user_id']}）{mark}：{impression}{how}")
     if cards:
         lines += ["", "【这里的人】", *cards]
     if sticker_lines:

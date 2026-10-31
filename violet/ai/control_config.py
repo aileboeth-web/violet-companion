@@ -176,6 +176,13 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_SOCIAL_TOOLS", "群里也能用工具", "social", "bool", "now",
             "开：群里和别人私聊时她也能联网查（谁问都行）；你（主人）在群里问时，还能查你的手机、课表等只读工具、帮你画图。"
             "会改动东西的工具群里永远不给。关：群里不用任何工具（以前的做法）", True),
+    Setting("VIOLET_SOCIAL_ANSWER_WHEN_CALLED", "叫她名字一定回", "social", "bool", "now",
+            "群里有人叫她名字、@她、拍一拍她，她这次选了不说话时再问她一次（多一次模型调用）", True),
+    Setting("VIOLET_MOOD", "她自己的心情", "features", "bool", "now",
+            "被夸、被谢会开心，被骂会不高兴，几个小时里慢慢平复；心情明显时影响她说话的语气、发表情包的多少和群里主动说话的次数"
+            "（按关键词判断，不多用模型）", True),
+    Setting("VIOLET_MOOD_HALF_LIFE_HOURS", "心情平复的半衰期（小时）", "features", "float", "now",
+            "过这么久，心情的变化就淡一半", 3.0, 0.1, 72),
     Setting("VIOLET_SOCIAL_INITIATIVE", "群里冷场时自己说话", "social", "bool", "now",
             "“自己决定”的群安静了一阵（15 分钟以上、3 天以内有人说过话），她偶尔会想想要不要自己起个话题；"
             "9:00–23:00，刚说过话的群不会；大多数时候她会选择不说。会多用一些模型调用", True),
@@ -207,6 +214,10 @@ SETTINGS: list[Setting] = [
             "关闭时收到的图片只用下面的识图模型看一眼，聊天里没有生成 / 编辑图片的工具", False),
     Setting("VIOLET_IMAGE_SELF_DECIDE", "她自己决定什么时候画图", "images", "bool", "now",
             "开：她觉得合适就会画一张（每次回复最多一张，每天的图片额度照样算）；关：只有你的话里明确要图（画、图片、照片…）才画", True),
+    Setting("VIOLET_IMAGE_STYLE", "画图风格", "images", "choice", "now",
+            "生活照：像手机拍的，真实光线和场景，按当时的时间和季节。"
+            "无论哪种都标为 AI 生成", "photo",
+            choices=(("photo", "生活照（像手机拍的）"), ("illustration", "插画"), ("anime", "动漫"))),
     Setting("VISION_LLM_MODEL", "识图模型", "images", "model", "now",
             "看懂你发来的图片用的模型；留空 = 和 Chat 用同一个模型", optional=True),
     Setting("VISION_TIMEOUT_SECONDS", "识图超时（秒）", "images", "float", "now", "", 60.0, 5, 300),

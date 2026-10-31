@@ -307,6 +307,8 @@ class SnowLumaChannel(ChannelAdapter):
             # not in the receive loop: answering QQ / asking the owner waits for this loop
             threading.Thread(target=self._friend_request, args=(event,), daemon=True, name="qq-friend-request").start()
             return 0
+        if post == "notice" and event.get("sub_type") == "poke":
+            return self._poked(event)
         if post != "message":
             return 0
         if str(event.get("user_id") or "") == self.self_id:
@@ -330,6 +332,35 @@ class SnowLumaChannel(ChannelAdapter):
                        group_name=clean_text(str(event.get("group_name") or ""), 60) or None)
         self.status_info.received += 1
         return 1
+
+    def _poked(self, event: dict[str, Any]) -> int:
+        """2026-10-30: someone 拍了拍 her -- like calling her: the owner's private poke reaches the owner's chat, any
+        other goes to the social engine (mentioned)."""
+        user = str(event.get("user_id") or event.get("sender_id") or "")
+        if str(event.get("target_id") or "") != self.self_id or not user or user == self.self_id:
+            return 0
+        group = str(event.get("group_id") or "")
+        key = f"poke:{user}:{event.get('time') or time.time():.0f}"
+        if not group and self._for_owner(event, []):
+            return 1 if self.deliver(InboundMessage(channel=self.channel_id, channel_type=self.channel_type, peer_id=user,
+                                                    dedup_key=f"nc:{self.channel_id}:{key}",
+                                                    parts=[Part("text", "[拍了拍你]")], message_id=key)) else 0
+        social = self._social()
+        if social is None:
+            return 0
+        social.receive(self, kind="group" if group else "private", peer_id=group or user, sender_id=user,
+                       sender_name=None, text="", poke=True, platform_msg_id=None)
+        return 1
+
+    def poke(self, kind: str, peer_id: str, user_id: str) -> None:
+        """拍一拍 someone back (send_poke; older OneBot implementations: group_poke / friend_poke)."""
+        params = {"user_id": int(user_id)}
+        if kind == "group":
+            params["group_id"] = int(peer_id)
+        try:
+            self.call("send_poke", params, timeout=10)
+        except QQError:
+            self.call("group_poke" if kind == "group" else "friend_poke", params, timeout=10)
 
     def _for_owner(self, event: dict[str, Any], segments: list[dict[str, Any]]) -> bool:
         peer = str(event.get("user_id") or "")

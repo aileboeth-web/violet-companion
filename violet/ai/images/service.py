@@ -295,9 +295,9 @@ class ImageService:
     def vary(self, source_asset_id: int, **kw: Any) -> ImageResult:
         return self.submit(ImageTask(kind="image_variation", input_asset_ids=[source_asset_id], **kw))
 
-    def violet_picture(self, scene: dict[str, Any], extra: str = "", **kw: Any) -> ImageResult:
+    def violet_picture(self, scene: dict[str, Any], extra: str = "", shot: str | None = None, **kw: Any) -> ImageResult:
         visual = VisualIdentityManager(self.db)
-        return self.submit(ImageTask(kind="image_generate", prompt=visual.prompt_for(scene, extra),
+        return self.submit(ImageTask(kind="image_generate", prompt=visual.prompt_for(scene, extra, shot=shot),
                                      reference_asset_ids=visual.reference_asset_ids(), scene=scene,
                                      life_event_id=scene.get("life_event_id"), caption=caption_for(scene), **kw))
 

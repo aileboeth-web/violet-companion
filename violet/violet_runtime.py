@@ -1136,6 +1136,8 @@ class VioletRuntime:
         try:
             if not testing:
                 self._before_pipeline(combined, turn.turn_id)
+                from ai import mood
+                mood.feel(self.db, combined, "主人")       # 2026-10-30: what the owner says moves her mood
         except Exception:
             logger.exception("engagement / preference bookkeeping failed for turn %s", turn.turn_id)
         extra = {"defer_memory": True, "turn_id": turn.turn_id} if self.async_memory else {"turn_id": turn.turn_id}

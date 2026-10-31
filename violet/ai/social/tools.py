@@ -22,10 +22,12 @@ logger = logging.getLogger("violet.social.tools")
 
 IMAGE_SCHEMA = {"type": "function", "function": {
     "name": "create_image",
-    "description": ("画一张图发到这里（主人要的时候用）。subject=violet：画你自己现在的样子（AI 插画，不是照片）；"
-                    "subject=other：画别的东西，prompt 写要画什么。图会跟着你的消息发出去。"),
+    "description": ("画一张图发到这里（主人要的时候用）。subject=violet：画你自己现在的样子（AI 生成，不是真的拍的），"
+                    "shot 选 selfie 自拍 / candid 别人拍 / scene 只拍眼前的东西；subject=other：画别的东西。"
+                    "prompt 写具体、真实的情境（在哪、在做什么、身边有什么）。图会跟着你的消息发出去。"),
     "parameters": {"type": "object", "properties": {
         "subject": {"type": "string", "enum": ["violet", "other"]},
+        "shot": {"type": "string", "enum": ["selfie", "candid", "scene"]},
         "prompt": {"type": "string", "description": "要画的内容或补充"}},
         "required": ["subject"]}}}
 

@@ -45,10 +45,14 @@ SCHEMAS = [
         "name": "create_image",
         "description": ("画一张图发给对方：对方想看图，或者你觉得这时候配一张图很合适时用（一次最多一张）。subject=violet：画 Violet 自己，scene 用 current（此刻，按已记录的生活）、"
                         "life_event（已发生的生活事件，需 life_event_id）或 hypothetical（用户想象的画面，会标为想象）；"
-                        "subject=other：画用户要的其他东西。结果是 AI 生成的插画，不是照片。"),
+                        "subject=other：画用户要的其他东西。"
+                        "画你自己时 shot 选拍法：selfie（自拍）、candid（像别人顺手拍的你）、scene（只拍你眼前的东西，不出现你）；"
+                        "prompt 写具体、真实的情境：在哪里、在做什么、身边有什么、什么光线（时间和季节程序会补上）。"
+                        "结果是 AI 生成的图片，不是真的拍的。"),
         "parameters": {"type": "object", "properties": {
             "subject": {"type": "string", "enum": ["violet", "other"]},
             "scene": {"type": "string", "enum": ["current", "life_event", "hypothetical"]},
+            "shot": {"type": "string", "enum": ["selfie", "candid", "scene"]},
             "life_event_id": {"type": "integer"},
             "imagined": {"type": "string", "description": "hypothetical 场景的简短描述"},
             "prompt": {"type": "string", "description": "subject=other 时要画的内容；subject=violet 时可选的补充"},
@@ -212,7 +216,8 @@ def _answer(result, caption: str | None, hypothetical: bool = False) -> str:
     return json.dumps({
         "ok": True, "asset_id": asset_id, "image_marker": image_marker(asset_id), "caption": caption,
         "hypothetical": hypothetical,
-        "note": ("把 image_marker 单独放一行即可发送图片。这是 AI 生成的插画，不是照片：不要说是拍的、自拍或摄像头拍的。"
+        "note": ("把 image_marker 单独放一行即可发送图片。这是 AI 生成的图片，不是摄像头真的拍的：可以像分享生活照那样自然地发，"
+                 "但不要声称是真实拍摄的；对方问起就说是 AI 生成的。"
                  + ("这是想象的画面，要让对方知道是想象的。" if hypothetical else "")),
     }, ensure_ascii=False)
 
@@ -231,11 +236,12 @@ def create_image(db, ctx: dict[str, Any], args: dict[str, Any]) -> str:
             scene = scene_for_eve(db, args.get("scene") or "current", args.get("life_event_id"), args.get("imagined"))
         except SceneError as exc:
             return _deny(exc.code, "这件事没有发生过，不能画成发生过的样子；可以画成想象的画面")
-        result = svc.violet_picture(scene, extra=extra, **common)
+        result = svc.violet_picture(scene, extra=extra, shot=str(args.get("shot") or "") or None, **common)
         return _answer(result, caption_for(scene), scene.get("hypothetical", False))
     if not extra.strip():
         return _deny("invalid", "要画什么？")
-    result = svc.generate(extra + "\n（插画风格，不要伪装成照片）", caption="AI 生成的图片", **common)
+    from ai.images.visual import other_prompt
+    result = svc.generate(other_prompt(extra, db.now()), caption="AI 生成的图片", **common)
     return _answer(result, "AI 生成的图片")
 
 
