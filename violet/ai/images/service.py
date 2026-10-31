@@ -101,6 +101,12 @@ class ImageService:
             existing = self.db.fetch_one("SELECT * FROM image_tasks WHERE idempotency_key = ?", (task.idempotency_key,))
             if existing:
                 return self._result_from_row(existing, reused=True)
+        if task.quality is None and task.kind in ("image_generate", "image_edit"):
+            # 2026-10-31 (user's server: gpt-image took 35-60 s, the relay's gateway cut everything over 60 s with
+            # 504): VIOLET_IMAGE_QUALITY, default medium (faster than the model's own default); auto = not sent
+            from ai.settings import env_str
+            quality = env_str("VIOLET_IMAGE_QUALITY", "medium").strip().lower()
+            task.quality = quality if quality in ("low", "medium", "high") else None
         if len(task.prompt or "") > MAX_PROMPT_CHARS or not 1 <= task.n <= 4:
             return ImageResult(False, task.task_id, "rejected", "invalid_task", "prompt too long or n outside 1..4")
         try:

@@ -218,7 +218,9 @@ SETTINGS: list[Setting] = [
             "生活照：像手机拍的，真实光线和场景，按当时的时间和季节。"
             "无论哪种都标为 AI 生成", "photo",
             choices=(("photo", "生活照（像手机拍的）"), ("illustration", "插画"), ("anime", "动漫"))),
-    Setting("VISION_LLM_MODEL", "识图模型", "images", "model", "now",
+    Setting("VIOLET_IMAGE_QUALITY", "画图质量", "images", "choice", "now",
+            "质量越高画得越慢；你的中转如果 60 秒就断（504 Gateway Timeout），用“中”或“低”。auto = 不指定，用模型自己的默认",
+            "medium", choices=(("low", "低（最快）"), ("medium", "中"), ("high", "高（最慢）"), ("auto", "不指定"))),    Setting("VISION_LLM_MODEL", "识图模型", "images", "model", "now",
             "看懂你发来的图片用的模型；留空 = 和 Chat 用同一个模型", optional=True),
     Setting("VISION_TIMEOUT_SECONDS", "识图超时（秒）", "images", "float", "now", "", 60.0, 5, 300),
     Setting("VIOLET_IMAGE_LEGACY_VISION", "没有图片功能时也识图", "images", "bool", "now",

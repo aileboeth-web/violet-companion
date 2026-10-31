@@ -241,6 +241,8 @@ VIOLET_MCP_AUTO_CLASSIFY=1
 VIOLET_IMAGE_SELF_DECIDE=1
 # 2026-10-30: photo (like a phone life photo) | illustration | anime
 VIOLET_IMAGE_STYLE=photo
+# low | medium | high | auto (not sent)
+VIOLET_IMAGE_QUALITY=medium
 VIOLET_AI_NATURAL=1
 VIOLET_NOTICE_VOICE=1
 VIOLET_SOCIAL_INITIATIVE=1

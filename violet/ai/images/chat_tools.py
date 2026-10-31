@@ -210,6 +210,9 @@ def _answer(result, caption: str | None, hypothetical: bool = False) -> str:
             "provider_unavailable": "图片服务暂时不可用",
         }
         status_note = "结果不确定，系统会人工核对，不要再试" if result.status == "uncertain" else None
+        if str(result.error_code or "") in ("http_504", "http_502", "timeout"):
+            # 2026-10-31: the relay's gateway cut a slow picture -- say what happened, a later try may work
+            status_note = "画图服务超时了（中转服务器没等到图片画完就断开了），这次没拿到图；过一会儿可以再试一次"
         return json.dumps({"ok": False, "error_code": result.error_code, "status": result.status,
                            "message": status_note or messages.get(result.error_code, "这次没能生成图片")},
                           ensure_ascii=False)
