@@ -319,7 +319,7 @@ def register_qq_routes(app: Flask, violetdb, runtime) -> None:
     def control_sticker_pack():                     # 2026-10-31: a starter set drawn with the owner's image model
         from ai import sticker_pack
         try:
-            return ok(sticker_pack.start(violetdb))
+            return ok(sticker_pack.start(violetdb, redraw=(request.get_json(silent=True) or {}).get("redraw") is True))
         except ValueError as exc:
             return bad(str(exc))
 

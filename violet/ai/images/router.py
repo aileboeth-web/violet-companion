@@ -117,7 +117,11 @@ class ImageBudget:
             return "model_daily_calls"
         if cost and "max_cost_per_day" in limits and mine["cost"] + cost > float(limits["max_cost_per_day"]):
             return "model_daily_cost"
-        g = self.registry.budgets().get("global") or {}
+        g = dict(self.registry.budgets().get("global") or {})
+        if entry.provider_id == "panel" and "max_images_per_day" in limits and "max_images_per_day" in g:
+            # 2026-10-31 (user raised "每天最多画几张" and it still said no): the page's limit is the one the owner
+            # sees, so the file's global cap never sits below it
+            g["max_images_per_day"] = max(int(g["max_images_per_day"]), int(limits["max_images_per_day"]))
         total = self.usage()
         if images and "max_images_per_day" in g and total["images"] + images > int(g["max_images_per_day"]):
             return "global_daily_images"

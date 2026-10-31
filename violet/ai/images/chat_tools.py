@@ -206,7 +206,7 @@ def _answer(result, caption: str | None, hypothetical: bool = False) -> str:
             "capability_not_supported": "现在没有能做这件事的图片模型",
             "capability_unverified": "图片模型还没验证过，暂时不能用",
             "no_image_model_enabled": "图片功能还没有开启可用的模型",
-            "budget_exceeded": "今天的图片额度用完了",
+            "budget_exceeded": "今天画图的次数到上限了（主人可以在后台“设置 → 图片 → 每天最多画几张”调高），明天会恢复",
             "provider_unavailable": "图片服务暂时不可用",
         }
         status_note = "结果不确定，系统会人工核对，不要再试" if result.status == "uncertain" else None

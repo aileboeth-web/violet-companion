@@ -30,8 +30,12 @@ PACK = [
     ("换了模型，我还是我", "她换了一件新外套，对着镜子比耶", "换模型、换设定以后", "换模型、升级、还是我"),
     ("正在重启…", "她闭着眼，身边有一个进度条", "要缓一缓、说错话想重来时", "重启、缓缓、重来"),
 ]
-STYLE = ("一张聊天用的表情包：可爱的 Q 版卡通角色，粗描边，干净的纯白背景，表情和动作夸张清楚，角色占画面大部分；"
-         "画面里用大号、清楚的中文写着“{text}”。所有表情包同一个画风、同一个角色。")
+# 2026-10-31 (user: the first set looked half-realistic; wants the look of dsh-stickers' whale girl -- the style only,
+# never that character): an anime chibi chat sticker, flat colours, a white die-cut outline, rounded hand-written text
+STYLE = ("一张 QQ / LINE 风格的聊天表情贴纸：日系萌系动漫画风的 Q 版二头身少女（anime chibi sticker），大眼睛、小嘴、"
+         "表情夸张可爱；干净流畅的线条，简洁平涂上色加柔和的阴影，颜色明亮清爽；角色外面有一圈白色描边（贴纸剪裁效果），"
+         "纯白背景，角色占画面大部分；画面里用大号、圆润的手写风中文写着“{text}”，字带白色描边。"
+         "所有表情包同一个角色、同一个画风。不要写实、不要照片质感、不要厚涂、不要半写实。")
 
 _state: dict[str, Any] = {"running": False, "done": 0, "total": 0, "failed": 0, "message": ""}
 _lock = threading.Lock()
@@ -73,11 +77,26 @@ def draw_one(db, item: tuple[str, str, str, str]) -> dict[str, Any] | None:
     return stickers.add_file(db, path, source="upload", description=description, source_detail=f"套装：{text}")
 
 
-def start(db) -> dict[str, Any]:
-    """Starts drawing the missing ones in the background. Raises ValueError when it cannot start."""
+def remove_set(db) -> int:
+    """The stickers of this set (drawn before) go, so the whole set is drawn again. Returns how many."""
+    from ai import stickers
+    rows = db.fetch_all("SELECT id FROM stickers WHERE source_detail LIKE '套装：%'")
+    for row in rows:
+        stickers.delete(db, row["id"])
+    return len(rows)
+
+
+def start(db, redraw: bool = False) -> dict[str, Any]:
+    """Starts drawing the missing ones (redraw: all of them, the old ones removed) in the background. Raises
+    ValueError when it cannot start."""
     from ai.images.service import images_enabled
     if not images_enabled():
         raise ValueError("图片功能没有打开（设置 → 图片）")
+    with _lock:
+        if _state["running"]:
+            raise ValueError("正在画，等这一套画完")
+    if redraw:
+        remove_set(db)
     todo = missing(db)
     if not todo:
         raise ValueError("这一套已经全都有了")

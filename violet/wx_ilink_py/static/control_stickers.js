@@ -56,7 +56,15 @@
     });
     clearTimeout(packTimer);
     if (p.running) packTimer = setTimeout(load, 8000);
-    return btn;
+    if (p.running || p.missing === p.size) return btn;
+    // 2026-10-31: the whole set again (the drawn ones are deleted first), e.g. after the style changed
+    const redraw = h("button", { type: "button", class: "ghost", text: "重画整套",
+      title: "删掉之前画的这一套，用现在的画风重新画 12 个" });
+    redraw.addEventListener("click", async () => {
+      if (!(await confirmBox(`删掉之前画的 ${p.size - p.missing} 个套装表情包，重新画整套 ${p.size} 个？每个算一张图片的额度。`))) return;
+      try { await api("POST", "/api/control/stickers/pack", { redraw: true }); toast("开始重画了"); load(); } catch (e) { toast(e.message, false); }
+    });
+    return h("span", { class: "row" }, btn, redraw);
   }
 
   async function load() {

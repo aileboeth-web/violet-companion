@@ -120,7 +120,7 @@ class SocialTools:
             return json.dumps({"ok": False, "error_code": "IMAGE_TURN_LIMIT", "message": "这次已经画过一张了"}, ensure_ascii=False)
         from ai.images.chat_tools import create_image
         args = {"subject": args.get("subject") or "other", "prompt": args.get("prompt") or "",
-                **({"scene": "current"} if args.get("subject") == "violet" else {})}
+                **({"scene": "current", "shot": args.get("shot")} if args.get("subject") == "violet" else {})}
         try:
             result = create_image(self.db, {"turn_key": self.turn_key}, args)
         except Exception as exc:                               # noqa: BLE001
@@ -132,6 +132,6 @@ class SocialTools:
         if payload.get("ok") and isinstance(payload.get("asset_id"), int):
             self.image_asset_ids.append(payload["asset_id"])
             payload = {"ok": True, "caption": payload.get("caption"),
-                       "note": "画好了，会跟着你的消息发出去。这是 AI 画的插画，不是照片，不要说是拍的。"}
+                       "note": "画好了，会跟着你的消息发出去。这是 AI 生成的图片，不是真的拍的，别人问起就说是 AI 生成的。"}
             return json.dumps(payload, ensure_ascii=False)
         return result

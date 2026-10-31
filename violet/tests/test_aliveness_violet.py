@@ -276,11 +276,36 @@ def test_a_sticker_set_is_drawn_with_the_image_model(clean, monkeypatch, tmp_pat
         __import__("time").sleep(0.02)
     s = sticker_pack.status()
     assert s["done"] == len(sticker_pack.PACK) - 1 and s["failed"] == 1
-    assert "Q 版卡通" in drawn[0] and "“收到！”" in drawn[0]
+    assert "anime chibi sticker" in drawn[0] and "不要半写实" in drawn[0] and "“收到！”" in drawn[0]
     rows = stickers.listing(db)
     assert len(rows) == len(sticker_pack.PACK) - 1 and all(r["enabled"] for r in rows)
     assert any("服务器好卡" in (r["description"] or "") and "关键词" in r["description"] for r in rows)
     assert len(sticker_pack.missing(db)) == 1                                # only the failed one is drawn again
+    stickers.add_bytes(db, PNG + b"mine", source="upload", description="我自己的")
+    assert sticker_pack.remove_set(db) == len(sticker_pack.PACK) - 1           # the redraw: only the set goes
+    assert [r["description"] for r in stickers.listing(db)] == ["我自己的"]
+    assert len(sticker_pack.missing(db)) == len(sticker_pack.PACK)
     monkeypatch.setattr(service, "images_enabled", lambda: False)
     with pytest.raises(ValueError):
         sticker_pack.start(db)
+
+def test_the_image_pages_daily_limit_is_not_undercut_by_the_files_global_cap(clean):
+    """2026-10-31: the owner raised 每天最多画几张 to 30, the file's global cap (20) still said no."""
+    from ai.images.registry import ModelEntry
+    from ai.images.router import ImageBudget
+    from ai.images.tasks import ImageTask
+    db = clean
+    db.execute("DELETE FROM image_calls")
+    registry = SimpleNamespace(budgets=lambda: {"global": {"max_images_per_day": 20}})
+    entry = ModelEntry(provider_id="panel", model_id="gpt-image", adapter_type="openai_images",
+                       limits={"max_images_per_day": 30}, pricing={"unpriced_max_calls_per_day": 30})
+    for i in range(25):
+        db.execute("INSERT INTO image_calls (task_id, entry_id, provider_id, model_id, kind, status, accepted, images, "
+                   "created_at) VALUES (?, 'panel/gpt-image', 'panel', 'gpt-image', 'image_generate', 'ok', 'yes', 1, ?)",
+                   (f"t{i}", db.now()))
+    budget = ImageBudget(db, registry)
+    assert budget.check(entry, ImageTask(kind="image_generate", prompt="猫")) is None
+    other = ModelEntry(provider_id="file", model_id="m", adapter_type="openai_images", limits={},
+                       pricing={"confirmed": True, "per_image": 0.01})
+    assert budget.check(other, ImageTask(kind="image_generate", prompt="猫")) == "global_daily_images"
+    db.execute("DELETE FROM image_calls")

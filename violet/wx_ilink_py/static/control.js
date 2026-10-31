@@ -453,19 +453,27 @@ loaders.memories = () => { memOffset = 0; loadMemories(); };
 // ---------------------------------------------------------------- tools (phase 9.2)
 const TOOL_STATUS = { connected: "已连接", unavailable: "连不上", disabled: "已停用", unknown: "还没检查" };
 const PERMISSION = { read: "只读", write: "写入（需另外授权）", high_risk: "高风险（需另外授权）", unknown: "不在白名单（隐藏）" };
-// the phone's server (made by the phone card's "连接") is shown in the phone card, not a second time in this list
+// the phone's server (made by the phone card's "连接") is shown in the phone card, not a second time in this list;
+// 2026-10-31 (user: "联网不是同一个工具吗为什么要分开"): the built-in violet-web server sits inside the 联网工具 card
 const PHONE_SERVER = "android-phone";
+const WEB_SERVER = "violet-web";
+function fillWebServer() {
+  const slot = document.getElementById("web-server-slot");
+  if (slot) slot.replaceChildren(...(window.webToolServer ? [toolServerCard(window.webToolServer, "联网工具的开关和授权")] : []));
+}
 function renderTools(servers) {
   $("#tools-updated").textContent = "更新于 " + new Date().toLocaleTimeString();
   const phone = servers.find((s) => s.name === PHONE_SERVER);
-  const others = servers.filter((s) => s.name !== PHONE_SERVER);
+  window.webToolServer = servers.find((s) => s.name === WEB_SERVER) || null;
+  fillWebServer();
+  const others = servers.filter((s) => s.name !== PHONE_SERVER && s.name !== WEB_SERVER);
   window.phoneToolServer = phone || null;
   if (window.renderPhoneTools) window.renderPhoneTools();
   $("#tools-list").replaceChildren(...(others.length ? others.map((s) => {
     const el = toolServerCard(s); el.id = "tool-srv-" + s.name; return el;
   }) : [h("p", { class: "note", text: "没有配置其他 MCP 服务器" })]));
   jumpNav($("#tools-jump"), [["手机", "phone-mcp"], ["联网工具", "tools-web"],
-    ...others.filter((s) => s.name !== "violet-web").map((s) => [s.name, "tool-srv-" + s.name]), ["添加服务器", "mcp-add-box"]]);
+    ...others.map((s) => [s.name, "tool-srv-" + s.name]), ["添加服务器", "mcp-add-box"]]);
 }
 function toolServerCard(s, title = s.name) {
   const facts = [`状态 ${TOOL_STATUS[s.status] || s.status}`, `传输 ${s.transport}`, s.url ? `地址 ${s.url}` : null, s.command,
@@ -524,8 +532,11 @@ function renderWeb(web) {
         if (!value) return;
         try { await api("POST", "/api/control/tools/web/secret", { value, confirm: true }); toast("凭据已替换"); loaders.tools(); } catch (e) { toast("替换失败：" + e.message, false); }
       } })),
-    h("p", { class: "note", text: "搜索服务、SearXNG 地址和搜索语言在“设置 → 功能开关”里改；停用单个联网工具在下面 violet-web 的工具列表里。" }),
-    ...(failures.length ? [h("div", { class: "note", text: "今天的失败：" }), ...failures] : []))));
+    h("p", { class: "note", text: "搜索服务、SearXNG 地址和搜索语言在“设置 → 功能开关”里改。" }),
+    ...(failures.length ? [h("div", { class: "note", text: "今天的失败：" }), ...failures] : [])),
+    h("details", {}, h("summary", { text: "工具开关和授权（搜索 / 读网页，给 Chat、主动消息…）" }),
+      h("div", { id: "web-server-slot" }))));
+  fillWebServer();
 }
 // 0.7.1: one click installs a private SearXNG on this server (root task service, progress dialog) and switches web
 // search on with it; uninstalling removes it and switches web search off
