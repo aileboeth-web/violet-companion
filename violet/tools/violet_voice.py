@@ -7,7 +7,7 @@ What a server needs (checked first, the page shows the same list):
   * Linux x86_64 with systemd, a CPU with AVX2
   * 8 GB memory or more (the model uses about 4 GB while speaking)
   * 12 GB free disk (Python packages ~3 GB, the model ~5 GB, room to unpack)
-  * Debian / Ubuntu (apt) for ffmpeg, or ffmpeg already installed
+  * Debian / Ubuntu (apt) for ffmpeg, gcc and the Python headers (pilk and pyworld are compiled), or those installed
 
 What it puts where:
   <root>/voice/src            CosyVoice's source at a pinned commit, Matcha-TTS (its submodule) inside
@@ -28,6 +28,7 @@ import platform
 import random
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -60,7 +61,7 @@ MIN_MEMORY_GB = 7.5
 MIN_DISK_GB = 12.0
 HEALTH_WAIT = 300.0
 REQUIREMENTS = ["Linux x86_64 + systemd", "CPU 支持 AVX2", "内存 8 GB 以上（说话时约占 4 GB）",
-                "硬盘空闲 12 GB 以上（依赖约 3 GB，模型约 5 GB）", "Debian / Ubuntu（自动装 ffmpeg）",
+                "硬盘空闲 12 GB 以上（依赖约 3 GB，模型约 5 GB）", "Debian / Ubuntu（自动装 ffmpeg 和编译工具 build-essential、python3-dev）",
                 "没有显卡也行：4 核 CPU 一句话大约 1 分钟"]
 Progress = Callable[[int, str], None]
 
@@ -258,16 +259,22 @@ def install(layout: Any, state: dict[str, Any], *, python: Path, app: Path, port
     if unit_path.exists():
         run(["systemctl", "stop", f"{UNIT_NAME}.service"], capture_output=True)
 
-    if not shutil.which("ffmpeg") and run is subprocess.run:
-        _say(progress, 4, "安装 ffmpeg（apt）")
+    # 2026-10-31 (user's Debian 12): pilk and pyworld have no wheels for Linux / Python 3.11 -- they are compiled, so
+    # a C compiler and the Python headers are needed besides ffmpeg
+    wanted = [pkg for pkg, present in (("ffmpeg", shutil.which("ffmpeg")), ("build-essential", shutil.which("gcc")),
+                                       ("python3-dev", Path(f"/usr/include/python{sys.version_info.major}."
+                                                            f"{sys.version_info.minor}/Python.h").exists()))
+              if not present]
+    if wanted and run is subprocess.run:
+        _say(progress, 4, "安装 " + "、".join(wanted) + "（apt）")
         if not shutil.which("apt-get"):
-            raise VoiceError("没有 ffmpeg，也没有 apt-get：请先装好 ffmpeg 再试")
+            raise VoiceError("缺少 " + "、".join(wanted) + "，也没有 apt-get：请先装好再试")
         env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
         run(["apt-get", "update"], capture_output=True, env=env)
-        done = run(["apt-get", "install", "-y", "--no-install-recommends", "ffmpeg"], capture_output=True, text=True,
+        done = run(["apt-get", "install", "-y", "--no-install-recommends", *wanted], capture_output=True, text=True,
                    env=env)
         if getattr(done, "returncode", 0) != 0:
-            raise VoiceError("ffmpeg 安装失败：" + (getattr(done, "stderr", "") or "")[-400:])
+            raise VoiceError("安装 " + "、".join(wanted) + " 失败：" + (getattr(done, "stderr", "") or "")[-400:])
 
     _say(progress, 7, "下载 CosyVoice 源码（GitHub）")
     work = base / "download"
