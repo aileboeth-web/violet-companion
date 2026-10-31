@@ -11,7 +11,7 @@
   }
 
   function item(s) {
-    const desc = h("input", { maxlength: 60, placeholder: "说明：画面、情绪、什么时候用" });
+    const desc = h("input", { maxlength: 120, placeholder: "说明：画面、什么时候发、关键词" });
     desc.value = s.description || "";
     return h("div", { class: "stk-item" + (s.enabled ? "" : " off") },
       h("img", { src: `/api/control/stickers/${s.id}/file`, alt: s.description || "表情包", loading: "lazy" }),
@@ -43,9 +43,26 @@
     input.click();
   }
 
+  // 2026-10-31: a starter set of 12 drawn with her image model (ai/sticker_pack.py), in the background
+  let packTimer = null;
+  function packButton(p) {
+    const btn = h("button", { type: "button", class: "ghost", text: p.running ? `画表情包中…（${p.done + p.failed}/${p.total}）` : "生成一套表情包",
+      title: "用你的生图模型画 12 个她的 Q 版表情包（日常反应 + AI 自嘲梗），每个算一张图片的额度" });
+    btn.disabled = p.running || !p.missing;
+    if (!p.missing && !p.running) btn.textContent = "表情包套装已齐";
+    btn.addEventListener("click", async () => {
+      if (!(await confirmBox(`用你的生图模型画 ${p.missing} 个表情包？每个算一张图片（约 15–40 秒一张），画好的会自动放进收藏。`))) return;
+      try { await api("POST", "/api/control/stickers/pack", {}); toast("开始画了，画好的会一个个出现"); load(); } catch (e) { toast(e.message, false); }
+    });
+    clearTimeout(packTimer);
+    if (p.running) packTimer = setTimeout(load, 8000);
+    return btn;
+  }
+
   async function load() {
     const root = $("#stk-root");
-    let d;
+    let d, pack = { running: false, missing: 0, done: 0, failed: 0, total: 0 };
+    try { pack = await api("GET", "/api/control/stickers/pack"); } catch (_) { /* older server: no button state */ }
     try { d = await api("GET", "/api/control/stickers"); } catch (e) { root.replaceChildren(h("p", { class: "err", text: e.message })); return; }
     const importBtn = h("button", { type: "button", class: "ghost", text: "导入 QQ 收藏的表情", onclick: async () => {
       importBtn.disabled = true; importBtn.textContent = "导入中…";
@@ -59,7 +76,7 @@
       h("div", { class: "row" }, h("h3", { text: "表情包" }), h("span", { class: "note", text: `${d.stickers.length} 个，${on} 个在用` })),
       h("p", { class: "note", text: (d.enabled ? "她聊天和在群里时会偶尔从这里挑一个发；挑的时候只看说明，所以说明要写清楚。" : "表情包功能关着（在“设置 → QQ 群聊、表情包与动态”里打开）。")
         + (d.auto_collect ? "你在 QQ 上发给她的表情包会自动收进来；" : "") + "群里别人发的，她觉得好玩会自己收藏。" }),
-      h("div", { class: "row" }, h("button", { type: "button", text: "上传表情包", onclick: upload }), importBtn,
+      h("div", { class: "row" }, h("button", { type: "button", text: "上传表情包", onclick: upload }), importBtn, packButton(pack),
         d.qq_connected ? null : h("span", { class: "note", text: "导入要先登录 QQ" })),
       d.stickers.length ? h("div", { class: "stk-grid" }, ...d.stickers.map(item))
         : h("p", { class: "note", text: "还没有表情包。" }));

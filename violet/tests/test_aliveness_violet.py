@@ -227,3 +227,60 @@ def test_qq_poke_notices_are_routed(monkeypatch):
     monkeypatch.setattr(ch, "call", lambda action, params=None, timeout=20.0: sent.append((action, params)))
     ch.poke("group", "614", "7")
     assert sent == [("send_poke", {"user_id": 7, "group_id": 614})]
+
+
+def test_the_models_own_addition_cannot_turn_her_into_an_anime_girl(clean, monkeypatch):
+    """2026-10-31, the user's server (task 38): the chat model added "silver-violet hair ... anime-inspired
+    illustration" and gpt-image drew an anime girl with purple hair."""
+    from ai.images.visual import VisualIdentityManager, clean_extra, other_prompt
+    monkeypatch.delenv("VIOLET_IMAGE_STYLE", raising=False)
+    real = ("A fictional AI assistant named Violet shown as a non-human digital persona in a cozy virtual server room, "
+            "silver-violet hair, subtle glowing interface reflections, friendly relaxed expression, holding up a small "
+            "wave toward the camera, tasteful anime-inspired illustration, warm monitor light, no text")
+    kept = clean_extra(real, about_her=True)
+    for gone in ("anime", "illustration", "hair", "non-human", "virtual", "glowing"):
+        assert gone not in kept
+    assert "holding up a small wave toward the camera" in kept and "warm monitor light" in kept
+    prompt = VisualIdentityManager().prompt_for({"description": "Violet 在书桌前"}, real, shot="selfie")
+    assert "虚拟人物" not in prompt and "anime-inspired" not in prompt and "silver-violet" not in prompt
+    assert prompt.splitlines()[-1].startswith("最终效果：一张真实的手机照片")
+    assert "silver" in clean_extra("a silver laptop on the desk", about_her=False)      # things keep their colours
+    assert other_prompt("a cat, anime style").splitlines()[0] == "画面：a cat"
+    monkeypatch.setenv("VIOLET_IMAGE_STYLE", "anime")
+    assert "anime style" in clean_extra("cat, anime style", about_her=False)          # the anime setting keeps it
+
+
+def test_a_sticker_set_is_drawn_with_the_image_model(clean, monkeypatch, tmp_path):
+    from ai import sticker_pack, stickers
+    import ai.images.service as service
+    import ai.images.media as media
+    db = clean
+    drawn = []
+    monkeypatch.setattr(service, "images_enabled", lambda: True)
+
+    def generate(self, prompt, **kw):
+        drawn.append(prompt)
+        return SimpleNamespace(ok=len(drawn) != 3, asset_ids=[len(drawn)])
+    monkeypatch.setattr(service.ImageService, "generate", generate)
+    monkeypatch.setattr(media.MediaAssetStore, "get", lambda self, asset_id: {"id": asset_id})
+
+    def path_of(self, asset):
+        f = tmp_path / f"{asset['id']}.png"
+        f.write_bytes(PNG + str(asset["id"]).encode())
+        return f
+    monkeypatch.setattr(media.MediaAssetStore, "path_of", path_of)
+    sticker_pack.start(db)
+    for _ in range(200):
+        if not sticker_pack.status()["running"]:
+            break
+        __import__("time").sleep(0.02)
+    s = sticker_pack.status()
+    assert s["done"] == len(sticker_pack.PACK) - 1 and s["failed"] == 1
+    assert "Q 版卡通" in drawn[0] and "“收到！”" in drawn[0]
+    rows = stickers.listing(db)
+    assert len(rows) == len(sticker_pack.PACK) - 1 and all(r["enabled"] for r in rows)
+    assert any("服务器好卡" in (r["description"] or "") and "关键词" in r["description"] for r in rows)
+    assert len(sticker_pack.missing(db)) == 1                                # only the failed one is drawn again
+    monkeypatch.setattr(service, "images_enabled", lambda: False)
+    with pytest.raises(ValueError):
+        sticker_pack.start(db)

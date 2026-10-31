@@ -309,6 +309,20 @@ def register_qq_routes(app: Flask, violetdb, runtime) -> None:
         except Exception as exc:                     # noqa: BLE001
             return bad(f"读不到 QQ 收藏的表情：{exc}")
 
+    @app.get("/api/control/stickers/pack")
+    def control_sticker_pack_status():
+        from ai import sticker_pack
+        return ok({**sticker_pack.status(), "missing": len(sticker_pack.missing(violetdb)),
+                   "size": len(sticker_pack.PACK)})
+
+    @app.post("/api/control/stickers/pack")
+    def control_sticker_pack():                     # 2026-10-31: a starter set drawn with the owner's image model
+        from ai import sticker_pack
+        try:
+            return ok(sticker_pack.start(violetdb))
+        except ValueError as exc:
+            return bad(str(exc))
+
     @app.post("/api/control/stickers/<int:sticker_id>")
     def control_sticker_update(sticker_id: int):
         from ai import stickers

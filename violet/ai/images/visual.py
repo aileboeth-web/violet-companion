@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from datetime import timedelta
 from typing import Any
 
@@ -53,6 +54,40 @@ SHOTS = {
     "candid": "像朋友在旁边随手拍下她的样子：她没看镜头或刚转过头，自然的动作",
     "scene": "只拍她眼前的东西或场景（桌上的东西、窗外、路上看到的），画面里没有她本人",
 }
+
+
+# 2026-10-31 (user's server, task 38): the chat model wrote its own English addition -- "non-human digital persona
+# ... silver-violet hair ... tasteful anime-inspired illustration" -- and gpt-image followed it, not the life-photo
+# style or her appearance. The addition may describe the scene; style words always go, and for a picture of her also
+# looks (hair, eyes, skin, body) and "virtual / non-human / digital being" -- those come from the visual profile.
+STYLE_WORDS = re.compile(r"(anime|manga|cartoon|chibi|illustrat|drawing|painting|painted|sketch|cel[- ]?shad|comic|"
+                         r"\bcg\b|3d render|render(ed|ing)?|digital art|concept art|artstation|stylized|semi-realistic|"
+                         r"watercolou?r|vector|pixel art|动漫|二次元|插画|漫画|卡通|手绘|绘画|画风|水彩|厚涂|立绘|渲染|CG|赛璐璐|Q版)", re.I)
+LOOK_WORDS = re.compile(r"(hair|eyes?\b|iris|skin|face|freckle|lips|body|figure|tall|slim|cute girl|beautiful|"
+                        r"non-human|not human|digital (persona|being|avatar|girl)|virtual|hologram|holographic|glowing|"
+                        r"robot|android|cyborg|fictional|发色|头发|长发|短发|发型|眼睛|瞳|皮肤|五官|身材|虚拟|数字人|全息|机器人|非人类)", re.I)
+
+
+def clean_extra(text: str, about_her: bool) -> str:
+    """The model's addition without style words (and, for a picture of her, without looks): clause by clause."""
+    style = image_style()
+    clauses = re.split(r"[,，;；。\n]+", text or "")
+    kept = []
+    for c in clauses:
+        c = c.strip()
+        if not c:
+            continue
+        if style == "photo" and STYLE_WORDS.search(c):
+            continue
+        if about_her and LOOK_WORDS.search(c):
+            continue
+        kept.append(c)
+    return "，".join(kept)[:300]
+
+
+FINAL = {"photo": "最终效果：一张真实的手机照片（photorealistic candid smartphone photo, natural light, real skin texture）。"
+                  "不是动漫、不是插画、不是 CG（not anime, not illustration, not 3D render）。",
+         "anime": "最终效果：日系动漫画风（anime style）。"}
 
 
 def image_style() -> str:
@@ -114,7 +149,7 @@ class VisualIdentityManager:
         if shot:
             lines.append(f"拍法：{SHOTS[shot]}")
         if shot != "scene":
-            lines += [f"人物（Violet，虚拟人物）：{a.get('overall', '')}；发型：{a.get('hair', '')}；{a.get('face', '')}；"
+            lines += [f"人物（Violet）：{a.get('overall', '')}；发型：{a.get('hair', '')}；{a.get('face', '')}；"
                       f"{a.get('build', '')}",
                       f"服饰：{w.get('style', '')}；颜色：{'、'.join(w.get('colors', []))}；配饰：{w.get('accessories', '')}"]
         if style == "illustration":
@@ -124,8 +159,11 @@ class VisualIdentityManager:
         else:
             rule, avoid = STYLE_RULES[style]
             lines += [f"风格：{rule}", "避免：" + "、".join(avoid)]
+        extra = clean_extra(extra, about_her=shot != "scene")
         if extra:
-            lines.append(f"补充要求（来自对话，已过滤）：{extra[:300]}")
+            lines.append(f"情境补充（只描述在做什么、在哪里；长相和画风以上面为准）：{extra}")
+        if style in FINAL:
+            lines.append(FINAL[style])               # last, so it is what the model reads last
         return "\n".join(lines)
 
 
@@ -163,7 +201,8 @@ def other_prompt(text: str, now_iso: str = "") -> str:
     if style == "illustration":
         return text + "\n（插画风格，不要伪装成照片）"
     rule, avoid = STYLE_RULES[style]
-    return "\n".join(x for x in [f"画面：{text}", moment, f"风格：{rule}", "避免：" + "、".join(avoid)] if x)
+    text = clean_extra(text, about_her=False) or text
+    return "\n".join(x for x in [f"画面：{text}", moment, f"风格：{rule}", "避免：" + "、".join(avoid), FINAL[style]] if x)
 
 
 def scene_for_eve(db, mode: str = "current", life_event_id: int | None = None, imagined: str | None = None,

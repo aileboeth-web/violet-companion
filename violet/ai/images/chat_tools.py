@@ -47,7 +47,8 @@ SCHEMAS = [
                         "life_event（已发生的生活事件，需 life_event_id）或 hypothetical（用户想象的画面，会标为想象）；"
                         "subject=other：画用户要的其他东西。"
                         "画你自己时 shot 选拍法：selfie（自拍）、candid（像别人顺手拍的你）、scene（只拍你眼前的东西，不出现你）；"
-                        "prompt 写具体、真实的情境：在哪里、在做什么、身边有什么、什么光线（时间和季节程序会补上）。"
+                        "prompt 只写具体、真实的情境：在哪里、在做什么、身边有什么（时间和季节程序会补上）；"
+                        "不要写长相、发色、画风（anime / illustration 之类），这些由系统按设定统一。"
                         "结果是 AI 生成的图片，不是真的拍的。"),
         "parameters": {"type": "object", "properties": {
             "subject": {"type": "string", "enum": ["violet", "other"]},
