@@ -187,7 +187,7 @@ SETTINGS: list[Setting] = [
             "“自己决定”的群安静了一阵（15 分钟以上、3 天以内有人说过话），她偶尔会想想要不要自己起个话题；"
             "9:00–23:00，刚说过话的群不会；大多数时候她会选择不说。会多用一些模型调用", True),
     Setting("VIOLET_SOCIAL_INITIATIVE_CHANCE", "冷场时想说话的频率", "social", "float", "now",
-            "每 25 分钟左右，每个冷场的群有多大概率让她想一想（0–1）；越大她越常主动说话", 0.3, 0, 1),
+            "每 25 分钟左右，每个冷场的群有多大概率让她想一想（0–1）；越大她越常主动说话", 0.6, 0, 1),
     Setting("VIOLET_SOCIAL_MODEL", "群聊用的模型", "social", "model", "now",
             "决定在群里说不说、说什么用的模型；留空 = 和 Chat 一样。群消息多时可以换便宜一点的模型", optional=True),
     Setting("VIOLET_SOCIAL_QUIET_SECONDS", "等群里安静几秒再决定", "social", "float", "now",

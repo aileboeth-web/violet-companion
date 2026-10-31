@@ -309,3 +309,41 @@ def test_the_image_pages_daily_limit_is_not_undercut_by_the_files_global_cap(cle
                        pricing={"confirmed": True, "per_image": 0.01})
     assert budget.check(other, ImageTask(kind="image_generate", prompt="猫")) == "global_daily_images"
     db.execute("DELETE FROM image_calls")
+
+def test_once_she_spoke_she_stays_in_the_conversation(clean, monkeypatch):
+    """2026-10-31 (user: she never spoke by herself, no feeling of a group member; chose 像一个爱接话的群友)."""
+    from ai.social.store import SocialStore
+    import ai.social.llm as llm
+    db = clean
+    monkeypatch.setenv("VIOLET_SOCIAL_QUIET_SECONDS", "15")
+    store = SocialStore(db)
+    conv = store.conversation("napcat", "group", "614", "群", default_mode="auto")
+    a = FakeAdapter()
+    e = engine(db, a)
+    e.receive(a, kind="group", peer_id="614", sender_id="1", sender_name="阿凯", text="周末去哪玩", platform_msg_id="1")
+    assert NoTimer.made[-1].delay > 6                                  # not in this conversation yet: waits
+    store.add_message(conv["id"], content="去爬山吧", is_self=True)
+    e._first_pending.clear()
+    e.receive(a, kind="group", peer_id="614", sender_id="1", sender_name="阿凯", text="爬哪座", platform_msg_id="2")
+    assert NoTimer.made[-1].delay <= 6                                 # she is in it: answers sooner
+    seen = {}
+    monkeypatch.setattr(llm, "decide", lambda system, user, tools=None: (seen.update(system=system, user=user)
+                                                                        or ({"action": "silent"}, "f", 1)))
+    e.decide(conv["id"])
+    assert "你正在这场聊天里" in seen["user"] and "爱接话的普通群友" in seen["system"]
+    assert "大多数时候安静看着就好" not in seen["system"]
+
+
+def test_a_failing_background_job_does_not_stop_her_speaking_up(clean, monkeypatch):
+    from ai.social import qzone
+    db = clean
+    a = FakeAdapter()
+    e = engine(db, a)
+    ran = []
+    monkeypatch.setattr(qzone, "tick", lambda runtime: (_ for _ in ()).throw(RuntimeError("qzone down")))
+    monkeypatch.setattr(e, "_sync_stickers", lambda: ran.append("stickers"))
+    monkeypatch.setattr(e, "initiative_tick", lambda: ran.append("initiative"))
+    e._post_timer = None
+    e.start_posting(1)
+    NoTimer.made[-1].fn()
+    assert ran == ["stickers", "initiative"]

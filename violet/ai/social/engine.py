@@ -71,14 +71,12 @@ class SocialEngine:
         def run():
             from ai.social import qzone
             self._post_timer = None
-            try:
-                qzone.tick(self.runtime)
-                adapter = qzone._qq(self.runtime)
-                if adapter is not None and adapter.is_running():
-                    stickers.sync_qq(self.db, adapter)
-                self.initiative_tick()
-            except Exception:                               # noqa: BLE001 -- the next round tries again
-                logger.exception("social background round failed")
+            try:                                            # 2026-10-31: each job on its own, one failing
+                for job in (lambda: qzone.tick(self.runtime), self._sync_stickers, self.initiative_tick):
+                    try:                                    # never stops the others (initiative ran last before)
+                        job()
+                    except Exception:                       # noqa: BLE001 -- the next round tries again
+                        logger.exception("social background round failed")
             finally:
                 self.start_posting(interval)
         if self._post_timer is not None:
@@ -87,6 +85,12 @@ class SocialEngine:
         timer.daemon = True
         self._post_timer = timer
         timer.start()
+
+    def _sync_stickers(self) -> None:
+        from ai.social import qzone
+        adapter = qzone._qq(self.runtime)
+        if adapter is not None and adapter.is_running():
+            stickers.sync_qq(self.db, adapter)
 
     def initiative_tick(self, rand=None) -> list[int]:
         """2026-10-30 (user: "在群里面只会有人发言之后才会冒泡"): in a group set to 自己决定 that has gone quiet, she
@@ -103,7 +107,7 @@ class SocialEngine:
         if not 9 <= now.hour < 23:
             return []
         from ai import mood
-        chance = max(0.0, min(1.0, env_float("VIOLET_SOCIAL_INITIATIVE_CHANCE", 0.3) * mood.initiative_factor(self.db)))
+        chance = max(0.0, min(1.0, env_float("VIOLET_SOCIAL_INITIATIVE_CHANCE", 0.6) * mood.initiative_factor(self.db)))
         asked = []
         for conv in self.db.fetch_all("SELECT id FROM social_conversations WHERE kind = 'group' AND mode = 'auto'"):
             row = self.db.fetch_one("SELECT MAX(created_at) AS last_any, MAX(CASE WHEN is_self = 1 THEN created_at END) "
@@ -112,10 +116,10 @@ class SocialEngine:
             if not last_any:
                 continue
             quiet = now - datetime.fromisoformat(str(last_any)[:19])
-            if quiet < timedelta(minutes=15) or quiet > timedelta(days=3):
+            if quiet < timedelta(minutes=10) or quiet > timedelta(days=3):
                 continue                                  # people are talking (the normal flow), or a dead group
-            if last_self and now - datetime.fromisoformat(str(last_self)[:19]) < timedelta(minutes=90):
-                continue
+            if last_self and now - datetime.fromisoformat(str(last_self)[:19]) < timedelta(minutes=45):
+                continue                                  # 2026-10-31: 10 / 45 minutes (were 15 / 90)
             if rand() >= chance:
                 continue
             asked.append(conv["id"])
@@ -183,6 +187,8 @@ class SocialEngine:
         quiet = env_float("VIOLET_SOCIAL_QUIET_SECONDS", 15.0)
         if delay is None:
             delay = min(3.0, quiet) if urgent else quiet
+            if not urgent and self._hot(conversation_id):
+                delay = min(6.0, quiet)                  # 2026-10-31: she is in this conversation -- keep up
             with self._lock:
                 first = self._first_pending.setdefault(conversation_id, time.monotonic())
             delay = max(0.5, min(delay, quiet * 4 - (time.monotonic() - first)))
@@ -194,6 +200,19 @@ class SocialEngine:
             timer.daemon = True
             self._timers[conversation_id] = timer
         timer.start()
+
+    def _hot(self, conversation_id: int) -> bool:
+        """She spoke here in the last few minutes (prompts.HOT_MINUTES)."""
+        from ai.social.prompts import HOT_MINUTES
+        row = self.db.fetch_one("SELECT MAX(created_at) AS at FROM social_messages WHERE conversation_id = ? AND is_self = 1",
+                                (conversation_id,))
+        if not row or not row["at"]:
+            return False
+        try:
+            ago = datetime.fromisoformat(self.db.now()[:19]) - datetime.fromisoformat(str(row["at"])[:19])
+        except ValueError:
+            return False
+        return timedelta(0) <= ago <= timedelta(minutes=HOT_MINUTES)
 
     def _run(self, conversation_id: int, trigger: str) -> None:
         with self._lock:

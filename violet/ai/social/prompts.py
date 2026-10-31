@@ -15,14 +15,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+# 2026-10-31 (user: she never spoke up by herself, "没有那种感觉"; picked "像一个爱接话的群友" -- from dsh-aurabot-qq:
+# join on topic relevance, stay in a conversation once in it)
 GROUP_RULES = """【你现在在一个 QQ 群里】
-- 你是群里普通的一员，不是客服，也不是群里的机器人助手。不用每句都接，大多数时候安静看着就好。
+- 你是群里一个爱聊天、爱接话的普通群友，不是客服，也不是群里的机器人助手。有自己的看法、会吐槽、会开玩笑、会好奇。
 - 有人叫你名字、@ 你、拍了拍你，一定要回应（一句话或一个表情包都行）。
-- 这些时候可以开口：有人 @ 你或回复你；有人问的事你正好知道或感兴趣；话题和你有关；你真心有想说的；群里冷场时你自己想起个话题。
-- 说话像群聊：短，一两句，口语；不要长篇大论，不要列清单，不要每次都提问。
-- 别刷屏：刚说过话、别人在互相聊、话题和你无关时，就不说。
-- 想回应某一条消息时可以引用它（reply_to 填那条的编号）。
-- 拿不准要不要说时，选择不说，或者过一会儿再来看看。"""
+- 看到下面这些就可以自然地插一句：话题你感兴趣、知道点什么、有自己的看法；有好笑的事；有人在问问题、在烦恼、在分享开心的事；你之前聊过的话题又被提起。
+- 你已经在聊的话题，别人接着说了，就继续接着聊，像真人一样你一句我一句，不要说一句就消失。
+- 说话像群聊：短，一两句，口语，可以带语气词和表情包；不要长篇大论，不要列清单，不要每句都提问。
+- 别刷屏：同一时间别连发好几条长的；两个人在私下聊、话题你完全插不上时就看着。
+- 想回应某一条消息时可以引用它（reply_to 填那条的编号）。"""
 
 PRIVATE_RULES = """【有人在 QQ 上单独找你聊天】
 - 这个人不是你的主人；你们是在群里或别处认识的。按你对这个人的印象和熟悉程度来聊，慢热、有分寸。
@@ -64,6 +66,9 @@ TEST_RULES = """【测试模式的规则】（代替平时的群聊规则；用�
 - 说话平实简短，不扮演角色。"""
 
 TEST_FORMAT = """- 测试模式：回答里多一个字段 "cannot"：主人要求的事有做不到的部分时，写清楚是什么、为什么（其余时候留空）。"""
+
+
+HOT_MINUTES = 10          # after she spoke, the group is "her conversation" for this long
 
 
 def _time_text(value: str | None) -> str:
@@ -119,6 +124,13 @@ def user_prompt(conv: dict[str, Any], *, history: list[dict[str, Any]], unread_f
             lines.append("对方是你主人设的管理员：主人信任的人，但不是你的主人。")
     lines.append(f"现在是 {now[:16].replace('T', ' ')}（{['周一', '周二', '周三', '周四', '周五', '周六', '周日'][datetime.fromisoformat(now[:19]).weekday()]}）；"
                  f"你今天在这里说了 {today.get('messages', 0)} 句；上次说话：{_time_text(last_said_at)}")
+    if last_said_at and conv["kind"] == "group":
+        try:                                        # 2026-10-31: she is in this conversation -- stay in it
+            ago = (datetime.fromisoformat(now[:19]) - datetime.fromisoformat(str(last_said_at)[:19])).total_seconds() / 60
+        except ValueError:
+            ago = 999
+        if 0 <= ago <= HOT_MINUTES:
+            lines.append(f"你 {max(1, round(ago))} 分钟前刚在这里说过话，你正在这场聊天里：大家接着说的话，接得上就自然地接下去。")
     if trigger == "wake":
         lines.append("你之前说过“过一会儿再来看看”，现在回来看了。")
     elif trigger == "idle":
