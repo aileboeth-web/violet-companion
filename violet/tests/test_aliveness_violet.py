@@ -368,7 +368,7 @@ def test_markup_for_other_bots_becomes_messages_and_stickers(clean):
     out = normalize_chat_output("今天吃白米饭！|||白米饭yyds <sticker:开心>\n<voice>好困哦</voice>",
                                 sticker_for_label=lambda label: stickers.by_label(db, label)["id"])
     kinds = [(m["type"], m.get("content") or m.get("sticker_id")) for m in out["messages"]]
-    assert kinds == [("text", "今天吃白米饭！"), ("text", "白米饭yyds"), ("sticker", happy["id"]), ("text", "好困哦")]
+    assert kinds == [("text", "今天吃白米饭！"), ("text", "白米饭yyds"), ("sticker", happy["id"]), ("voice", "好困哦")]
     assert stickers.by_label(db, "生气") is None
     out = normalize_chat_output("哼 <sticker:生气>", sticker_for_label=lambda label: None)
     assert [m["content"] for m in out["messages"]] == ["哼"]

@@ -360,6 +360,13 @@ class MessageSender:
                 self._send_sticker_message(msg, client_id, origin, turn_id, proactive_event_id, record_history,
                                            stop_reason, report)
                 continue
+            if msg_type == "voice":
+                # 2026-10-31: said in her voice (ai/voice.py) in the background -- a minute on a CPU; the words go
+                # out as text right away when the voice is not ready, the channel has none, or it is too long
+                if content and stop_reason is None and self._voice_later(content, origin, turn_id, record_history):
+                    report.sent.append({**msg, "content": f"[语音] {content}"})
+                    continue
+                msg_type, msg = "text", {**msg, "type": "text"}
             if msg_type != "text" or not content:
                 self.db.add_outbound_message(client_id, origin, str(msg_type or "unknown"), content,
                                              turn_id, proactive_event_id, status="skipped", channel=self.channel,
@@ -447,6 +454,40 @@ class MessageSender:
             report.sent.append({**msg, "content": label, "life_event_id": shared_event})
             return None
         return last_error
+
+    def _voice_later(self, text: str, origin: str, turn_id: str | None, record_history: bool) -> bool:
+        """Starts saying `text` in the background; False when it cannot (then the caller sends it as text)."""
+        from ai import trace, voice
+        supports = getattr(self.client, "supports_voice", None)
+        if not (callable(supports) and supports()) or not voice.ready() or len(text) > voice.max_chars():
+            return False
+
+        def work():
+            client_id = f"pybot-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
+            outbound_id = self.db.add_outbound_message(client_id, origin, "voice", text, turn_id, None,
+                                                       channel=self.channel, peer_id=self.peer_id)
+            try:
+                path = voice.to_file(voice.speak(text, "silk"), "silk")
+                self.db.update_outbound_message(outbound_id, status="sending", increment_attempts=True)
+                rejected = _response_error(self.client.send_voice(str(path)))
+                if rejected:
+                    raise SendRejected(rejected)
+            except Exception as exc:                     # noqa: BLE001 -- the words still reach the owner
+                error = f"{exc.__class__.__name__}: {exc}"[:300]
+                logger.warning("voice not sent, sending the words instead: %s", error)
+                self.db.update_outbound_message(outbound_id, status="failed", error=error)
+                trace.step("发语音", 结果="失败，改发文字", 原因=error)
+                self._send_one(self.db.add_outbound_message(client_id + "-t", origin, "text", text, turn_id, None,
+                                                            channel=self.channel, peer_id=self.peer_id),
+                               client_id + "-t", text, record_history)
+                return
+            message_id = self.db.add_assistant_message("text", f"[语音] {text}", channel=self.channel,
+                                                       peer_id=self.peer_id) if record_history else None
+            self.db.update_outbound_message(outbound_id, status="sent", message_id=message_id)
+            trace.step("发语音", 结果="已发出", 内容=trace.text(text))
+        threading.Thread(target=work, daemon=True, name="voice-send").start()
+        trace.step("发语音", 结果="在生成（约一分钟）", 内容=trace.text(text))
+        return True
 
     def _send_sticker_message(self, msg: dict[str, Any], client_id: str, origin: str, turn_id: str | None,
                               proactive_event_id: int | None, record_history: bool, stop_reason: str | None,

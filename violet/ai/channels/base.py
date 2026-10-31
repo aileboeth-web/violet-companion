@@ -186,6 +186,10 @@ class ChannelAdapter(ABC):
         """A sticker of her collection; platforms without stickers get it as a picture."""
         return self.send_image(peer_id, path)
 
+    def send_voice(self, peer_id: str, path: str) -> dict[str, Any]:
+        """2026-10-31: a voice message (ai/voice.py, QQ's silk); platforms without one get the words as text."""
+        raise UnsupportedOperation(f"{self.label} 不支持发送语音")
+
     def send_typing(self, peer_id: str, on: bool) -> None:
         """Cosmetic; platforms without a typing indicator ignore it."""
 
@@ -256,6 +260,18 @@ class PeerTransport:
             raise
         self.adapter.status_info.sent += 1
         return result
+
+    def send_voice(self, path: str, **_ignored) -> dict[str, Any]:
+        try:
+            result = self.adapter.send_voice(self.peer_id, str(path))
+        except Exception:
+            self.adapter.status_info.send_failures += 1
+            raise
+        self.adapter.status_info.sent += 1
+        return result
+
+    def supports_voice(self) -> bool:
+        return type(self.adapter).send_voice is not ChannelAdapter.send_voice
 
     def send_sticker(self, path: str, **_ignored) -> dict[str, Any]:
         try:

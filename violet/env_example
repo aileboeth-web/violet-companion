@@ -243,6 +243,9 @@ VIOLET_IMAGE_SELF_DECIDE=1
 VIOLET_IMAGE_STYLE=photo
 # low | medium | high | auto (not sent)
 VIOLET_IMAGE_QUALITY=medium
+# 2026-10-31: her voice (optional install: violet voice install)
+VIOLET_VOICE=1
+VIOLET_VOICE_MAX_CHARS=60
 VIOLET_AI_NATURAL=1
 VIOLET_NOTICE_VOICE=1
 VIOLET_SOCIAL_INITIATIVE=1

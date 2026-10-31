@@ -46,14 +46,15 @@ def strip_stray_brackets(line: str) -> str:
 
 
 VOICE_TAG_RE = re.compile(r"<voice>(.*?)</voice>", re.S | re.I)
+VOICE_LINE = "[[语音]]"                                     # a line to be said (ai/voice.py), not written
 STICKER_TAG_RE = re.compile(r"<sticker[:：]\s*([^>\s]{1,12})\s*>", re.I)
 
 
 def expand_markup(text: str, sticker_for_label=None) -> str:
     """2026-10-31: the markup of prompts written for other bots (the Aurabot persona, persona/templates/dafeiyu.json):
-    "|||" = a new message, <voice>…</voice> = its words (said as text until voice exists), <sticker:开心> = a sticker of
+    "|||" = a new message, <voice>…</voice> = a line starting with VOICE_LINE (a voice message), <sticker:开心> = a sticker of
     her collection that fits the label ([[表情:N]]), dropped when none fits."""
-    text = VOICE_TAG_RE.sub(lambda m: "\n" + m.group(1).strip() + "\n", text or "")
+    text = VOICE_TAG_RE.sub(lambda m: "\n" + VOICE_LINE + " ".join(m.group(1).split()) + "\n", text or "")
 
     def sticker(m: re.Match) -> str:
         number = None
@@ -107,7 +108,11 @@ def normalize_chat_output(raw_content: str, sticker_for_label=_owner_sticker_for
                 stickers += 1
             pos = match.end()
         rest = line[pos:].strip()
-        if rest:
+        if rest.startswith(VOICE_LINE):                      # 2026-10-31: said, not written (MessageSender)
+            spoken = rest[len(VOICE_LINE):].strip()
+            if spoken:
+                messages.append({"type": "voice", "content": spoken, "media_id": None})
+        elif rest:
             messages.append({"type": "text", "content": rest, "media_id": None})
     if not messages:
         return {"should_send": False, "messages": []}

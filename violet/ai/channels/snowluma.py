@@ -457,21 +457,35 @@ class SnowLumaChannel(ChannelAdapter):
                          timeout=60)
         return {"ok": True, "message_id": (data or {}).get("message_id")}
 
+    @staticmethod
+    def _voice_segment(path: str) -> dict[str, Any]:
+        encoded = base64.b64encode(Path(path).read_bytes()).decode("ascii")
+        return {"type": "record", "data": {"file": f"base64://{encoded}"}}
+
+    def send_voice(self, peer_id: str, path: str) -> dict[str, Any]:
+        """2026-10-31: a voice message (QQ's silk from ai/voice.py)."""
+        data = self.call("send_private_msg", {"user_id": int(peer_id), "message": [self._voice_segment(path)]},
+                         timeout=60)
+        return {"ok": True, "message_id": (data or {}).get("message_id")}
+
     def send_to(self, kind: str, peer_id: str, text: str | None, reply_to: str | None = None,
-                sticker_path: str | None = None, image_path: str | None = None) -> str | None:
+                sticker_path: str | None = None, image_path: str | None = None,
+                voice_path: str | None = None) -> str | None:
         """The social engine's send: a group or someone's private chat, optionally quoting a message; text, one
         sticker of her collection, or (2026-10-30) one picture she drew."""
         message: list[dict[str, Any]] = []
         if reply_to:
             message.append({"type": "reply", "data": {"id": str(reply_to)}})
-        if sticker_path:
+        if voice_path:                                   # a voice message stands alone (no quote)
+            message = [self._voice_segment(voice_path)]
+        elif sticker_path:
             message.append(self._sticker_segment(sticker_path))
         elif image_path:
             encoded = base64.b64encode(Path(image_path).read_bytes()).decode("ascii")
             message.append({"type": "image", "data": {"file": f"base64://{encoded}"}})
         else:
             message.append({"type": "text", "data": {"text": text or ""}})
-        timeout = 60 if (sticker_path or image_path) else None
+        timeout = 60 if (sticker_path or image_path or voice_path) else None
         extra = {"timeout": timeout} if timeout else {}
         if kind == "group":
             data = self.call("send_group_msg", {"group_id": int(peer_id), "message": message}, **extra)

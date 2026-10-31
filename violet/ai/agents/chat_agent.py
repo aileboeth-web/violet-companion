@@ -243,6 +243,10 @@ class ChatAgent(BaseAgent):
         feeling = "" if testing else mood.note(violetdb)        # 2026-10-30: her own mood, only when clearly there
         if feeling:
             messages.append({"role": "system", "content": feeling})
+        from ai import voice
+        speaking = "" if testing or is_proactive or "<voice>" in str(messages) else voice.prompt_note()
+        if speaking:                                            # 2026-10-31: she can send a voice message
+            messages.append({"role": "system", "content": speaking})
         from ai.images.service import images_enabled
         if not is_proactive and images_enabled():
             messages.append({"role": "system", "content": (

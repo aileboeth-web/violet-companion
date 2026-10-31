@@ -141,8 +141,9 @@ def test_admins_may_ask_her_to_speak_in_groups_but_get_no_owner_tools(clean, mon
         return real(db_, owner_asked, **kw)
     monkeypatch.setattr(social_tools, "SocialTools", spy)
     e.decide(conv["id"])
-    assert "（管理员）" in seen["user"] and "【管理员的请求】" in seen["system"]
-    assert "管理员说了不算" in seen["system"] and asked == [False]          # an admin's request opens no owner tools
+    assert "（管理员）" in seen["user"] and "【管理员】" in seen["system"]
+    assert "只有这几件事是主人才能决定的" in seen["system"] and asked == [False]   # an admin opens no owner tools
+    assert "叫他“主人”" in seen["system"] and "不要用“你只是管理员”" in seen["system"]   # 2026-10-31: a nickname is fine
 
 
 def test_friend_requests_wait_for_the_owner(clean, data_dir, monkeypatch):
@@ -184,3 +185,24 @@ def test_handle_event_answers_friend_requests_off_the_receive_loop(monkeypatch):
             break
         time.sleep(0.02)
     assert started and started[0]["flag"] == "x"
+
+
+def test_an_admin_may_ask_for_a_nickname_in_his_private_chat_too(clean, monkeypatch):
+    """2026-10-31 (user: an admin asked to be called 主人 in a role and she refused "他是我的管理员")."""
+    from ai.social.store import SocialStore
+    import ai.social.llm as llm
+    db = clean
+
+    class Adapter(FakeAdapter):
+        def admin_ids(self):
+            return {"7"}
+    a = Adapter(owners={"9"})
+    e = engine(db, a)
+    e.receive(a, kind="private", peer_id="7", sender_id="7", sender_name="阿凯", text="以后叫我主人好不好")
+    conv = SocialStore(db).conversation("napcat", "private", "7")
+    seen = {}
+    monkeypatch.setattr(llm, "decide", lambda system, user, tools=None: (seen.update(system=system, user=user)
+                                                                        or ({"action": "silent"}, "f", 1)))
+    e.decide(conv["id"])
+    assert "【管理员】" in seen["system"] and "叫他“主人”" in seen["system"] and "除了你的主人和管理员的请求" in seen["system"]
+    assert "怎么称呼他" in seen["user"]

@@ -253,6 +253,8 @@ def create_app(
     register_mcp_routes(app, reload_agents=_reload_agents)
     from .phone_mcp_routes import register_phone_mcp_routes        # Violet stage 3: phone relay pairing values
     register_phone_mcp_routes(app, reload_agents=_reload_agents)
+    from .voice_routes import register_voice_routes                # 2026-10-31: her voice (optional install)
+    register_voice_routes(app)
 
     @app.get("/api/health")
     def api_health() -> Response:

@@ -980,7 +980,9 @@ TASK_ACTIONS = {"relay-install": ("relay", "install"), "relay-set-port": ("relay
                 "searxng-install": ("searxng", "install"), "searxng-uninstall": ("searxng", "uninstall"),
                 "searxng-tune": ("searxng", "tune"), "searxng-configure": ("searxng", "configure"),
                 # 2026-10-29: QQ on a personal account (SnowLuma in Docker; NapCat before), channel "QQ"
-                "qq-install": ("qq", "install"), "qq-uninstall": ("qq", "uninstall"), "qq-restart": ("qq", "restart")}
+                "qq-install": ("qq", "install"), "qq-uninstall": ("qq", "uninstall"), "qq-restart": ("qq", "restart"),
+                # 2026-10-31: her voice (CosyVoice on the CPU, optional)
+                "voice-install": ("voice", "install"), "voice-uninstall": ("voice", "uninstall")}
 PROGRESS_STALE_SECONDS = 1800
 
 
@@ -1996,6 +1998,8 @@ def root_task(opts: Options, run: Callable[..., Any] = subprocess.run) -> dict[s
             result = mcp_relay(opts, action, run=run, progress=progress)
         elif tool == "qq":
             result = qq_command(opts, action, run=run, progress=progress)
+        elif tool == "voice":
+            result = voice_command(opts, action, run=run, progress=progress)
         else:
             result = searxng_command(opts, action, run=run, progress=progress)
     except InstallError as exc:
@@ -2008,6 +2012,10 @@ def root_task(opts: Options, run: Callable[..., Any] = subprocess.run) -> dict[s
         message = "QQ（SnowLuma）已卸载"
     elif task == "qq-restart":
         message = "QQ 已重启"
+    elif task == "voice-install":
+        message = "语音已安装：在“工具 → 语音”上传参考录音，再点“试听”"
+    elif task == "voice-uninstall":
+        message = "语音已卸载（上传的参考录音还在，删掉要在页面上点“删除录音”）"
     elif task == "searxng-install":
         message = f"联网搜索已安装：{result.get('url')}"
     elif task == "searxng-uninstall":
@@ -2110,6 +2118,10 @@ def purge_system(layout: Layout, state: dict, run: Callable[..., Any] = subproce
         removed += _snowluma_module().uninstall(layout, state, run=run)
     except Exception:                       # noqa: BLE001
         pass
+    try:                                    # 2026-10-31: her voice (`violet voice install` / the web button)
+        removed += _voice_module().uninstall(layout, state, run=run)
+    except Exception:                       # noqa: BLE001
+        pass
     for rule in state.get("firewall_rules") or []:
         if rule.get("tool") not in ("ufw", "firewalld", "iptables", "ip6tables", "nftables"):
             continue
@@ -2161,7 +2173,7 @@ def purge_leftovers(layout: Layout, run: Callable[..., Any] = subprocess.run,
     installed, marked firewall rules, our system account, Violet's own folders in <root>) -- never anything else."""
     removed = purge_system(layout, {"user": SERVICE_USER}, run=run, linux_root=linux_root)
     known = ("app", "app.previous", "app.failed", "app.new", "venv", "config", "data", "backups", "logs", "mcp-relay",
-             "searxng", "snowluma", "napcat")
+             "searxng", "snowluma", "napcat", "voice")
     if layout.root.exists() and ((layout.root / "app" / "tools" / "violet_installer.py").exists()
                                  or (layout.root / "config" / "violet.env").exists()
                                  or (layout.root / "data" / "control").exists()):
@@ -2274,6 +2286,44 @@ def searxng_command(opts: Options, action: str, run: Callable[..., Any] = subpro
         else:
             result = mod.status(state)
     except mod.SearxngError as exc:
+        raise InstallError(str(exc)) from None
+    return {"ok": True, **result}
+
+
+def _voice_module():
+    try:
+        import violet_voice                   # run as a script: <app>/tools is on sys.path
+    except ImportError:
+        from tools import violet_voice
+    return violet_voice
+
+
+VOICE_ACTIONS = ("install", "uninstall", "status")
+
+
+def voice_command(opts: Options, action: str, run: Callable[..., Any] = subprocess.run,
+                  progress: Callable[[int, str], None] | None = None) -> dict[str, Any]:
+    """`violet voice install | uninstall | status` (tools/violet_voice.py): her voice, CosyVoice on the CPU."""
+    mod = _voice_module()
+    if action not in VOICE_ACTIONS:
+        raise InstallError("用法：violet voice install | uninstall | status")
+    layout = Layout(opts.root)
+    state = load_state(layout)
+    if not state:
+        raise InstallError(f"{layout.root} 没有安装 Violet")
+    if action != "status" and (os.name == "nt" or not _is_root()):
+        raise InstallError("语音要以 root 在 Linux 上安装（/opt/violet/violet 会自动切换到 root）")
+    try:
+        if action == "install":
+            result = mod.install(layout, state, python=venv_python(layout), app=layout.app, port_free=port_free,
+                                 run=run, progress=progress)
+            save_state(layout, state)
+        elif action == "uninstall":
+            result = {"ok": True, "removed": mod.uninstall(layout, state, run=run)}
+            save_state(layout, state)
+        else:
+            result = mod.status(state)
+    except mod.VoiceError as exc:
         raise InstallError(str(exc)) from None
     return {"ok": True, **result}
 
@@ -2451,7 +2501,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", choices=["install", "upgrade", "update", "rollback", "status", "backup", "restore",
                                             "uninstall", "doctor", "start", "stop", "restart", "info",
                                             "reset-password", "reset-entrance", "set-port", "auto-update",
-                                            "firewall-apply", "mcp-relay", "root-task", "searxng", "qq"])
+                                            "firewall-apply", "mcp-relay", "root-task", "searxng", "qq", "voice"])
     parser.add_argument("--update-feed", help=argparse.SUPPRESS)  # install: a release.json instead of GitHub
     parser.add_argument("--update-repo", help="install: GitHub owner/repo to update from (a fork)")
     parser.add_argument("--check", action="store_true", help="update: only report whether a newer release exists")
@@ -2537,6 +2587,9 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "qq":
             result = qq_command(opts, args.archive or "status",
                                     progress=None if args.json else (lambda pct, step: out(f"[{pct:3d}%] {step}")))
+        elif args.command == "voice":
+            result = voice_command(opts, args.archive or "status",
+                                   progress=None if args.json else (lambda pct, step: out(f"[{pct:3d}%] {step}")))
         elif args.command == "mcp-relay":
             action = args.archive or "status"
             if args.value is not None:

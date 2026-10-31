@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 TASKS = ("relay-install", "relay-set-port", "searxng-install", "searxng-uninstall", "searxng-tune",
-         "searxng-configure", "qq-install", "qq-uninstall", "qq-restart")
+         "searxng-configure", "qq-install", "qq-uninstall", "qq-restart", "voice-install", "voice-uninstall")
 NAMES = ("task", "update")
 STALE_SECONDS = 1800           # a running entry this old belongs to a helper that was killed
 
@@ -80,6 +80,16 @@ def searxng_export() -> dict[str, Any] | None:
     """What root wrote after installing the private SearXNG (<data>/control/searxng.json): {url, port, ...}."""
     try:
         data = json.loads((control_dir() / "searxng.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    url = str(data.get("url") or "") if isinstance(data, dict) else ""
+    return data if url.startswith("http://127.0.0.1:") else None
+
+
+def voice_export() -> dict[str, Any] | None:
+    """What root wrote after installing her voice (<data>/control/voice.json): {url, port, model}."""
+    try:
+        data = json.loads((control_dir() / "voice.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     url = str(data.get("url") or "") if isinstance(data, dict) else ""

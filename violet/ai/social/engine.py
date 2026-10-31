@@ -322,7 +322,9 @@ class SocialEngine:
         sticker_lines = stickers.prompt_lines(self.db)
         obey = bool(owner_ids) and env_bool("VIOLET_SOCIAL_OBEY_OWNER", True)
         # 2026-10-30: admins (set on the channels page) may ask her to speak / answer / be quiet in groups, no more
-        admins = admin_ids if conv["kind"] == "group" and env_bool("VIOLET_SOCIAL_OBEY_OWNER", True) else set()
+        # 2026-10-31: in groups and in an admin's own private chat
+        admins = admin_ids if env_bool("VIOLET_SOCIAL_OBEY_OWNER", True) and (
+            conv["kind"] == "group" or conv["peer_id"] in admin_ids) else set()
         system = prompts.system_prompt(test_mode.TESTER_SOCIAL if testing else _persona_text(self.db, conv["channel"]),
                                        conv["kind"],
                                        testing=testing, obey_owner=obey, obey_admins=bool(admins))
@@ -342,10 +344,13 @@ class SocialEngine:
         note = tools.note() if tools is not None else None
         if note:
             system = system + "\n\n" + note
-        from ai import mood
+        from ai import mood, voice
         feeling = "" if testing else mood.note(self.db)
         if feeling:
             system = system + "\n\n" + feeling
+        speaking = "" if testing or "<voice>" in system else voice.prompt_note()
+        if speaking:                                     # 2026-10-31: she can send a voice message
+            system = system + "\n\n" + speaking
         try:
             decision, model, latency = (llm.decide(system, user, tools=tools) if tools is not None and tools.names
                                         else llm.decide(system, user))
@@ -427,9 +432,15 @@ class SocialEngine:
             if adapter is None or not adapter.is_running():
                 action, error = "silent", "QQ 没有连接，没有发出去"
             else:
+                from ai.chat_output import VOICE_LINE
                 for i, text in enumerate(texts):
                     if conv["daily_message_limit"] and today["messages"] + sent >= conv["daily_message_limit"]:
                         break
+                    if text.startswith(VOICE_LINE):           # 2026-10-31: said in her voice, in the background
+                        text = text[len(VOICE_LINE):].strip()
+                        if self._voice_later(conv, adapter, text):
+                            sent += 1
+                            continue
                     try:
                         msg_id = adapter.send_to(conv["kind"], conv["peer_id"], text,
                                                  reply_to=reply_to if action == "reply" and i == 0 else None)
@@ -499,6 +510,36 @@ class SocialEngine:
                    模型=model, 耗时毫秒=latency)
         return {"action": action, "sent": sent, "check_back": check_back, "error": error, "reason": reason,
                 "sticker_wanted": bool(wanted), "collect_wanted": bool(decision.get("collect"))}
+
+    def _voice_later(self, conv: dict[str, Any], adapter, text: str) -> bool:
+        """Says `text` in her voice in the background (about a minute); the words as text when the voice fails.
+        False when there is no voice (the caller sends the text now)."""
+        from ai import voice
+        if not text or not voice.ready() or len(text) > voice.max_chars() or adapter is None:
+            return False
+        try:
+            import inspect
+            if "voice_path" not in inspect.signature(adapter.send_to).parameters:
+                return False
+        except (TypeError, ValueError):
+            return False
+
+        def work():
+            try:
+                path = voice.to_file(voice.speak(text, "silk"), "silk")
+                msg_id = adapter.send_to(conv["kind"], conv["peer_id"], None, voice_path=str(path))
+                self.store.add_message(conv["id"], content=f"[语音] {text}", is_self=True, platform_msg_id=msg_id,
+                                       message_type="voice")
+                trace.step("发语音", 会话=conv["id"], 结果="已发出", 内容=trace.text(text))
+            except Exception as exc:                      # noqa: BLE001 -- the words still go out
+                trace.step("发语音", 会话=conv["id"], 结果="失败，改发文字", 原因=str(exc)[:200])
+                try:
+                    msg_id = adapter.send_to(conv["kind"], conv["peer_id"], text)
+                    self.store.add_message(conv["id"], content=text, is_self=True, platform_msg_id=msg_id)
+                except Exception:                         # noqa: BLE001
+                    logger.exception("voice fallback text not sent to conversation %s", conv["id"])
+        threading.Thread(target=work, daemon=True, name="voice-social").start()
+        return True
 
     # -- stickers (0.7.9) ---------------------------------------------------------------------------------------
     def _download(self, adapter, url: str | None):

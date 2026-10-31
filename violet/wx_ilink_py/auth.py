@@ -437,6 +437,7 @@ def _wants_html() -> bool:
 
 
 CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+       "media-src 'self' blob:; "              # 2026-10-31: the voice 试听 plays the audio it fetched (control_voice.js)
        "connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
 
 
