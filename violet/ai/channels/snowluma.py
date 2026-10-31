@@ -21,6 +21,7 @@ import base64
 import hashlib
 import itertools
 import json
+import logging
 import os
 import re
 import threading
@@ -35,10 +36,23 @@ from ai.channels.normalize import clean_text, coalesce, safe_error
 from ai.channels.onebot11 import parse_cq_string, segment_parts
 
 MAX_DOWNLOAD = 10 * 1024 * 1024
+logger = logging.getLogger("violet.snowluma")
 
 
 class QQError(RuntimeError):
     pass
+
+
+def accept_friend(db, payload: dict[str, Any]) -> str:
+    """Accepts a friend request (ai/permissions "friend_add"; also the handler of an approval)."""
+    from ai import permissions
+    rt = permissions._RUNTIME.get("rt")
+    manager = getattr(rt, "channels", None)
+    adapter = manager.get(str(payload.get("channel") or "")) if manager is not None else None
+    if adapter is None or not hasattr(adapter, "call") or not adapter.is_running():
+        raise RuntimeError("QQ 没有连接")
+    adapter.call("set_friend_add_request", {"flag": str(payload["flag"]), "approve": True})
+    return f"好，我加了 QQ {payload.get('user_id')} 为好友。"
 
 
 def account_token(config_dir: str | None) -> str | None:
@@ -289,6 +303,10 @@ class SnowLumaChannel(ChannelAdapter):
         post = event.get("post_type")
         if post == "meta_event":
             return 0
+        if post == "request" and event.get("request_type") == "friend":
+            # not in the receive loop: answering QQ / asking the owner waits for this loop
+            threading.Thread(target=self._friend_request, args=(event,), daemon=True, name="qq-friend-request").start()
+            return 0
         if post != "message":
             return 0
         if str(event.get("user_id") or "") == self.self_id:
@@ -350,6 +368,39 @@ class SnowLumaChannel(ChannelAdapter):
             return set(identities.bound_peers(self.channel_id))
         except Exception:
             return set()
+
+    def admin_ids(self) -> set[str]:
+        """2026-10-30: the accounts the owner made admins (not the owner; a few requests in groups)."""
+        identities = getattr(self.runtime, "identities", None)
+        if identities is None or not hasattr(identities, "admin_peers"):
+            return set()
+        try:
+            return set(identities.admin_peers(self.channel_id))
+        except Exception:
+            return set()
+
+    def _friend_request(self, event: dict[str, Any]) -> None:
+        """2026-10-30 (user: 让她有同意加好友的能力，默认要经我同意): someone wants to add her. permissions
+        "friend_add": self -> accepted, ask (default) -> the owner is asked ("同意 N"), forbid -> left unanswered."""
+        from ai import permissions, trace
+        flag = str(event.get("flag") or "")
+        user = str(event.get("user_id") or "")
+        comment = clean_text(str(event.get("comment") or ""), 80)
+        db = getattr(self.runtime, "db", None)
+        if not flag or not user or db is None:
+            return
+        level = permissions.level("friend_add")
+        trace.step("好友申请", 渠道=self.channel_id, QQ=user, 验证消息=comment or None, 处理=permissions.LEVELS[level])
+        payload = {"channel": self.channel_id, "flag": flag, "user_id": user, "comment": comment}
+        try:
+            if level == "self":
+                accept_friend(db, payload)
+                permissions._tell_owner(f"QQ {user} 加了我好友，我同意了" + (f"（验证消息：{comment}）" if comment else "") + "。")
+            elif level == "ask":
+                permissions.request(db, "friend_add", f"QQ {user} 想加我好友" + (f"，验证消息：{comment}" if comment else "")
+                                    + "。", payload)
+        except Exception:                                  # noqa: BLE001
+            logger.exception("friend request from %s not handled", user)
 
     # -- sending ----------------------------------------------------------------------------------------------------
     def send_text(self, peer_id: str, text: str, client_id: str | None = None) -> dict[str, Any]:
@@ -437,3 +488,11 @@ class SnowLumaChannel(ChannelAdapter):
     def probe(self) -> dict[str, Any]:
         info = self.call("get_login_info") or {}
         return {"ok": bool(info.get("user_id")), "self_id": info.get("user_id"), "nickname": info.get("nickname")}
+
+
+def _register() -> None:
+    from ai import permissions
+    permissions.register("friend_add", accept_friend)
+
+
+_register()

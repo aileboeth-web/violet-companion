@@ -10,7 +10,7 @@
 (() => {
   const STATE = { connected: ["已连接", "ok"], starting: ["正在连接", "warn"], reconnecting: ["正在重连", "warn"],
     needs_login: ["需要登录", "bad"], error: ["出错", "bad"], stopped: ["未运行", ""], disabled: ["已关闭", ""] };
-  const PEER = { bound: "已绑定", pending: "待批准", blocked: "已屏蔽" };
+  const PEER = { bound: "主人", admin: "管理员", pending: "待批准", blocked: "已屏蔽" };
   const FIELD = { api_base: "接口地址", poll_timeout: "长轮询秒数", proxy: "代理（可选）", webhook_loopback_only: "只接受本机上报",
     check_interval: "检查间隔（秒）", bot_token: "Bot Token", access_token: "访问令牌", webhook_secret: "签名密钥",
     app_id: "AppID", app_secret: "AppSecret", sandbox: "沙箱环境（机器人还没审核上线时勾选）" };
@@ -112,9 +112,11 @@
       box.replaceChildren(...(peers.length ? peers.map((p) => h("div", { class: "row" },
         pill(PEER[p.status] || p.status, p.status === "bound" ? "ok" : p.status === "blocked" ? "bad" : "warn"),
         h("span", { text: `${fmt(p.display_name)}（${p.peer_id}）· ${p.message_count} 条 · 最近 ${when(p.last_seen_at)}` }),
-        ...["bound", "pending", "blocked"].filter((s) => s !== p.status).map((s) => h("button", { class: "ghost", text: { bound: "绑定为我", pending: "设为待批准", blocked: "屏蔽" }[s],
+        // 2026-10-30: an admin is someone else the owner trusts (QQ only): own chat window, a few requests in groups
+        ...["bound", ...(ch.type === "napcat" ? ["admin"] : []), "pending", "blocked"].filter((s) => s !== p.status).map((s) => h("button", { class: "ghost", text: { bound: "绑定为我", admin: "设为管理员", pending: "设为待批准", blocked: "屏蔽" }[s],
           onclick: async () => {
             if (s === "bound" && !(await confirmBox(`把 ${p.peer_id} 绑定为你的账号？之后它发来的消息会进入你和 Violet 的对话和记忆。`))) return;
+            if (s === "admin" && !(await confirmBox(`把 ${p.peer_id} 设为管理员？管理员不是你：他私聊她时是他自己的聊天窗口，不共用你的记忆；在群里可以让她说话、回应、安静。他之前在你的聊天里说的话会搬到他自己的窗口。`))) return;
             try { await api("POST", `/api/control/channels/peers/${p.id}`, { status: s }); toast("已保存"); loaders.channels(); } catch (e) { toast(e.message, false); }
           } })))) : [h("p", { class: "note", text: "还没有人在这个渠道上发过消息。" })]));
     } catch (e) { box.replaceChildren(h("p", { class: "err", text: e.message })); }
@@ -122,7 +124,7 @@
   function peersDetails(ch) {
     const box = h("div", { class: "stack" });
     return h("details", { ontoggle: (ev) => { if (ev.target.open) loadPeers(ch, box); } },
-      h("summary", { text: `联系人（已绑定 ${ch.peers.bound} · 待批准 ${ch.peers.pending} · 已屏蔽 ${ch.peers.blocked}）` }), box);
+      h("summary", { text: `联系人（主人 ${ch.peers.bound}` + (ch.peers.admin ? ` · 管理员 ${ch.peers.admin}` : "") + ` · 待批准 ${ch.peers.pending} · 已屏蔽 ${ch.peers.blocked}）` }), box);
   }
 
   // the settings of a channel in use: hidden behind "修改配置"

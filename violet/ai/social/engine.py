@@ -131,7 +131,8 @@ class SocialEngine:
             known = self.db.fetch_one("SELECT 1 FROM social_people p JOIN social_messages m ON m.sender_id = p.user_id "
                                       "JOIN social_conversations c ON c.id = m.conversation_id AND c.kind = 'group' "
                                       "WHERE p.channel = ? AND p.user_id = ? LIMIT 1", (channel, sender_id))
-            if policy == "off" or (policy == "known" and not known):
+            admin = hasattr(adapter, "admin_ids") and sender_id in adapter.admin_ids()
+            if not admin and (policy == "off" or (policy == "known" and not known)):
                 trace.step("私聊未处理", 渠道=channel, QQ=sender_id, 原因="设置不允许" if policy == "off" else "不认识的人")
                 return None
         conv = self.store.conversation(channel, kind, peer_id, group_name if kind == "group" else sender_name)
@@ -274,6 +275,7 @@ class SocialEngine:
             return None
         adapter = self._adapter(conv["channel"])
         owner_ids = adapter.owner_ids() if adapter is not None and hasattr(adapter, "owner_ids") else set()
+        admin_ids = (adapter.admin_ids() if adapter is not None and hasattr(adapter, "admin_ids") else set()) - owner_ids
         self._look_at_stickers(unread, adapter)
         from ai import test_mode
         testing = test_mode.active()       # 2026-10-30: no persona, no impressions, only the messages since the test began
@@ -289,13 +291,16 @@ class SocialEngine:
         from ai.social import llm, prompts
         sticker_lines = stickers.prompt_lines(self.db)
         obey = bool(owner_ids) and env_bool("VIOLET_SOCIAL_OBEY_OWNER", True)
+        # 2026-10-30: admins (set on the channels page) may ask her to speak / answer / be quiet in groups, no more
+        admins = admin_ids if conv["kind"] == "group" and env_bool("VIOLET_SOCIAL_OBEY_OWNER", True) else set()
         system = prompts.system_prompt(test_mode.TESTER_SOCIAL if testing else _persona_text(self.db, conv["channel"]),
                                        conv["kind"],
-                                       testing=testing, obey_owner=obey)
+                                       testing=testing, obey_owner=obey, obey_admins=bool(admins))
         user = prompts.user_prompt({**conv, "notes": None} if testing else conv, history=history,
                                    unread_from=int(conv["watermark"] or 0), people=people,
                                    owner_ids=owner_ids, today=today, last_said_at=(said or {}).get("at"),
-                                   now=self.db.now(), trigger=trigger, sticker_lines=sticker_lines)
+                                   now=self.db.now(), trigger=trigger, sticker_lines=sticker_lines,
+                                   admin_ids=admin_ids)
         # 2026-10-30: tools here too (ai/social/tools.py) -- the owner's data and drawing only when he is asking
         owner_asked = (obey or testing) and any(str(m.get("sender_id")) in owner_ids for m in unread)
         tools = None

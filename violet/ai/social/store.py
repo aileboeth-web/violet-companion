@@ -198,6 +198,31 @@ class SocialStore:
         self.db.execute("UPDATE social_conversations SET watermark = MAX(watermark, ?), updated_at = ? WHERE id = ?",
                         (int(upto_id), self.db.now(), int(conversation_id)))
 
+    def adopt_owner_messages(self, channel: str, peer_id: str, name: str | None = None) -> int:
+        """2026-10-30: a bound account turned out to be someone else (now an admin): what it said in the owner's chat
+        and her answers to it (messages.peer_id) move to its private conversation here, already read. Returns how
+        many moved. The memories written from them stay (the memory page can delete them)."""
+        rows = self.db.fetch_all("SELECT id, role, message_type, content, created_at FROM messages "
+                                 "WHERE COALESCE(channel, 'wechat') = ? AND peer_id = ? ORDER BY id", (channel, str(peer_id)))
+        conv = self.conversation(channel, "private", str(peer_id), name or None)
+        if not rows:
+            return 0
+        with self.db.transaction():
+            for r in rows:
+                mine = r["role"] != "user"
+                self.db.execute(
+                    "INSERT INTO social_messages (conversation_id, sender_id, sender_name, is_self, message_type, content, "
+                    "created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (conv["id"], None if mine else str(peer_id), None if mine else name, 1 if mine else 0,
+                     r["message_type"] or "text", r["content"], r["created_at"]))
+            self.db.execute("DELETE FROM messages WHERE id IN (" + ",".join("?" * len(rows)) + ")", [r["id"] for r in rows])
+            newest = self.db.fetch_one("SELECT MAX(id) AS id, MAX(created_at) AS at FROM social_messages "
+                                       "WHERE conversation_id = ?", (conv["id"],))
+            self.db.execute("UPDATE social_conversations SET watermark = MAX(watermark, ?), last_message_at = "
+                            "MAX(COALESCE(last_message_at, ''), ?), updated_at = ? WHERE id = ?",
+                            (newest["id"], newest["at"], self.db.now(), conv["id"]))
+        return len(rows)
+
     # -- pictures (0.7.9) -----------------------------------------------------------------------------------------
     def add_media(self, message_id: int, *, kind: str, file_key: str | None, url: str | None,
                   description: str | None = None, sticker_id: int | None = None) -> int:

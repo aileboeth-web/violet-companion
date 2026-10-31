@@ -15,6 +15,12 @@ Binding:
 
 Several bound accounts (WeChat + Telegram + QQ) share the owner's conversation and memory -- explicitly, because the
 admin bound each of them.
+
+2026-10-30 (user: two QQ accounts bound, the second one is another person and its chat landed in "你"): a peer can be
+an ``admin`` instead -- someone the owner trusts, not the owner. An admin is not the owner's conversation: on QQ the
+private chat is one of Violet's own conversations (ai/social), and in groups an admin may ask her to speak / answer /
+be quiet; nothing more. Making a peer an admin moves what it said in the owner's chat (and her answers to it) into its
+own private conversation (ai.social.store.SocialStore.adopt_owner_messages).
 """
 
 from __future__ import annotations
@@ -29,7 +35,7 @@ from typing import Any
 
 from ai.channels.normalize import clean_text
 
-STATUSES = ("pending", "bound", "blocked")
+STATUSES = ("pending", "bound", "admin", "blocked")
 ACCEPT_POLICIES = ("owner", "first_peer")
 PAIRING_TTL_SECONDS = 600
 PAIRING_MAX_TRIES = 5
@@ -85,6 +91,16 @@ class IdentityStore:
             "SELECT peer_id FROM channel_identities WHERE channel = ? AND status = 'bound' ORDER BY last_seen_at DESC",
             (channel,))]
 
+    def admin_peers(self, channel: str) -> list[str]:
+        return [r["peer_id"] for r in self.db.fetch_all(
+            "SELECT peer_id FROM channel_identities WHERE channel = ? AND status = 'admin'", (channel,))]
+
+    def first_peer(self, channel: str) -> str | None:
+        """The owner account bound first on this channel: older messages without a sender are its."""
+        row = self.db.fetch_one("SELECT peer_id FROM channel_identities WHERE channel = ? AND status = 'bound' "
+                                "ORDER BY COALESCE(bound_at, first_seen_at), id LIMIT 1", (channel,))
+        return row["peer_id"] if row else None
+
     def primary_peer(self, channel: str) -> str | None:
         """The bound peer last heard from on this channel (where proactive messages go)."""
         peers = self.bound_peers(channel)
@@ -92,7 +108,8 @@ class IdentityStore:
 
     # -- the decision for one incoming message ------------------------------------------------------------------
     def admit(self, channel: str, peer_id: str, accept: str = "owner", display_name: str | None = None) -> str:
-        """owner (process it) | pending (unknown, not processed) | blocked. Records the peer either way."""
+        """owner (process it) | pending (unknown, not processed) | admin (not the owner) | blocked. Records the peer
+        either way."""
         if peer_id == "":
             return "owner"
         now = self.db.now()
@@ -124,6 +141,9 @@ class IdentityStore:
         self.db.execute("UPDATE channel_identities SET status = ?, bound_at = ?, bound_by = ? WHERE id = ?",
                         (status, self.db.now() if status == "bound" else None, actor if status == "bound" else None,
                          identity_id))
+        if status == "admin" and row["status"] != "admin":
+            from ai.social.store import SocialStore     # what it said in the owner's chat goes to its own window
+            SocialStore(self.db).adopt_owner_messages(row["channel"], row["peer_id"], row.get("display_name"))
         return self.db.fetch_one("SELECT * FROM channel_identities WHERE id = ?", (identity_id,))
 
     def create_pairing_code(self, channel: str | None = None) -> dict[str, Any]:

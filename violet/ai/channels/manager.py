@@ -553,7 +553,7 @@ class ChannelManager:
                 "secrets": [{"name": n, "is_set": bool(stored.get(n)), "fingerprint": _fingerprint(stored.get(n))}
                             for n in secret_names],
                 "webhook_path": f"/channels/hook/{channel_id}" if entry.get("type") == "onebot11" else None,
-                "peers": {s: sum(1 for i in identities if i["status"] == s) for s in ("bound", "pending", "blocked")}}
+                "peers": {s: sum(1 for i in identities if i["status"] == s) for s in ("bound", "admin", "pending", "blocked")}}
 
     def describe(self) -> list[dict[str, Any]]:
         return [self.describe_one(channel_id) for channel_id in self.entries()]

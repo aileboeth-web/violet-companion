@@ -269,15 +269,17 @@ $("#ov-refresh").addEventListener("click", () => loaders.overview());
 
 // ---------------------------------------------------------------- chat
 const KIND = { user: "对方", violet: "Violet 回复", proactive: "Violet 主动", reminder: "提醒", system: "系统" };
-// 2026-10-29: channel -> conversations (left) -> messages (right). "你" is the owner's chat on that channel; groups
-// and other people are Violet's own conversations (each message shows who said it).
+// 2026-10-29: channel -> conversations (left) -> messages (right). The owner's chat is one window per bound account
+// (2026-10-30: by QQ name and number, key "owner:<peer>"); groups and other people are Violet's own conversations.
 const hist = { channel: null, conv: "owner", before: null, channels: [], items: [] };
 const KIND_ICON = { owner: "★", group: "群", private: "人" };
 function convName(item) { return item ? item.title : ""; }
+function isOwner(key) { return key === "owner" || String(key).startsWith("owner:"); }
+function ownerPeer() { const cur = hist.items.find((i) => i.key === hist.conv); return cur && cur.peer !== undefined ? cur.peer : null; }
 function renderChannels() {
   $("#hist-chans").replaceChildren(...(hist.channels.length ? hist.channels.map((c) => h("button", {
     type: "button", role: "tab", class: "chip" + (c.id === hist.channel ? " active" : ""), "aria-selected": String(c.id === hist.channel),
-    text: c.label + (c.conversations ? `（${c.conversations + (c.owner_messages ? 1 : 0)}）` : ""),
+    text: c.label + (c.conversations || c.owner_windows > 1 ? `（${c.conversations + (c.owner_windows || 0)}）` : ""),
     onclick: () => { hist.channel = c.id; hist.conv = "owner"; loadHistoryList(); } }))
     : [h("p", { class: "note", text: "还没有聊天记录" })]));
 }
@@ -304,14 +306,16 @@ function renderList() {
     : [h("p", { class: "note", text: "这个渠道还没有聊天" })]));
   const cur = hist.items.find((i) => i.key === hist.conv);
   $("#hist-head").replaceChildren(...(cur ? [h("strong", { text: convName(cur) }), h("span", { class: "note", text: " " + (cur.subtitle || "") })] : []));
-  const owner = hist.conv === "owner";
+  const owner = isOwner(hist.conv);
   $("#chat-role-wrap").hidden = !owner; $("#chat-legend").hidden = !owner;
 }
 async function loadDays() {
   const sel = $("#chat-day");
-  if (hist.conv !== "owner") { sel.replaceChildren(h("option", { value: "", text: "全部" })); return; }
+  if (!isOwner(hist.conv)) { sel.replaceChildren(h("option", { value: "", text: "全部" })); return; }
   try {
-    const days = await api("GET", "/api/control/messages/days?" + new URLSearchParams({ channel: hist.channel }));
+    const q = new URLSearchParams({ channel: hist.channel });
+    if (ownerPeer() !== null) q.set("peer", ownerPeer());
+    const days = await api("GET", "/api/control/messages/days?" + q);
     const keep = sel.value;
     sel.replaceChildren(h("option", { value: "", text: "全部" }), ...days.map((d) => h("option", { value: d.day, text: `${d.day}（${d.n}）` })));
     sel.value = days.some((d) => d.day === keep) ? keep : "";
@@ -323,8 +327,11 @@ async function loadChat(append) {
   if ($("#chat-day").value) params.set("date", $("#chat-day").value);
   if ($("#chat-q").value.trim()) params.set("q", $("#chat-q").value.trim());
   if (append && hist.before) params.set("before_id", hist.before);
-  const owner = hist.conv === "owner";
-  if (owner) { params.set("channel", hist.channel); if ($("#chat-role").value) params.set("role", $("#chat-role").value); }
+  const owner = isOwner(hist.conv);
+  if (owner) {
+    params.set("channel", hist.channel); if ($("#chat-role").value) params.set("role", $("#chat-role").value);
+    if (ownerPeer() !== null) params.set("peer", ownerPeer());
+  }
   try {
     const d = owner ? await api("GET", "/api/control/messages?" + params)
       : await api("GET", `/api/control/history/${encodeURIComponent(hist.channel)}/${hist.conv}?` + params);

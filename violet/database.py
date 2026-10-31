@@ -126,10 +126,13 @@ class VioletDatabase:
         ("intent_condition", "TEXT"),
     )
 
-    def _ensure_column(self, table: str, column: str, ddl: str) -> None:
+    def _ensure_column(self, table: str, column: str, ddl: str) -> bool:
+        """True when the column was added now."""
         existing = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})").fetchall()}
         if column not in existing:
             self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+            return True
+        return False
 
     def _initialize_schema_locked(self) -> None:
         self._create_tables_locked()
@@ -149,6 +152,14 @@ class VioletDatabase:
             self._ensure_column(table, "channel", "TEXT")
         for table in ("inbound_messages", "outbound_messages"):
             self._ensure_column(table, "peer_id", "TEXT")
+        # 2026-10-30: which bound account a message of the owner's chat came from / went to (the history page lists
+        # them by QQ name and number; an account made an admin takes its messages along). Older rows: from the inbox /
+        # outbox, once.
+        if self._ensure_column("messages", "peer_id", "TEXT"):
+            self.conn.execute("UPDATE messages SET peer_id = (SELECT i.peer_id FROM inbound_messages i WHERE "
+                              "i.stored_message_id = messages.id AND i.peer_id IS NOT NULL LIMIT 1) WHERE peer_id IS NULL")
+            self.conn.execute("UPDATE messages SET peer_id = (SELECT o.peer_id FROM outbound_messages o WHERE "
+                              "o.message_id = messages.id AND o.peer_id IS NOT NULL LIMIT 1) WHERE peer_id IS NULL")
         from ai.channels.identity import SCHEMA as channel_schema
         self.conn.executescript(channel_schema)
         # 2026-10-29: Violet's social life (QQ groups, other people) in its own tables -- ai/social/store.py
@@ -881,6 +892,7 @@ class VioletDatabase:
         media_id: str | None = None,
         created_at: str | None = None,
         channel: str | None = None,
+        peer_id: str | None = None,
     ) -> int:
         if role not in self.VALID_ROLES:
             raise ValueError(f"Invalid role: {role}")
@@ -892,10 +904,10 @@ class VioletDatabase:
         cursor = self.execute(
             """
             INSERT INTO messages
-            (role, direction, message_type, content, media_id, created_at, channel)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (role, direction, message_type, content, media_id, created_at, channel, peer_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (role, direction, message_type, content, media_id, created_at or self.now(), channel),
+            (role, direction, message_type, content, media_id, created_at or self.now(), channel, peer_id or None),
         )
         return int(cursor.lastrowid)
 
@@ -906,6 +918,7 @@ class VioletDatabase:
         media_id: str | None = None,
         created_at: str | None = None,
         channel: str | None = None,
+        peer_id: str | None = None,
     ) -> int:
         return self.add_message(
             role="user",
@@ -915,6 +928,7 @@ class VioletDatabase:
             media_id=media_id,
             created_at=created_at,
             channel=channel,
+            peer_id=peer_id,
         )
 
     def add_assistant_message(
@@ -924,6 +938,7 @@ class VioletDatabase:
         media_id: str | None = None,
         created_at: str | None = None,
         channel: str | None = None,
+        peer_id: str | None = None,
     ) -> int:
         return self.add_message(
             role="assistant",
@@ -933,6 +948,7 @@ class VioletDatabase:
             media_id=media_id,
             created_at=created_at,
             channel=channel,
+            peer_id=peer_id,
         )
 
     def get_message(self, message_id: int) -> Optional[dict[str, Any]]:

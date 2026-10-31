@@ -248,9 +248,16 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
     @app.get("/api/control/messages/days")
     def control_message_days():
         channel = (request.args.get("channel") or "").strip()[:64]
+        where, params = [], []
+        if channel:
+            where.append("COALESCE(channel, 'wechat') = ?")
+            params.append(channel)
+            if "peer" in request.args:                   # 2026-10-30: one account's window
+                where.append("COALESCE(peer_id, ?) = ?")
+                params += [_fallback_peer(channel), (request.args.get("peer") or "")[:64]]
         rows = violetdb.fetch_all("SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS n FROM messages "
-                                  + ("WHERE COALESCE(channel, 'wechat') = ? " if channel else "")
-                                  + "GROUP BY day ORDER BY day DESC LIMIT 400", (channel,) if channel else ())
+                                  + ("WHERE " + " AND ".join(where) + " " if where else "")
+                                  + "GROUP BY day ORDER BY day DESC LIMIT 400", params)
         return ok(rows)
 
     @app.get("/api/control/messages")
@@ -282,6 +289,9 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
         if channel:                                     # 2026-10-29: the owner's chat on one channel (NULL = WeChat)
             where.append("COALESCE(channel, 'wechat') = ?")
             params.append(channel)
+            if "peer" in request.args:                   # 2026-10-30: one bound account's window
+                where.append("COALESCE(peer_id, ?) = ?")
+                params += [_fallback_peer(channel), (request.args.get("peer") or "")[:64]]
         sql = ("SELECT id, role, direction, message_type, content, created_at FROM messages"
                + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id DESC LIMIT ?")
         rows = violetdb.fetch_all(sql, (*params, limit))
@@ -310,6 +320,45 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
         labels.setdefault("wechat", {"label": "微信", "type": "wechat_ilink"})
         return labels
 
+    def _fallback_peer(channel: str) -> str:
+        """Older messages of the owner's chat without a sender belong to the account bound first."""
+        from ai.channels.identity import IdentityStore
+        return IdentityStore(violetdb).first_peer(channel) or ""
+
+    def _names(channel: str) -> dict[str, dict[str, Any]]:
+        """peer -> {name, status}: the channel's contacts, then the people she met (QQ nicknames)."""
+        out: dict[str, dict[str, Any]] = {}
+        for r in violetdb.fetch_all("SELECT user_id, nickname FROM social_people WHERE channel = ?", (channel,)):
+            out[str(r["user_id"])] = {"name": r["nickname"], "status": None}
+        for r in violetdb.fetch_all("SELECT peer_id, display_name, status FROM channel_identities WHERE channel = ?",
+                                    (channel,)):
+            old = out.get(str(r["peer_id"]), {})
+            out[str(r["peer_id"])] = {"name": r["display_name"] or old.get("name"), "status": r["status"]}
+        return out
+
+    ROLE_TEXT = {"bound": "主人", "admin": "管理员"}
+
+    def _owner_windows(channel: str) -> list[dict[str, Any]]:
+        """2026-10-30 (user: 全都用 QQ 名称和 QQ 号分类): the owner's chat on a channel, one window per bound account
+        (messages.peer_id; older rows without one go to the account bound first)."""
+        fallback = _fallback_peer(channel)
+        rows = violetdb.fetch_all(
+            "SELECT COALESCE(peer_id, ?) AS peer, COUNT(*) AS n, MAX(created_at) AS last_at, MAX(id) AS last_id "
+            "FROM messages WHERE COALESCE(channel, 'wechat') = ? GROUP BY COALESCE(peer_id, ?)", (fallback, channel, fallback))
+        names = _names(channel)
+        number = "QQ " if (_channel_labels().get(channel, {}).get("type") or channel) in ("napcat", "onebot11") else ""
+        out = []
+        for r in rows:
+            peer = str(r["peer"] or "")
+            info = names.get(peer, {})
+            role = ROLE_TEXT.get(info.get("status") or "", "")
+            last = violetdb.fetch_one("SELECT content FROM messages WHERE id = ?", (r["last_id"],))
+            out.append({"key": "owner:" + peer if peer else "owner", "kind": "owner", "peer": peer,
+                        "title": info.get("name") or (number + peer if peer else "主人"),
+                        "subtitle": " · ".join(x for x in [(number + peer) if peer else "", role or "主人"] if x),
+                        "last_text": (last or {}).get("content"), "last_at": r["last_at"], "count": r["n"]})
+        return out
+
     @app.get("/api/control/history")
     def control_history():
         from ai.social.store import SocialStore
@@ -327,25 +376,25 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
             if not own and not others and ch not in labels:
                 continue
             last = max([x for x in [own and own["last_at"], *[c.get("last_message_at") for c in others]] if x], default=None)
+            windows = len(_owner_windows(ch)) if own else 0
             out.append({"id": ch, "label": labels.get(ch, {}).get("label", ch), "type": labels.get(ch, {}).get("type", ""),
-                        "owner_messages": own["n"] if own else 0, "conversations": len(others), "last_at": last})
+                        "owner_messages": own["n"] if own else 0, "owner_windows": windows,
+                        "conversations": len(others), "last_at": last})
         return ok({"channels": out})
 
     @app.get("/api/control/history/<channel>")
     def control_history_channel(channel: str):
         from ai.social.store import MODE_TEXT, SocialStore
-        own = violetdb.fetch_one("SELECT COUNT(*) AS n, MAX(created_at) AS last_at FROM messages "
-                                 "WHERE COALESCE(channel, 'wechat') = ?", (channel,))
-        last = violetdb.fetch_one("SELECT content FROM messages WHERE COALESCE(channel, 'wechat') = ? "
-                                  "ORDER BY id DESC LIMIT 1", (channel,))
-        items = []
-        if own and own["n"]:
-            items.append({"key": "owner", "kind": "owner", "title": "你", "subtitle": "和你的聊天",
-                          "last_text": (last or {}).get("content"), "last_at": own["last_at"], "count": own["n"]})
+        items = _owner_windows(channel)
+        names = _names(channel)
         for c in SocialStore(violetdb).conversations(channel=channel):
-            items.append({"key": str(c["id"]), "kind": c["kind"], "title": c.get("title") or c["peer_id"],
+            info = names.get(str(c["peer_id"]), {}) if c["kind"] == "private" else {}
+            role = ROLE_TEXT.get(info.get("status") or "", "")
+            items.append({"key": str(c["id"]), "kind": c["kind"],
+                          "title": c.get("title") or info.get("name") or ("QQ " + c["peer_id"] if c["kind"] == "private"
+                                                                          else c["peer_id"]),
                           "subtitle": ("群 " + c["peer_id"] + " · " + MODE_TEXT.get(c["mode"], c["mode"]))
-                          if c["kind"] == "group" else ("QQ " + c["peer_id"]),
+                          if c["kind"] == "group" else " · ".join(x for x in ["QQ " + c["peer_id"], role] if x),
                           "last_text": c.get("last_text"), "last_at": c.get("last_message_at"), "count": c["message_count"]})
         items.sort(key=lambda i: i.get("last_at") or "", reverse=True)
         return ok({"channel": channel, "items": items})

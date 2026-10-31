@@ -440,7 +440,7 @@ class MessageSender:
                 report.failed.append({**msg, "error": last_error})
                 return last_error
             label = f"[图片：{asset.get('caption') or 'AI 生成的图片'}]"
-            message_id = self.db.add_assistant_message("image", label, channel=self.channel) if record_history else None
+            message_id = self.db.add_assistant_message("image", label, channel=self.channel, peer_id=self.peer_id) if record_history else None
             self.db.update_outbound_message(outbound_id, status="sent", message_id=message_id)
             store.mark_send(asset["id"], "sent")
             shared_event = self._mark_life_event_shown(asset)
@@ -477,7 +477,7 @@ class MessageSender:
             report.skipped.append({**msg, "error": error})      # not a failed reply: no fallback text for it
             trace.step("发表情包", 编号=sticker["id"], 结果="失败", 原因=error)
             return
-        message_id = self.db.add_assistant_message("text", label, channel=self.channel) if record_history else None
+        message_id = self.db.add_assistant_message("text", label, channel=self.channel, peer_id=self.peer_id) if record_history else None
         self.db.update_outbound_message(outbound_id, status="sent", message_id=message_id)
         stickers.mark_used(self.db, sticker["id"])
         report.sent.append({**msg, "content": label})
@@ -550,7 +550,7 @@ class MessageSender:
                 from ai import trace
                 trace.step("发送", 渠道=self.channel, 消息号=outbound_id, 结果="失败", 尝试次数=attempt, 原因=last_error)
                 return last_error
-            message_id = self.db.add_assistant_message("text", content, channel=self.channel) if record_history else None
+            message_id = self.db.add_assistant_message("text", content, channel=self.channel, peer_id=self.peer_id) if record_history else None
             self.db.update_outbound_message(outbound_id, status="sent", message_id=message_id)
             from ai import trace
             trace.step("发送", 渠道=self.channel, 消息号=outbound_id, 结果="已发出", 尝试次数=attempt, 内容=trace.text(content))
@@ -1159,7 +1159,7 @@ class VioletRuntime:
                 message_id = None
                 try:
                     message_id = self.db.add_user_message("text", combined, created_at=turn.received_at,
-                                                          channel=conversation[0])
+                                                          channel=conversation[0], peer_id=conversation[1])
                     self.db.update_inbound_messages(turn.inbound_ids, stored_message_id=message_id)
                     try:
                         from ai.images.media import MediaAssetStore
@@ -1267,7 +1267,8 @@ class VioletRuntime:
         except ValueError as exc:
             outcome = str(exc)
         try:
-            self.db.add_user_message("text", combined, created_at=turn.received_at, channel=conversation[0])
+            self.db.add_user_message("text", combined, created_at=turn.received_at, channel=conversation[0],
+                                     peer_id=conversation[1])
             sender.send_messages(self.voiced(outcome), origin="reply", turn_id=turn.turn_id)
         except Exception:
             logger.exception("approval answer of turn %s not sent", turn.turn_id)
@@ -1407,7 +1408,7 @@ class VioletRuntime:
         for row in expire:
             if answerable(row) and row.get("stored_message_id") is None and row.get("content"):
                 message_id = self.db.add_user_message("text", text_of(row), created_at=row["received_at"],
-                                                      channel=row.get("channel") or "wechat")
+                                                      channel=row.get("channel") or "wechat", peer_id=row.get("peer_id"))
                 self.db.update_inbound_messages([row["id"]], stored_message_id=message_id)
         if expire:
             self.db.update_inbound_messages([r["id"] for r in expire], status="expired",

@@ -11,6 +11,7 @@ Every ability with consequences has one of three levels, set on the settings pag
   risky_tools   MCP tools that change something (write / high risk), beyond the ones allowed one by one on the
                 tools page (those always run). ask: they are offered too, every call waits for the owner.
                 default ask (2026-10-30, user: "比较自由调用工具"; was forbid)
+  friend_add    accepting a QQ friend request (ai/channels/snowluma.py)                            default ask
 
 An approval expires after 24 hours. Carrying it out is the ability's handler (registered here); the outcome goes
 back to the owner through the runtime's system message.
@@ -47,11 +48,14 @@ ABILITIES = {
     "qzone_post": ("自己发 QQ 动态", "她觉得想发时就发（还要打开“发 QQ 动态”）。先问你：她会私聊你要发的内容，你同意才发。", "self"),
     "risky_tools": ("会改动东西的工具", "手机上的操作这类“写入 / 高风险”的工具（工具页里单独放行的那些照常直接用）。"
                     "先问你：这些工具她都能用，但每次调用都要你同意；不允许：只有单独放行的能用。", "ask"),
+    # 2026-10-30 (user: 让她有同意加好友的能力，不过默认是要经我同意); only the owner answers, not an admin
+    "friend_add": ("同意 QQ 加好友", "有人加她的 QQ 好友时。先问你：她私聊你是谁、验证消息是什么，你回复“同意 N”才加；"
+                   "自己做：直接同意，再告诉你；不允许：不理会。", "ask"),
 }
 EXPIRE_HOURS = 24
 COMMAND_RE = re.compile(r"^\s*(同意|批准|可以|好的?|不同意|拒绝|不要|不行|算了)\s*#?(\d{1,6})\s*$")
 _HANDLERS: dict[str, Callable[[Any, dict[str, Any]], str]] = {}
-HANDLER_MODULES = {"qzone_post": "ai.social.qzone"}
+HANDLER_MODULES = {"qzone_post": "ai.social.qzone", "friend_add": "ai.channels.snowluma"}
 _RUNTIME: dict[str, Any] = {}
 _LOCK = threading.Lock()
 
