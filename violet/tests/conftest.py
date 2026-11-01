@@ -48,6 +48,14 @@ os.environ.update({
     # image system off unless a test turns it on; media files go to the temp dir
     "VIOLET_IMAGE_ENABLED": "0",
     "VIOLET_MEDIA_DIR": str(_TMP / "media"),
+    # 2026-11-01: production skips the Intent call (ai/agents/intent_agent.intent_step); the many pipeline tests
+    # written for it keep it on, tests of the Intent-free turn switch it off
+    "VIOLET_INTENT_STEP": "1",
+    "VIOLET_TEST_INTENT_STEP": "1",                    # the same for tools/harness.py sessions
+    "VTEST_INTENT_STEP": "1",                          # ... also those started by a test (no VIOLET_ passed on)
+    # 2026-11-01: the stepped history window remembers its start per process; tests of window sizes expect the plain
+    # sliding window, test_capability_rework_violet.py switches it on
+    "VIOLET_CONTEXT_STABLE_HISTORY": "0",
 })
 for _key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
     os.environ.pop(_key, None)

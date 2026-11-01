@@ -612,23 +612,35 @@ def _run_pipeline(
     trace.step("可用工具", 工具=sorted(catalog.tools) or None, 连不上=[u.get("server") for u in catalog.unavailable] or None,
                已停用=catalog.disabled or None, 未授权=catalog.refused or None)
 
-    # Step 1: 意图识别
-    visualize_step("Intent Recognition", "识别用户意图：对话 or 任务")
-    _ps.node_start("Intent", input_data={"user_message": user_message})
-    try:
-        intent_result = intent_agent.run(user_message, call_context={"tool_catalog_note": intent_note(catalog)})
-        parsed = parse_json_object(intent_result.get("content"))
-    except Exception as exc:
-        logger.exception("IntentAgent failed; falling back to plain chat route")
-        errors["intent"] = f"{exc.__class__.__name__}: {exc}"
-        intent_result = {"content": "", "messages": [], "raw": {}, "error": errors["intent"]}
-        parsed = None
-    intent_json, problem = normalize_intent(parsed)
-    if problem:
-        logger.warning("Intent output unusable (%s); continuing as %s", problem, intent_json["route"])
-        errors.setdefault("intent", problem)
-    trace.step("意图识别", 路线=intent_json.get("route"), 要回复=intent_json.get("should_reply"),
-               工具请求=intent_json.get("tool_query") or "没有", 问题=problem, 原始输出=trace.text(intent_result.get("content")))
+    # Step 1: 意图识别 (2026-11-01: off by default -- Chat decides itself, see intent_agent.intent_step)
+    from ai.agents.intent_agent import intent_step
+    use_intent = intent_step()
+    if use_intent:
+        visualize_step("Intent Recognition", "识别用户意图：对话 or 任务")
+        _ps.node_start("Intent", input_data={"user_message": user_message})
+        try:
+            intent_result = intent_agent.run(user_message, call_context={"tool_catalog_note": intent_note(catalog)})
+            parsed = parse_json_object(intent_result.get("content"))
+        except Exception as exc:
+            logger.exception("IntentAgent failed; falling back to plain chat route")
+            errors["intent"] = f"{exc.__class__.__name__}: {exc}"
+            intent_result = {"content": "", "messages": [], "raw": {}, "error": errors["intent"]}
+            parsed = None
+        intent_json, problem = normalize_intent(parsed)
+        if problem:
+            logger.warning("Intent output unusable (%s); continuing as %s", problem, intent_json["route"])
+            errors.setdefault("intent", problem)
+        trace.step("意图识别", 路线=intent_json.get("route"), 要回复=intent_json.get("should_reply"),
+                   工具请求=intent_json.get("tool_query") or "没有", 问题=problem,
+                   原始输出=trace.text(intent_result.get("content")))
+    else:
+        _ps.node_skip("Intent")
+        intent_result = {"content": "", "messages": [], "raw": {}, "skipped": True}
+        intent_json = {**DEFAULT_INTENT, "fallback": True, "skipped": True}
+
+    def intent_done(*args, **kwargs) -> None:
+        if use_intent:
+            _ps.node_done(*args, **kwargs)
     recalled_memories = extract_tool_memories(intent_result)
     from ai import test_mode
     testing = test_mode.active()          # 2026-10-30: no memories, no topic bookkeeping, no persona checks
@@ -647,7 +659,7 @@ def _run_pipeline(
         user_raised = []
 
     if intent_json.get("route") == "silent" or intent_json.get("should_reply") is False:
-        _ps.node_done("Intent", output_data={"messages": intent_result.get("messages", []), "content": intent_json})
+        intent_done("Intent", output_data={"messages": intent_result.get("messages", []), "content": intent_json})
         _ps.node_skip("Performer")
         _ps.node_skip("Chat")
         _ps.node_skip("Memory")
@@ -707,7 +719,7 @@ def _run_pipeline(
 
     performer_result = None
     if intent_json["route"] == "task":
-        _ps.node_done("Intent", "Performer", output_data={"messages": intent_result.get("messages", []), "content": intent_json})
+        intent_done("Intent", "Performer", output_data={"messages": intent_result.get("messages", []), "content": intent_json})
         visualize_step("Task Performer", "执行任务相关操作")
         active_task_id = intent_json.get("active_task_id")
         try:
@@ -744,7 +756,7 @@ def _run_pipeline(
             performer_result = _failed_performer_result(active_task_id, exc)
         _ps.node_done("Performer", "Chat", output_data={"messages": performer_result.get("messages", []), "content": performer_result.get("content")})
     else:
-        _ps.node_done("Intent", "Chat", output_data={"messages": intent_result.get("messages", []), "content": intent_json})
+        intent_done("Intent", "Chat", output_data={"messages": intent_result.get("messages", []), "content": intent_json})
         _ps.node_skip("Performer")
 
     direct = direct_tools(catalog) if reminder is None and forget is None else []
@@ -777,6 +789,8 @@ def _run_pipeline(
     }
     try:
         chat_result = chat_agent.run(user_message, call_context=chat_context)
+        known = {m.get("id") for m in recalled_memories}
+        recalled_memories += [m for m in extract_tool_memories(chat_result) if m.get("id") not in known]  # 11-01
         # phase 9.3: a link in the reply must come from this turn's tools, the user's words or the recent conversation
         from ai.web.citations import checked_reply
         recent = [r.get("content") for r in violetdb.get_recent_messages(limit=30)]

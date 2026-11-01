@@ -288,10 +288,11 @@ class BaseAgent:
         max_attempts = max(1, env_int("LLM_MAX_RETRY_ATTEMPTS", 3))
         base_delay = env_float("LLM_RETRY_BASE_DELAY", 3.0)
         deadline = time.monotonic() + env_float("LLM_TOTAL_TIMEOUT_SECONDS", 180.0)
-        from ai.model_params import apply as apply_model_params
+        from ai.model_params import create as create_with_params
+        kwargs = {"cache_key": f"violet-{self.__class__.__name__}", **kwargs}     # 2026-11-01: provider cache routing
         for attempt in range(1, max_attempts + 1):
             try:
-                return client.chat.completions.create(**apply_model_params(kwargs))
+                return create_with_params(client, kwargs)
             except self.retryable_errors as exc:
                 if attempt >= max_attempts:
                     raise

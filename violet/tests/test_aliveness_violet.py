@@ -135,10 +135,11 @@ def test_the_mood_reaches_the_group_prompt(clean, monkeypatch):
               mentioned=True, platform_msg_id="1")
     assert mood.current(db)["value"] == pytest.approx(0.3)
     seen = {}
-    monkeypatch.setattr(llm, "decide", lambda system, user, tools=None: (seen.update(system=system)
+    monkeypatch.setattr(llm, "decide", lambda system, user, tools=None: (seen.update(system=system, user=user)
                                                                         or ({"action": "say", "messages": ["嘿嘿"]}, "f", 1)))
     e.decide(conv["id"])
-    assert "【你现在的心情】心情不错" in seen["system"]
+    # 2026-11-01 (token rework): with this decision's part (after the cached history), not in the system prompt
+    assert "【你现在的心情】心情不错" in seen["user"][1] and "【你现在的心情】" not in seen["system"]
 
 
 # ------------------------------------------------------------------------------------------------ groups

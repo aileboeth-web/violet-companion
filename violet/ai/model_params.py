@@ -70,4 +70,85 @@ def apply(kwargs: dict[str, Any]) -> dict[str, Any]:
     for name in EXTRA_PARAMS:
         if name in out and name not in allowed:
             out.pop(name)
+    return _cache_hints(out)
+
+
+# ------------------------------------------------------------------------------------------------ prompt caching
+# 2026-11-01 (token rework; user: GPT now, DeepSeek too, maybe Claude later -- "都做吧，可以选"). Every provider caches
+# the same beginning of a prompt; callers order their prompts for that and mark where the unchanging part ends with
+# "_cache_break" on a message, plus "cache_key" on the request. What is sent depends on VIOLET_LLM_PROVIDER:
+#   openai    prompt_cache_key (routes calls with the same beginning to the same cache)
+#   claude    cache_control on the marked messages (at most 4) -- Claude caches only what is marked
+#   deepseek  nothing: its cache is automatic
+#   other     nothing
+# A relay that refuses one of these fields gets it no more (create() retries once without it).
+PROVIDERS = ("auto", "openai", "deepseek", "claude", "other")
+CACHE_MARK = "_cache_break"
+_REFUSED: set[tuple[str, str]] = set()             # (model, field) a relay answered 400 for
+
+
+def provider(model: str | None) -> str:
+    chosen = env_str("VIOLET_LLM_PROVIDER", "auto").strip().lower()
+    if chosen in PROVIDERS and chosen != "auto":
+        return chosen
+    name = (model or "").lower()
+    if "claude" in name:
+        return "claude"
+    if "deepseek" in name:
+        return "deepseek"
+    if name.startswith(("gpt", "o1", "o3", "o4", "chatgpt")) or "/gpt" in name:
+        return "openai"
+    return "other"
+
+
+def _cache_hints(out: dict[str, Any]) -> dict[str, Any]:
+    model = str(out.get("model") or "")
+    kind = provider(model)
+    key = out.pop("cache_key", None)
+    messages = out.get("messages")
+    if isinstance(messages, list) and any(isinstance(m, dict) and CACHE_MARK in m for m in messages):
+        marks = 0
+        claude = kind == "claude" and (model, "cache_control") not in _REFUSED
+        cleaned = []
+        for m in messages:
+            if isinstance(m, dict) and CACHE_MARK in m:
+                m = {k: v for k, v in m.items() if k != CACHE_MARK}
+                if claude and marks < 4 and isinstance(m.get("content"), str) and m["content"]:
+                    m["content"] = [{"type": "text", "text": m["content"], "cache_control": {"type": "ephemeral"}}]
+                    marks += 1
+            cleaned.append(m)
+        out["messages"] = cleaned
+    if key and kind == "openai" and (model, "prompt_cache_key") not in _REFUSED:
+        out["extra_body"] = {**(out.get("extra_body") or {}), "prompt_cache_key": str(key)[:64]}
     return out
+
+
+def _refused_field(exc: Exception, request: dict[str, Any]) -> str | None:
+    """The cache field a relay refused (HTTP 400 naming it), else None."""
+    status = getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
+    if status not in (400, 422):
+        return None
+    text = str(exc).lower()
+    if "prompt_cache_key" in (request.get("extra_body") or {}) and "prompt_cache_key" in text:
+        return "prompt_cache_key"
+    sent_marks = any(isinstance(m, dict) and isinstance(m.get("content"), list) and
+                     any(isinstance(p, dict) and "cache_control" in p for p in m["content"])
+                     for m in request.get("messages") or [])
+    if sent_marks and ("cache_control" in text or "content" in text):
+        return "cache_control"
+    return None
+
+
+def create(client, kwargs: dict[str, Any]):
+    """client.chat.completions.create with the model's policy and the cache hints; a refused hint is dropped for
+    good and the call made once more without it."""
+    request = apply(kwargs)
+    try:
+        return client.chat.completions.create(**request)
+    except Exception as exc:
+        refused = _refused_field(exc, request)
+        if refused is None:
+            raise
+        _REFUSED.add((str(request.get("model") or ""), refused))
+        logger.warning("model %s: the relay refused %s; it is not sent any more", request.get("model"), refused)
+        return client.chat.completions.create(**apply(kwargs))

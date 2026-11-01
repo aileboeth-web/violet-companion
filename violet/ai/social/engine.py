@@ -62,6 +62,7 @@ class SocialEngine:
         self._lock = threading.Lock()
         self._timer_factory = timer_factory
         self._post_timer = None
+        self._anchors: dict[int, Any] = {}       # conversation -> first history message shown (_stepped)
 
     def start_posting(self, interval: float = 1500.0) -> None:
         """0.7.9: every ~25 minutes she may post on QQ 空间 (ai/social/qzone.py decides whether); 2026-10-30: and the
@@ -187,11 +188,17 @@ class SocialEngine:
         quiet = env_float("VIOLET_SOCIAL_QUIET_SECONDS", 15.0)
         if delay is None:
             delay = min(3.0, quiet) if urgent else quiet
+            limit = quiet * 4
             if not urgent and self._hot(conversation_id):
                 delay = min(6.0, quiet)                  # 2026-10-31: she is in this conversation -- keep up
+            elif not urgent:
+                # 2026-11-01 (token rework: one busy group made 82 decisions a day, almost all "silent", ~8.5k tokens
+                # each): nobody is calling her and she is not in the conversation -- what came in is looked at
+                # together, once, VIOLET_SOCIAL_BATCH_SECONDS after the first new message
+                limit = delay = max(quiet, env_float("VIOLET_SOCIAL_BATCH_SECONDS", 180.0))
             with self._lock:
                 first = self._first_pending.setdefault(conversation_id, time.monotonic())
-            delay = max(0.5, min(delay, quiet * 4 - (time.monotonic() - first)))
+            delay = max(0.5, min(delay, limit - (time.monotonic() - first)))
         with self._lock:
             old = self._timers.pop(conversation_id, None)
             if old is not None:
@@ -309,9 +316,11 @@ class SocialEngine:
         self._look_at_stickers(unread, adapter)
         from ai import test_mode
         testing = test_mode.active()       # 2026-10-30: no persona, no impressions, only the messages since the test began
-        history = self.store.messages(conversation_id, limit=max(10, env_int("VIOLET_SOCIAL_CONTEXT_MESSAGES", 30)))
+        size = max(10, env_int("VIOLET_SOCIAL_CONTEXT_MESSAGES", 30))
+        history = self.store.messages(conversation_id, limit=size * 2)
         from ai import context_cut
         history = context_cut.social_rows(conversation_id, history)      # 翻篇 / test mode
+        history = self._stepped(conversation_id, history, size)
         speakers = sorted({m["sender_id"] for m in history if m.get("sender_id") and not m["is_self"]})
         people = self.store.people(conv["channel"], speakers) if speakers else []
         if testing:                                        # who is who (the owner is marked), but no impressions
@@ -328,11 +337,12 @@ class SocialEngine:
         system = prompts.system_prompt(test_mode.TESTER_SOCIAL if testing else _persona_text(self.db, conv["channel"]),
                                        conv["kind"],
                                        testing=testing, obey_owner=obey, obey_admins=bool(admins))
-        user = prompts.user_prompt({**conv, "notes": None} if testing else conv, history=history,
-                                   unread_from=int(conv["watermark"] or 0), people=people,
-                                   owner_ids=owner_ids, today=today, last_said_at=(said or {}).get("at"),
-                                   now=self.db.now(), trigger=trigger, sticker_lines=sticker_lines,
-                                   admin_ids=admin_ids)
+        from ai import mood
+        user = prompts.user_prompt_parts({**conv, "notes": None} if testing else conv, history=history,
+                                         unread_from=int(conv["watermark"] or 0), people=people,
+                                         owner_ids=owner_ids, today=today, last_said_at=(said or {}).get("at"),
+                                         now=self.db.now(), trigger=trigger, sticker_lines=sticker_lines,
+                                         admin_ids=admin_ids, feeling="" if testing else mood.note(self.db))
         # 2026-10-30: tools here too (ai/social/tools.py) -- the owner's data and drawing only when he is asking
         owner_asked = (obey or testing) and any(str(m.get("sender_id")) in owner_ids for m in unread)
         tools = None
@@ -344,11 +354,8 @@ class SocialEngine:
         note = tools.note() if tools is not None else None
         if note:
             system = system + "\n\n" + note
-        from ai import mood, voice
-        feeling = "" if testing else mood.note(self.db)
-        if feeling:
-            system = system + "\n\n" + feeling
-        speaking = "" if testing else voice.prompt_note(automatic=conv["kind"] == "private")
+        from ai import voice
+        speaking = "" if testing else voice.prompt_note(automatic=conv["kind"] == "private", json_field=True)
         if speaking:                                     # 2026-10-31: she can send a voice message (11-01: always)
             system = system + "\n\n" + speaking
         try:
@@ -364,8 +371,8 @@ class SocialEngine:
             # 2026-10-30 (user, from dsh-aurabot-qq: 叫名字必回): someone called her by name / @ / poke -- asked once more
             trace.step("社交决定", 会话=conv["id"], 结果="有人叫她却不说话，再问一次")
             try:
-                decision, model, latency = llm.decide(system, user + "\n\n（有人直接叫了你、@了你或拍了拍你：这次要回应，"
-                                                      "哪怕一句话或一个表情包；只输出 JSON。）")
+                decision, model, latency = llm.decide(system, prompts.PromptParts((
+                    user[0], user[1] + "\n\n（有人直接叫了你、@了你或拍了拍你：这次要回应，哪怕一句话或一个表情包；只输出 JSON。）")))
             except llm.SocialLLMError:
                 pass
         if tools is not None and tools.image_asset_ids:
@@ -380,6 +387,20 @@ class SocialEngine:
             result["sticker_numbers"] = [re.sub(r"^-\s*(\d+)：.*$", r"\1", line) for line in sticker_lines]
             result["owner_known"] = bool(owner_ids)
         return result
+
+    def _stepped(self, conversation_id: int, rows: list[dict[str, Any]], size: int) -> list[dict[str, Any]]:
+        """The last `size` messages -- but starting at the same message for as long as at most 2 x size have piled up
+        since (2026-11-01, token rework: a window sliding by one message changed the beginning of every prompt)."""
+        if not rows:
+            return rows
+        anchor = self._anchors.get(conversation_id)
+        natural = rows[-size:]
+        if anchor is not None and anchor <= natural[0]["id"] and any(r["id"] == anchor for r in rows):
+            kept = [r for r in rows if r["id"] >= anchor]
+        else:
+            kept = natural
+        self._anchors[conversation_id] = kept[0]["id"]
+        return kept
 
     def _act(self, conv: dict[str, Any], decision: dict[str, Any], adapter, today: dict[str, int], newest: int,
              trigger: str, model: str, latency: int) -> dict[str, Any]:
@@ -401,6 +422,15 @@ class SocialEngine:
                 if row is not None:
                     decision = {**decision, "sticker": str(row["id"])}
         texts = [re.sub(r"\s+\n", "\n", str(t)).strip()[:500] for t in (texts or []) if str(t or "").strip()][:3]
+        from ai.chat_output import VOICE_LINE
+        spoken = " ".join(str(decision.get("voice") or "").split())
+        if spoken and action not in ("say", "reply"):
+            action = "say"                               # she wanted to say it
+        if spoken and not any(t.startswith(VOICE_LINE) for t in texts):
+            # 2026-11-01: the decision's own "voice" field (it was only <voice> markup inside a message before, which
+            # the JSON format never mentioned); written now, said afterwards, a long one as several voice messages
+            from ai import voice as voice_mod
+            texts.append(VOICE_LINE + spoken[:voice_mod.max_chars()])
         reply_to = str(decision.get("reply_to") or "").lstrip("#").strip() or None
         try:
             check_back = float(decision.get("check_back_minutes") or 0)

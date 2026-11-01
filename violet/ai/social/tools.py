@@ -43,6 +43,7 @@ class SocialTools:
         self.names: set[str] = set()
         self.image_asset_ids: list[int] = []
         self.called: list[str] = []
+        self.owner_only: set[str] = set()
         from ai.web.tool_guard import WebToolGuard
         self.web_guard = WebToolGuard("")
         self._build()
@@ -58,18 +59,20 @@ class SocialTools:
         except Exception:                                      # noqa: BLE001 -- no tools this time
             logger.exception("social tools: discovery failed")
             catalog = None
+        # 2026-11-01 (token rework): the same tool list whoever is talking -- a list that changed with the speaker made
+        # every switch a full cache miss. The owner's data and drawing are refused in run() when he is not the one asking.
         for name, tool in sorted((catalog.tools if catalog else {}).items()):
             if "chat" not in tool.agents or tool.permission != "read" or tool.needs_approval:
                 continue
-            public = name.startswith("violet-web__")
-            if not public and not self.owner_asked:
-                continue
+            if not name.startswith("violet-web__"):
+                self.owner_only.add(name)
             self.schemas.append(tool_schema_to_openai_tool(name, tool.description, tool.input_schema))
             self.names.add(name)
         from ai.images.service import images_enabled
-        if self.owner_asked and images_enabled():
+        if images_enabled():
             self.schemas.append(IMAGE_SCHEMA)
             self.names.add("create_image")
+            self.owner_only.add("create_image")
 
     def note(self) -> str | None:
         """What she is told about them (facts; added to the system prompt)."""
@@ -89,6 +92,9 @@ class SocialTools:
         self.called.append(name)
         if name not in self.names:
             result = json.dumps({"ok": False, "error_code": "UNKNOWN_TOOL", "message": "这次不能用这个工具"}, ensure_ascii=False)
+        elif name in self.owner_only and not self.owner_asked:
+            result = json.dumps({"ok": False, "error_code": "OWNER_ONLY",
+                                 "message": "找你的人不是主人：主人的私人数据和画图都不能用，照实说做不到"}, ensure_ascii=False)
         else:
             denial = self.web_guard.check(name, args)
             if denial is not None:

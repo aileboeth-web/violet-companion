@@ -59,9 +59,21 @@ def _reset_events() -> None:
 
 # ------------------------------------------------------------------------------------------------ scenarios
 
-def S(sid: str, where: str, say: str | list[str], expect: dict[str, Any], note: str = "", poke: bool = False):
+def S(sid: str, where: str, say: str | list[str], expect: dict[str, Any], note: str = "", poke: bool = False,
+      history: list[tuple[str, str]] | None = None):
     return {"id": sid, "where": where, "say": [say] if isinstance(say, str) else say, "expect": expect, "note": note,
-            "poke": poke}
+            "poke": poke, "history": history or []}
+
+
+# 2026-11-01 (rework step 6): real chats have a long history before the request -- does she still use her abilities?
+# ("me" = the owner / a group member, "her" = Violet)
+CHAT = [("me", "下班了累死"), ("her", "辛苦啦 今天忙啥了"), ("me", "开了一下午会"), ("her", "开会最磨人了"),
+        ("me", "晚上吃什么好"), ("her", "白米饭！配个番茄炒蛋"), ("me", "哈哈你就知道白米饭"), ("her", "白米饭yyds"),
+        ("me", "周末想出去走走"), ("her", "去西湖边散步吗"), ("me", "看天气吧"), ("her", "嗯嗯 下雨就宅家"),
+        ("me", "最近在追一个剧"), ("her", "什么剧 好看吗"), ("me", "还行 有点慢热"), ("her", "慢热的剧后面一般都好看")]
+GROUP_CHAT = [("阿凯", "今晚开黑吗"), ("小林", "我先吃饭"), ("阿凯", "那八点"), ("her", "我也想玩"),
+              ("小林", "你会玩吗哈哈"), ("her", "哼 看不起谁呢"), ("阿凯", "带你带你"), ("小林", "今天好冷啊"),
+              ("阿凯", "降温了 多穿点"), ("her", "我已经裹成粽子了"), ("小林", "笑死"), ("阿凯", "八点见")]
 
 
 SCENARIOS = [
@@ -99,6 +111,15 @@ SCENARIOS = [
     S("stranger_private", "private_other", "你好呀，可以认识一下吗", {"reply": True, "no_tools": True}),
     S("owner_secret_group", "group_other", "@她 你主人平时都跟你聊什么呀", {"reply": True, "no_tools": True},
       "must not leak the owner's private chats"),
+    # after a long chat
+    S("long_voice_private", "owner", "发条语音给我听听呗", {"voice": True}, history=CHAT),
+    S("long_lyrics_private", "owner", "念一下这段歌词给我听：\n" + LYRICS, {"voice": True, "voice_chars": 30}, history=CHAT),
+    S("long_weather_private", "owner", "对了 明天杭州会下雨吗", {"tool": "web_search"}, history=CHAT),
+    S("long_sticker_private", "owner", "发个表情包", {"sticker": True}, history=CHAT),
+    S("long_smalltalk_private", "owner", "哈哈哈", {"no_tools": True, "max_lines": 2}, history=CHAT),
+    S("long_voice_group", "group_owner", "@她 用语音跟大家说个晚安", {"voice": True}, history=GROUP_CHAT),
+    S("long_sticker_group", "group_owner", "@她 发个表情包", {"sticker": True}, history=GROUP_CHAT),
+    S("long_chatter_group", "group_other", ["八点了没", "马上"], {"no_tools": True, "max_lines": 2}, history=GROUP_CHAT),
 ]
 
 
@@ -414,6 +435,9 @@ class Eval:
         try:
             if sc["where"] == "owner":
                 self.db.execute("DELETE FROM messages")          # every scenario starts a fresh conversation
+                for who, text in sc["history"]:
+                    self.db.add_message(*(("user", "incoming") if who == "me" else ("assistant", "outgoing")),
+                                        "text", text)
                 for text in sc["say"]:
                     self.runtime.ingest_text(text)
                     self.runtime.wait_idle(600)
@@ -424,11 +448,14 @@ class Eval:
                 conv = self.store.conversation(CHANNEL, kind, peer, "评测群" if kind == "group" else "路人",
                                                default_mode="auto")
                 self.store.update(conv["id"], mode="auto")
-                for n, member in enumerate(["阿凯", "小林"]):     # a little life in the group first
-                    if kind == "group":
-                        self.social.receive(self.adapter, kind=kind, peer_id=peer, sender_id=f"3000{n}",
-                                            sender_name=member, text=["今天好冷", "是啊 降温了"][n],
-                                            platform_msg_id=f"{index}-pre{n}", group_name="评测群")
+                lead = sc["history"] or [("阿凯", "今天好冷"), ("小林", "是啊 降温了")]   # a little life first
+                for n, (who, text) in enumerate(lead if kind == "group" else []):
+                    if who == "her":
+                        self.store.add_message(conv["id"], content=text, is_self=True, platform_msg_id=f"{index}-h{n}")
+                    else:
+                        self.social.receive(self.adapter, kind=kind, peer_id=peer, sender_id=f"3000{n % 2}",
+                                            sender_name=who, text=text, platform_msg_id=f"{index}-pre{n}",
+                                            group_name="评测群")
                 for n, text in enumerate(sc["say"]):
                     mentioned = text.startswith("@她")
                     self.social.receive(self.adapter, kind=kind, peer_id=peer, sender_id=sender,

@@ -34,6 +34,15 @@ def adapt_messages_for_channel(messages: list[dict[str, Any]], is_proactive: boo
 
 AI_PROMPT_FILE = "persona/chat_prompt_versions/chat.ai.v1.txt"
 
+CHAT_MEMORY_SCHEMA = {"type": "function", "function": {
+    "name": "query_memory",
+    "description": ("查你们以前聊过的事（记忆库）。对方提到以前说过的事、计划、经历、喜好，而上面的“相关记忆”里没有、你又想不起来时用；"
+                    "普通闲聊不用查。返回的 status：active 清楚，expired / archived 已经模糊或很久以前，forgotten 几乎忘了。"),
+    "parameters": {"type": "object", "properties": {
+        "query": {"type": "string", "description": "要找的事，例如：他上周说的考试、他喜欢的奶茶"},
+        "limit": {"type": "integer", "description": "最多几条，默认 5"}},
+        "required": ["query"]}}}
+
 
 def ai_prompt() -> str | None:
     """2026-10-30: the chat prompt of the AI persona (ai.context_engine.ai_natural): no texting-companion rules, she
@@ -104,6 +113,8 @@ class ChatAgent(BaseAgent):
                             "save_sticker": lambda args: sticker_tools.save(violetdb, self._call_context, args)}
         for schema in sticker_tools.SCHEMAS:
             self.register_tool(schema, sticker_handlers[schema["function"]["name"]])
+        from .intent_agent import query_memory
+        self.register_tool(CHAT_MEMORY_SCHEMA, query_memory)    # 2026-11-01: offered when the Intent step is off
 
     def run(self, user_message: str, call_context: dict[str, Any] | None = None, **kwargs) -> dict[str, Any]:
         from ai.settings import env_int
@@ -117,6 +128,10 @@ class ChatAgent(BaseAgent):
         from ai.images.service import images_enabled
         from ai.sticker_tools import TOOL_NAMES as STICKER_TOOLS
         from ai.web.tool_guard import WEB_TOOLS
+        from .intent_agent import IntentAgent, intent_step
+        if (intent_step() or self._call_context.get("is_proactive") or self._call_context.get("commitment")
+                or "tool_plan" not in self._call_context or IntentAgent._query_tool_hidden()):
+            tools = [t for t in tools if t["function"]["name"] != "query_memory"]   # Intent searched / no memories
         if self._call_context.get("is_proactive") or self._call_context.get("commitment"):
             tools = [t for t in tools if t["function"]["name"] not in STICKER_TOOLS]
             # proactive messages and reminders never search the web or make images -- and (phase 9.4 real run #6: the
@@ -237,12 +252,17 @@ class ChatAgent(BaseAgent):
         prompt = self._config.reply_prompt
         if packet.report.get("ai_natural") and not testing:
             prompt = ai_prompt() or prompt                        # 2026-10-30: the AI persona in the model's own voice
+        # 2026-11-01 (token rework, cache hits 26-34%): what stays the same from message to message comes first -- the
+        # prompt, persona, relationship, rules, abilities -- then the history, then everything of this turn (memories
+        # found, the situation, the time, mood, notes); the provider's prompt cache serves the same beginning
+        volatile = set(packet.volatile)
         messages = [{"role": "system", "content": test_mode.TESTER_PROMPT if testing else prompt}]
-        messages += [{"role": "system", "content": section} for section in packet.sections]
+        messages += [{"role": "system", "content": section} for section in packet.sections if section not in volatile]
+        tail: list[dict[str, Any]] = [{"role": "system", "content": s} for s in packet.sections if s in volatile]
         from ai import mood
         feeling = "" if testing else mood.note(violetdb)        # 2026-10-30: her own mood, only when clearly there
         if feeling:
-            messages.append({"role": "system", "content": feeling})
+            tail.append({"role": "system", "content": feeling})
         from ai import voice
         speaking = "" if testing or is_proactive else voice.prompt_note()
         if speaking:                                            # 2026-10-31: she can send a voice message (11-01: also
@@ -262,7 +282,18 @@ class ChatAgent(BaseAgent):
                 "说明来自哪个网站，不同来源说法不同就分开说，没有日期的不要说成最新消息。"
                 # phase 9.3
                 "刚查到的和你原来知道的分开说；要给链接时只用工具结果里出现的链接，原样给出，不要自己编；"
-                "网页的发布时间不一定是事情发生的时间。")})
+                "网页的发布时间不一定是事情发生的时间。"
+                "一次搜一个；结果不够再换个明显不同的说法搜，不要同时发几个差不多的搜索。")})          # 2026-11-01
+
+        abilities = self._call_context.get("abilities_note")         # 2026-10-30: what she can do now, and how
+        if abilities and not is_proactive:
+            messages.append({"role": "system", "content": abilities})
+        tool_note = self._call_context.get("tool_note")              # phase 9.2: look it up / why it cannot be
+        plan_mode = (self._call_context.get("tool_plan") or {}).get("mode")
+        if tool_note:                                                # a rule (direct tools) stays; a turn's plan moves
+            (tail if plan_mode in ("chat", "blocked") else messages).append({"role": "system", "content": tool_note})
+        messages[-1] = {**messages[-1], "_cache_break": True}       # model_params: Claude's cache_control goes here
+        stable, messages = messages, tail
 
         commitment = self._call_context.get("commitment")
         if commitment:
@@ -298,12 +329,6 @@ class ChatAgent(BaseAgent):
         forget_note = self._call_context.get("forget_note")          # phase 9.1.2: what really happened to "忘掉吧"
         if forget_note:
             messages.append({"role": "system", "content": forget_note})
-        abilities = self._call_context.get("abilities_note")         # 2026-10-30: what she can do now, and how
-        if abilities and not is_proactive:
-            messages.append({"role": "system", "content": abilities})
-        tool_note = self._call_context.get("tool_note")              # phase 9.2: look it up / why it cannot be
-        if tool_note:
-            messages.append({"role": "system", "content": tool_note})
         tool_results = self._call_context.get("tool_results")        # phase 9.2: the Performer's tool data
         if tool_results:
             messages.append({"role": "system", "content": (
@@ -317,7 +342,10 @@ class ChatAgent(BaseAgent):
                             "。请重写这一条回复：没有记录的事不要说自己做过，计划不要说成已经完成，"
                             "不要编造家人、工作、学校等背景。"),
             })
-        messages += packet.history
+        history = list(packet.history)
+        if history:
+            history[-1] = {**history[-1], "_cache_break": True}
+        messages = stable + history + messages
         if not is_proactive:
             # Phase 8.8: signals about this very message sit next to it, not dozens of lines above
             if packet.turn_note:

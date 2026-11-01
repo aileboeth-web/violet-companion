@@ -295,9 +295,12 @@ def test_group_tools_web_for_everyone_the_owners_data_only_for_him(violetdb, mon
     monkeypatch.setenv("VIOLET_IMAGE_ENABLED", "1")
     stranger = SocialTools(violetdb, owner_asked=False, turn_key="t")
     owner = SocialTools(violetdb, owner_asked=True, turn_key="t")
-    assert stranger.names == {"violet-web__web_search"} and "不是主人" in stranger.note()
-    assert owner.names == {"violet-web__web_search", "android-phone__battery", "create_image"}   # never a changing one
-    assert json.loads(stranger.run("android-phone__battery", {}))["error_code"] == "UNKNOWN_TOOL"
+    # 2026-11-01 (token rework): the same list for everyone (a list that changed with the speaker missed the cache);
+    # the owner's data and drawing are refused when he is not the one asking
+    assert owner.names == stranger.names == {"violet-web__web_search", "android-phone__battery", "create_image"}
+    assert "不是主人" in stranger.note()                                                            # never a changing one
+    assert json.loads(stranger.run("android-phone__battery", {}))["error_code"] == "OWNER_ONLY"
+    assert json.loads(stranger.run("create_image", {"subject": "other"}))["error_code"] == "OWNER_ONLY"
     monkeypatch.setenv("VIOLET_SOCIAL_TOOLS", "0")
     assert SocialTools(violetdb, owner_asked=True, turn_key="t").names == set()
 

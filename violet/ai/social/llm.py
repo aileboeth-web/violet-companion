@@ -63,33 +63,39 @@ def parse_object(text: str | None) -> dict[str, Any]:
     return value
 
 
-def decide(system: str, user: str, source: str = "social", tools=None,
+def decide(system: str, user: str | tuple[str, str], source: str = "social", tools=None,
            max_rounds: int = 4) -> tuple[dict[str, Any], str, int]:
     """(the decision object, model, latency ms). Raises SocialLLMError. source: for the token ledger (ai/usage.py).
-    tools (2026-10-30): an ai.social.tools.SocialTools -- the model may call them first, then answers with the JSON."""
-    from ai.model_params import apply as apply_model_params
+    tools (2026-10-30): an ai.social.tools.SocialTools -- the model may call them first, then answers with the JSON.
+    user (2026-11-01): one text, or (what changes slowly, this decision) -- the first part ends the cached beginning."""
+    from ai.model_params import CACHE_MARK, create
     model = model_name()
     if not model:
         raise SocialLLMError("还没有设置 Chat 模型")
     started = time.monotonic()
-    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    messages = [{"role": "system", "content": system, CACHE_MARK: True}]
+    if isinstance(user, (tuple, list)):
+        messages += [{"role": "user", "content": user[0], CACHE_MARK: True}, {"role": "user", "content": user[1]}]
+    else:
+        messages.append({"role": "user", "content": user})
     schemas = list(getattr(tools, "schemas", None) or [])
     from ai import usage
     try:
         client = _client()
         content = None
         for round_index in range(max_rounds + 1):
-            request = {"model": model, "messages": messages, "temperature": 0.8, "max_tokens": 700}
+            request = {"model": model, "messages": messages, "temperature": 0.8, "max_tokens": 700,
+                       "cache_key": f"violet-{source}"}
             if schemas and round_index < max_rounds:
                 request.update(tools=schemas, tool_choice="auto")
-            response = client.chat.completions.create(**apply_model_params(request))
+            response = create(client, request)
             usage.record(source, getattr(response, "model", None) or model, getattr(response, "usage", None))
             message = response.choices[0].message
             calls = getattr(message, "tool_calls", None) or []
             if not calls or "tools" not in request:
                 content = message.content
                 break
-            messages.append(message.model_dump(exclude_none=True))
+            messages.append(message.model_dump(exclude_none=True))           # appended: the beginning stays cached
             for call in calls:
                 try:
                     args = json.loads(call.function.arguments or "{}")

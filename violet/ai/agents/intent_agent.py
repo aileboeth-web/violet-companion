@@ -16,6 +16,51 @@ from .base_agent import BaseAgent
 NO_MEMORY_NOTE = "（记忆库里目前没有可查询的事件记忆，本轮不提供 query_memory 工具，请直接输出意图 JSON。）"
 
 
+def query_memory(args: dict) -> dict:
+    """The query_memory tool (Intent's, and since 2026-11-01 Chat's own when the Intent step is off)."""
+    query = recall_search_text(args.get("query", ""))
+    if not query:
+        return {"memories": []}
+    violetdb.refresh_event_states()
+    memories = violetdb.search_event_memories(
+        query=query,
+        category=args.get("category"),
+        limit=int(args.get("limit", 5)),
+        min_similarity=0.35,
+        recall=True,
+    )
+    for memory in memories:
+        # Bookkeeping only: being retrieved does not make a memory more important.
+        violetdb.mark_event_memory_recalled(memory["id"], weight_bonus=0.0)
+    return {
+        "note": "memory_strength 越大，表示记忆越稳固；similarity 越大，表示和本次查询越相关；"
+                "kind/progress/event_time 描述这是长期事实还是事件，以及事件进展",
+        "memories": [
+            {
+                "id": memory["id"],
+                "content": memory["content"],
+                "category": memory["category"],
+                "kind": memory.get("kind"),
+                "progress": memory.get("progress"),
+                "event_time": memory.get("event_time"),
+                "status": memory["status"],
+                "memory_strength": round(memory["forget_weight"], 2),
+                "similarity": round(memory.get("similarity", 0), 2),
+                "retrieval": memory.get("retrieval"),
+            }
+            for memory in memories
+            if memory["status"] != "deleted"
+        ]
+    }
+
+
+def intent_step() -> bool:
+    """2026-11-01 (capability rework, scenario eval: Intent took 7-22 s and ~7.7k tokens per message, and marked
+    voice / pictures as "not configured" because it only knew the external tools): off by default -- Chat decides
+    about tools itself and looks memories up with query_memory. VIOLET_INTENT_STEP=1 restores the Intent call."""
+    return env_bool("VIOLET_INTENT_STEP", False)
+
+
 class IntentAgent(BaseAgent):
     """
     意图识别 agent。
@@ -39,40 +84,7 @@ class IntentAgent(BaseAgent):
         self.register_tool(schema=QUERY_MEMORY_SCHEMA, handler=self._tool_query_memory)
 
     def _tool_query_memory(self, args: dict) -> dict:
-        query = recall_search_text(args.get("query", ""))
-        if not query:
-            return {"memories": []}
-        violetdb.refresh_event_states()
-        memories = violetdb.search_event_memories(
-            query=query,
-            category=args.get("category"),
-            limit=int(args.get("limit", 5)),
-            min_similarity=0.35,
-            recall=True,
-        )
-        for memory in memories:
-            # Bookkeeping only: being retrieved does not make a memory more important.
-            violetdb.mark_event_memory_recalled(memory["id"], weight_bonus=0.0)
-        return {
-            "note": "memory_strength 越大，表示记忆越稳固；similarity 越大，表示和本次查询越相关；"
-                    "kind/progress/event_time 描述这是长期事实还是事件，以及事件进展",
-            "memories": [
-                {
-                    "id": memory["id"],
-                    "content": memory["content"],
-                    "category": memory["category"],
-                    "kind": memory.get("kind"),
-                    "progress": memory.get("progress"),
-                    "event_time": memory.get("event_time"),
-                    "status": memory["status"],
-                    "memory_strength": round(memory["forget_weight"], 2),
-                    "similarity": round(memory.get("similarity", 0), 2),
-                    "retrieval": memory.get("retrieval"),
-                }
-                for memory in memories
-                if memory["status"] != "deleted"
-            ]
-        }
+        return query_memory(args)
 
     def build_context_messages(self, user_message: str) -> list[dict[str, Any]]:
         """

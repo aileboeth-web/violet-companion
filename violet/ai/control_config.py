@@ -88,6 +88,12 @@ def _agent_settings() -> list[Setting]:
 SETTINGS: list[Setting] = [
     Setting("LLM_API_URL", "API 地址", "api", "url", "now", "OpenAI 兼容接口，例如 https://relay.example/v1"),
     Setting("LLM_API_KEY", "API Key", "api", "secret", "now", "只能替换，不能查看；保存后立即用于新的调用"),
+    # 2026-11-01 (token rework; user: GPT now, DeepSeek too, maybe Claude later -- "都做吧，可以选")
+    Setting("VIOLET_LLM_PROVIDER", "模型服务商（用于缓存）", "api", "choice", "now",
+            "让提示词缓存命中更多、更省钱：OpenAI 会带缓存分组参数，Claude 会标出可缓存的部分，DeepSeek 自动缓存；"
+            "自动识别 = 按模型名判断；中转站不认这些参数时会自动不再发送", "auto",
+            choices=(("auto", "自动识别"), ("openai", "OpenAI（GPT）"), ("deepseek", "DeepSeek"), ("claude", "Claude"),
+                     ("other", "其他"))),
     *_agent_settings(),
     Setting("LLM_REQUEST_TIMEOUT_SECONDS", "单次请求超时（秒）", "api", "float", "now", "", 90.0, 5, 600),
     Setting("LLM_CONNECT_TIMEOUT_SECONDS", "连接超时（秒）", "api", "float", "now", "", 10.0, 1, 120),
@@ -132,6 +138,10 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_CHAT_TOOLS_DIRECT", "查询工具直接交给回复", "features", "bool", "now",
             "开：每一轮回复都能直接用连上的只读工具（联网搜索、课表、手机状态等），自己判断要不要查；"
             "关：只在意图识别判断要查时才给（以前的做法，少一点 token，但容易漏查）", True),
+    # 2026-11-01 (capability rework: the Intent call cost 7-22 s and ~7.7k tokens per message)
+    Setting("VIOLET_INTENT_STEP", "回复前先做意图识别", "features", "bool", "now",
+            "关（推荐）：她直接回复，自己决定要不要用工具、查记忆，快一倍、省一半 token；"
+            "开：先多调用一次模型判断意图（以前的做法，出问题时可以切回来）", False),
     # 2026-10-30 (user: "比较自由调用工具，在聊天的时候知道要用什么工具")
     Setting("VIOLET_CHAT_ACTION_TOOLS", "会改动东西的工具也交给回复", "features", "bool", "now",
             "开：会改动东西的工具（例如手机上的操作）也由她在聊天里直接调用，不再单独建任务；没单独放行的，每次都先问你"
@@ -192,6 +202,9 @@ SETTINGS: list[Setting] = [
             "决定在群里说不说、说什么用的模型；留空 = 和 Chat 一样。群消息多时可以换便宜一点的模型", optional=True),
     Setting("VIOLET_SOCIAL_QUIET_SECONDS", "等群里安静几秒再决定", "social", "float", "now",
             "有人一直在说时先等一等，攒在一起看一次（被 @ 或私聊时只等 3 秒）；越短越及时，模型调用也越多", 15.0, 3, 600),
+    Setting("VIOLET_SOCIAL_BATCH_SECONDS", "没人叫她时，群消息攒多久看一次（秒）", "social", "float", "now",
+            "没人 @ 她、她也没在聊的时候，从第一条新消息起最多等这么久，一起看一次再决定要不要插话；"
+            "被叫到或正在聊时照样几秒内回。越长越省 token，插话也越晚", 180.0, 15, 1800),
     Setting("VIOLET_SOCIAL_CONTEXT_MESSAGES", "每次看多少条聊天记录", "social", "int", "now",
             "决定时给模型看最近多少条消息（包括已经看过的）", 30, 10, 200),
     Setting("VIOLET_SOCIAL_OWNER_DIGEST", "把群里的事告诉你", "social", "bool", "now",

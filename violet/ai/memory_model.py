@@ -507,11 +507,14 @@ _REMINDER_CLOCK_RE = re.compile(
     rf"(?P<part>{_DAY_PART_RE})?\s*(?:(?P<h24>[0-9]{{1,2}})[:：](?P<m24>[0-9]{{2}})"
     rf"|(?P<hour>{_CN_NUM})\s*[点时](?:\s*(?P<half>半)|\s*(?P<quarter>一刻|三刻)|\s*(?P<minute>{_CN_NUM})\s*分?)?)")
 _DAY_PART_ONLY_RE = re.compile(_DAY_PART_RE)
+# 2026-11-01 (scenario eval: "十分钟后提醒我喝水" was refused -- only 今天 / 明天 / 后天 were understood)
+_RELATIVE_RE = re.compile(rf"(?:过\s*)?(?P<n>{_CN_NUM}|半)\s*(?P<half>个半)?\s*个?\s*(?P<unit>分钟|分|小时|钟头|个钟)"
+                          r"\s*(?P<after>以后|之后|后)?")
 _PART_DEFAULTS = {"凌晨": "05:00", "早晨": "08:00", "清早": "07:00"}
 _LEADING_FILLER_RE = re.compile(r"^(?:我|你|要|得|需要|该|去|就|再|能|可以|可不可以|能不能|麻烦|请|记得|帮我|到时候?)+")
 _TRAILING_FILLER_RE = re.compile(r"(?:一下|吧|哦|噢|啊|呀|哈|啦|嘛|呗|喔|哟|吗|么|呢|好吗|好不好|行吗)+$")
 _REMINDER_REASONS = {
-    "no_date": "没能确定是哪一天（现在只能自动设“今天 / 明天 / 后天”这类说法的提醒）",
+    "no_date": "没能确定是哪一天（能自动设的是“今天 / 明天 / 后天几点”和“十分钟后 / 半小时后”这类说法）",
     "ambiguous_time": "时间的说法不止一个或说不通，没法确定",
     "no_content": "没听出要提醒什么事",
     "too_long": "这句话太长，没法确定要提醒的到底是哪件事",
@@ -569,6 +572,35 @@ def _clock_of(match: re.Match, part: str | None) -> tuple[int, int] | None:
     return hour, minute
 
 
+def _reminder_content(rest: str) -> str:
+    rest = re.sub(r"(?:记得|帮我|麻烦你?|请你?|你)?提醒(?:一下)?我(?:一下)?", " ", rest)
+    pieces = [re.sub(r"\s+", "", c) for c in _CLAUSE_SPLIT_RE.split(rest)]
+    pieces = [_TRAILING_FILLER_RE.sub("", _LEADING_FILLER_RE.sub("", p)) for p in pieces if p]
+    return _TRAILING_FILLER_RE.sub("", _LEADING_FILLER_RE.sub("", "".join(pieces)))
+
+
+def _relative_reminder(result: dict, text: str, relative: list[re.Match], now: datetime) -> dict:
+    """"十分钟后 / 半小时后 / 过两个小时 / 一个半小时以后提醒我…" (2026-11-01)."""
+    m = relative[0]
+    other = text[:m.start()] + " " + text[m.end():]
+    if len(relative) > 1 or any(c.group("h24") or c.group("hour") for c in _REMINDER_CLOCK_RE.finditer(other)):
+        return {**result, "reason": "ambiguous_time"}                  # "十分钟后，三点提醒我"
+    amount = 0.5 if m.group("n") == "半" else _cn_number(m.group("n"))
+    if amount is None:
+        return {**result, "reason": "ambiguous_time"}
+    amount += 0.5 if m.group("half") else 0
+    minutes = amount * (1 if m.group("unit") in ("分钟", "分") else 60)
+    if not 1 <= minutes <= 24 * 60:
+        return {**result, "reason": "ambiguous_time"}
+    due = (now + timedelta(minutes=minutes)).replace(second=0, microsecond=0)
+    content = _reminder_content(other)
+    if not content:
+        return {**result, "reason": "no_content"}
+    if len(content) > env_int("VIOLET_REMINDER_MAX_CONTENT_CHARS", 20):
+        return {**result, "reason": "too_long"}
+    return {**result, "ok": True, "reason": "parsed", "content": content, "due_at": due.isoformat()}
+
+
 def parse_reminder_request(text: str | None, now: datetime | None = None) -> dict:
     """Deterministic reading of an explicit "提醒我…" request. Pure: no DB, no LLM.
 
@@ -591,6 +623,9 @@ def parse_reminder_request(text: str | None, now: datetime | None = None) -> dic
     if len(triggers) > 1:
         return {**result, "reason": "several_requests"}
     dates = {_REMINDER_DATES[d] for d in _REMINDER_DATE_RE.findall(text)}
+    relative = [m for m in _RELATIVE_RE.finditer(text) if m.group("after") or m.group(0).lstrip().startswith("过")]
+    if relative and not dates:
+        return _relative_reminder(result, text, relative, now or now_china())
     if not dates:
         return {**result, "reason": "no_date"}
     clocks = [m for m in _REMINDER_CLOCK_RE.finditer(text) if m.group("h24") or m.group("hour")]

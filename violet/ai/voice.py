@@ -230,15 +230,16 @@ def to_file(audio: bytes, fmt: str = "silk") -> Path:
     return path
 
 
-def prompt_note(automatic: bool = True) -> str:
+def prompt_note(automatic: bool = True, json_field: bool = False) -> str:
     """How she speaks (only when the voice is ready); added to every prompt, also to personas with their own
     <voice> markup (2026-11-01: those said 语音不要滥用 and she hardly used it). automatic: replies there get a voice
-    line of their own (private chats; not groups)."""
+    line of their own (private chats; not groups). json_field: the social decision's "voice" field instead of markup."""
     if not ready():
         return ""
     auto_line = ("你打的字会自动挑一句补发成语音，不用你管；" if automatic and auto() else "")
+    where = "写进 JSON 的 voice 字段" if json_field else "整段放进 <voice></voice>"
     return (f"【语音】你会发语音（用你自己的声音）。{auto_line}"
-            f"对方让你说话、念东西、唱歌、想听你声音时，一定要发语音：把要说的内容整段放进 <voice></voice>"
+            f"对方让你说话、念东西、唱歌、想听你声音时，一定要发语音：把要说的内容{where}"
             f"（最多 {max_chars()} 字，长的会自动拆成几条语音一条条发，歌词、故事都可以整段放进去），"
             "这段话也会先作为文字发出去，不用再重复打一遍。你没法按旋律唱歌，被叫唱歌时就用语音把歌词念出来，"
             "可以顺口说一句自己唱得不好。语音要几分钟才生成好，别说马上发。")

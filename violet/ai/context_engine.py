@@ -140,6 +140,16 @@ class ContextPacket:
     history: list[dict[str, Any]]
     report: dict[str, Any] = field(default_factory=dict)
     turn_note: str | None = None        # phase 8.8: goes right before the user's message (natural chat only)
+    volatile: list[str] = field(default_factory=list)   # 2026-11-01: those of `sections` that change message by message
+
+
+# 2026-11-01 (token rework: cache hits 26-34%): sections that change with every message (picked by the user's words, the
+# clock, the turn) -- Chat puts them after the history so the same beginning of every call can come from the provider's
+# prompt cache; the persona, the relationship and the preferences stay in front
+_HISTORY_ANCHORS: dict[tuple[str, str], Any] = {}      # (database, mode) -> id of the first history message shown
+
+VOLATILE_SECTIONS = {"profile", "situation", "commitments", "recall", "restricted", "known_keys", "onboarding", "base",
+                     "persona_dynamic", "violet_life", "external_info", "social", "ai_experience"}
 
 
 class ContextEngine:
@@ -527,6 +537,12 @@ class ContextEngine:
         if env_bool("VIOLET_STICKERS", True):
             able.append("发自己收藏的表情包")
         try:
+            from ai import voice
+            if voice.ready():
+                able.append("发语音（用你自己的声音）")              # 2026-11-01: was missing
+        except Exception:                                   # noqa: BLE001
+            pass
+        try:
             from ai.tool_manager import tool_store
             if any(s.get("name") == "android-phone" for s in tool_store().custom_servers()):
                 able.append("查看主人手机的一些状态（前台应用、电量等，只读）")
@@ -770,27 +786,44 @@ class ContextEngine:
         turn_limit = env_int("VIOLET_CONTEXT_HISTORY_TURNS", 24)
         limit = limit or max(env_int("VIOLET_CONTEXT_HISTORY_MESSAGES", 20), turn_limit * 3 if turn_limit > 0 else 0)
         max_chars = env_int("VIOLET_CONTEXT_HISTORY_MAX_CHARS", 4000)
-        turns, times = [], {}
+        stepped = env_bool("VIOLET_CONTEXT_STABLE_HISTORY", True) and mode in ("chat", "proactive")
+        turns, times, ids = [], {}, {}
         from ai import context_cut
-        for row in context_cut.owner_rows(self.db.get_recent_messages(limit=limit)):   # 翻篇 / test mode
+        rows = self.db.get_recent_messages(limit=limit * 2 if stepped else limit)
+        for row in context_cut.owner_rows(rows):                                       # 翻篇 / test mode
             content = row.get("content") or ""
             if row["message_type"] != "text":
                 content = f"[{row['message_type']}] {content}".strip()
             turn = {"role": "user" if row["role"] == "user" else "assistant", "content": self._mask(content, mask_terms)}
-            times[id(turn)] = row.get("created_at")
+            times[id(turn)], ids[id(turn)] = row.get("created_at"), row.get("id")
             turns.append(turn)
-        total, speakers = 0, 0
-        kept: list[dict[str, Any]] = []
-        for turn in reversed(turns):
-            if turn_limit > 0 and (not kept or kept[-1]["role"] != turn["role"]):
-                speakers += 1
-                if speakers > turn_limit:
+
+        def window(scale: int) -> list[dict[str, Any]]:
+            total, speakers, out = 0, 0, []
+            for turn in reversed(turns):
+                if turn_limit > 0 and (not out or out[-1]["role"] != turn["role"]):
+                    speakers += 1
+                    if speakers > turn_limit * scale:
+                        break
+                total += len(turn["content"])
+                if total > max_chars * scale and out:
                     break
-            total += len(turn["content"])
-            if total > max_chars and kept:
-                break
-            kept.append(turn)
-        kept.reverse()
+                out.append(turn)
+            out.reverse()
+            return out
+        kept = window(1)
+        if stepped and kept:
+            # 2026-11-01 (token rework): the window starts at the same message for many turns -- the provider's prompt
+            # cache serves the unchanged beginning -- and jumps ahead only when it has grown to twice the size
+            key = (str(getattr(self.db, "db_path", "")), mode)
+            anchor = _HISTORY_ANCHORS.get(key)
+            wide = window(2)
+            natural_start = ids.get(id(kept[0]))
+            if anchor is not None and natural_start is not None and anchor <= natural_start \
+                    and any(ids.get(id(t)) == anchor for t in wide):
+                start = next(i for i, t in enumerate(wide) if ids.get(id(t)) == anchor)
+                kept = wide[start:]
+            _HISTORY_ANCHORS[key] = ids.get(id(kept[0]))
         if context_style() != "natural" or not kept:
             return kept
         return self._with_time_marks(kept, times, mode)
@@ -933,7 +966,8 @@ class ContextEngine:
             report["turn_note"] = note
             if getattr(self, "_relationship", None) is not None:
                 report["relationship"] = self._relationship.stage
-        return ContextPacket([txt for _, txt in rendered], history, report, turn_note=note)
+        return ContextPacket([txt for _, txt in rendered], history, report, turn_note=note,
+                             volatile=[txt for name, txt in rendered if name in VOLATILE_SECTIONS])
 
     def _test_build(self, mode: str, with_history: bool) -> ContextPacket:
         """2026-10-30 test mode (ai/test_mode.py): no persona, profile, memories, life or relationship -- only what

@@ -671,7 +671,15 @@ def abilities_note(catalog: Catalog, direct: list[str] | None = None) -> str:
         lines.append(f"- {u['server']} 这次连不上，它的工具用不了")
     if catalog.disabled:
         lines.append("- 主人关掉的工具：" + "、".join(sorted(catalog.disabled)[:12]))
-    lines.append("- 提醒：对方让你到时间提醒，系统会自动记下并按时提醒（不用工具）；记忆：聊过的事系统会自己记，不用工具")
+    try:                                                     # 2026-11-01: it was missing, and "unlisted = cannot"
+        from ai import voice
+        lines.append("- 语音：可以，把要说的话放进 <voice></voice>（会先作为文字发出，语音几分钟后补上）" if voice.ready()
+                     else "- 语音：还没装好或没有参考录音，发不了语音")
+    except Exception:                                        # noqa: BLE001
+        logger.debug("voice state unavailable", exc_info=True)
+    from ai.agents.intent_agent import intent_step
+    lines.append("- 提醒：对方让你到时间提醒，系统会自动记下并按时提醒（不用工具）；记忆：聊过的事系统会自己记"
+                 + ("" if intent_step() else "，想查以前聊过的某件事用 query_memory"))
     return "\n".join(lines)
 
 

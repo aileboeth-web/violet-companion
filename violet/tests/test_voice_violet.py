@@ -215,9 +215,33 @@ def test_a_group_voice_line(db, data, service, monkeypatch):
         {"action": "say", "messages": ["来了|||<voice>哼 就说一句</voice>"]}, "f", 1)))
     e.decide(conv["id"])
     assert "【语音】你会发语音" in seen["system"] and "自动挑一句" not in seen["system"]     # groups: no automatic line
+    assert "voice 字段" in seen["system"] and '"voice"' in seen["system"]               # 11-01: a field of the JSON
     assert wait_for(lambda: len(a.sent) == 3)
     assert [s[2] for s in a.sent] == ["来了", "哼 就说一句", "voice:#!SILK_V3哼 就说一句"]
     assert wait_for(lambda: SocialStore(db).messages(conv["id"])[-1]["content"] == "[语音] 哼 就说一句")
+
+
+def test_the_group_decision_voice_field(db, data, service, monkeypatch):
+    """2026-11-01: "voice" is a field of the group decision (the JSON format never mentioned <voice> markup)."""
+    from ai import voice
+    from ai.social.store import SocialStore
+    import ai.social.llm as llm
+    voice.save_reference(MP3, "参考")
+    conv = SocialStore(db).conversation("napcat", "group", "615", "群", default_mode="auto")
+
+    class Voiced(FakeAdapter):
+        def send_to(self, kind, peer_id, text, reply_to=None, sticker_path=None, image_path=None, voice_path=None):
+            self.sent.append(text or ("voice:" + Path(voice_path).read_bytes().decode() if voice_path else None))
+            return f"out{len(self.sent)}"
+    a = Voiced()
+    e = engine(db, a)
+    e.receive(a, kind="group", peer_id="615", sender_id="1", sender_name="阿凯", text="念首诗听听", platform_msg_id="1",
+              mentioned=True)
+    monkeypatch.setattr(llm, "decide", lambda system, user, tools=None: (
+        {"action": "silent", "messages": [], "voice": "床前明月光，疑是地上霜。"}, "f", 1))
+    e.decide(conv["id"])
+    assert wait_for(lambda: len(a.sent) == 2)
+    assert a.sent == ["床前明月光，疑是地上霜。", "voice:#!SILK_V3床前明月光，疑是地上霜。"]
 
 
 def test_qq_voice_messages_are_record_segments(tmp_path, monkeypatch):

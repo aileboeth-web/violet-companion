@@ -43,6 +43,11 @@ def _json_payload(result_text: str) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _bigrams(text: str) -> set[str]:
+    chars = "".join(ch for ch in text.lower() if ch.isalnum())
+    return {chars[i:i + 2] for i in range(len(chars) - 1)}
+
+
 class WebToolGuard:
     def __init__(self, user_message: str):
         self.allowed_urls = {_norm(u) for u in URL_RE.findall(user_message or "")}
@@ -50,6 +55,7 @@ class WebToolGuard:
         self.calls = 0
         self.tainted = False
         self.finding_ids: list[int] = []
+        self.queries: list[set[str]] = []
 
     @staticmethod
     def _deny(code: str, message: str) -> str:
@@ -64,6 +70,15 @@ class WebToolGuard:
             return self._deny("WEB_TURN_LIMIT", "本轮联网次数已达上限")
         if tool_name == FETCH_URL and _norm(str(arguments.get("url") or "")) not in self.allowed_urls:
             return self._deny("URL_NOT_PROVIDED", "只能读取用户给出的链接或本轮搜索结果里的链接")
+        if tool_name == WEB_SEARCH:
+            # 2026-11-01 (scenario eval: "最近有什么科技新闻" -> three near-identical searches at once, the third refused
+            # by the turn limit): a search that mostly repeats one of this turn is not run again
+            words = _bigrams(str(arguments.get("query") or ""))
+            # 0.7: "近期 科技新闻 2026年11月 AI 芯片…" vs "2026年11月 最新 科技新闻 AI 芯片…" is 0.75 (the same search);
+            # "雾里的灯 乐评" vs "雾里的灯 专辑" 0.6 and "杭州 天气" vs "杭州 今天 天气 预报" 0.67 are different ones
+            if any(words and prev and len(words & prev) / min(len(words), len(prev)) >= 0.7 for prev in self.queries):
+                return self._deny("SAME_SEARCH", "这一轮已经搜过差不多的内容：用已经拿到的结果回答，结果不多就照实说")
+            self.queries.append(words)
         self.calls += 1
         return None
 

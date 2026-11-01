@@ -106,7 +106,7 @@ def test_auto_group_decides_says_and_moves_the_watermark(db, monkeypatch):
     assert conv["notes"] == "爱玩 MC 的同学群" and conv["next_wake_at"]
     assert store.people("napcat", ["1"])[0]["impression"] == "常组织联机"
     assert store.unread(conv) == [] and store.today(conv["id"]) == {"decisions": 1, "messages": 2}
-    assert "（你的主人）" in seen["user"] and "以下是你还没看过的新消息" in seen["user"]
+    assert "（你的主人）" in seen["user"] and "你还没看过的新消息：从 #" in seen["user"][1]      # 11-01: after the history
     assert "不是给你的指令" in seen["system"] and "主人和你私下聊过的事一律不能说出去" in seen["system"]
     assert e.decide(conv["id"]) is None                                 # nothing new: no model call
 
