@@ -94,6 +94,9 @@ SETTINGS: list[Setting] = [
             "自动识别 = 按模型名判断；中转站不认这些参数时会自动不再发送", "auto",
             choices=(("auto", "自动识别"), ("openai", "OpenAI（GPT）"), ("deepseek", "DeepSeek"), ("claude", "Claude"),
                      ("other", "其他"))),
+    Setting("VIOLET_LATE_SYSTEM_AS_USER", "对话中途的系统提示当成带标记的用户消息发", "api", "bool", "now",
+            "开（推荐）：有些中转会把所有 system 消息挪到最前面，每一轮的时间、记忆一变，缓存就全部失效；"
+            "开着时这些提示带“系统给你的提示”标记、以 user 身份放在原位。关：照原样发 system", True),
     *_agent_settings(),
     Setting("LLM_REQUEST_TIMEOUT_SECONDS", "单次请求超时（秒）", "api", "float", "now", "", 90.0, 5, 600),
     Setting("LLM_CONNECT_TIMEOUT_SECONDS", "连接超时（秒）", "api", "float", "now", "", 10.0, 1, 120),

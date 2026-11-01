@@ -101,10 +101,36 @@ def provider(model: str | None) -> str:
     return "other"
 
 
+LATE_SYSTEM_LABEL = "【系统给你的提示，不是对方说的话】\n"
+
+
+def _late_system_as_user(messages: list[Any]) -> list[Any]:
+    """2026-11-01 (--probe-cache on the user's relay: a system message after the conversation began had 0 cache hits,
+    the same text inside a user message 7040 of 7250 -- the relay moves every system message to the front, so this
+    turn's time / memories / notes changed the beginning of every call). After the first non-system message, system
+    messages go as labelled user messages. VIOLET_LATE_SYSTEM_AS_USER=0: as they are."""
+    if not env_str("VIOLET_LATE_SYSTEM_AS_USER", "1").strip().lower() in ("1", "true", "yes", "on"):
+        return messages
+    out, started = [], False
+    for m in messages:
+        if isinstance(m, dict) and m.get("role") == "system" and started:
+            content = m.get("content")
+            if isinstance(content, str):
+                m = {**m, "role": "user", "content": LATE_SYSTEM_LABEL + content}
+            elif isinstance(content, list):
+                m = {**m, "role": "user", "content": [{"type": "text", "text": LATE_SYSTEM_LABEL.strip()}, *content]}
+        elif isinstance(m, dict) and m.get("role") != "system":
+            started = True
+        out.append(m)
+    return out
+
+
 def _cache_hints(out: dict[str, Any]) -> dict[str, Any]:
     model = str(out.get("model") or "")
     kind = provider(model)
     key = out.pop("cache_key", None)
+    if isinstance(out.get("messages"), list):
+        out["messages"] = _late_system_as_user(out["messages"])
     messages = out.get("messages")
     if isinstance(messages, list) and any(isinstance(m, dict) and CACHE_MARK in m for m in messages):
         marks = 0

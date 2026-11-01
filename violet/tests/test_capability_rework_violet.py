@@ -90,6 +90,21 @@ def test_cache_hints_per_provider(monkeypatch):
     assert isinstance(mp.apply({"model": "my-relay-model", "messages": msgs})["messages"][0]["content"], list)
 
 
+def test_system_messages_after_the_conversation_began_go_as_user(monkeypatch):
+    """--probe-cache on the user's relay: a system message after the history had 0 cache hits (the relay moves every
+    system message to the front); the same text inside a user message was cached."""
+    from ai import model_params as mp
+    msgs = [{"role": "system", "content": "规则"}, {"role": "system", "content": "人设"},
+            {"role": "user", "content": "昨天的话"}, {"role": "system", "content": "当前时间 20:01"},
+            {"role": "user", "content": "今天好累"}]
+    monkeypatch.setenv("VIOLET_LATE_SYSTEM_AS_USER", "1")
+    sent = mp.apply({"model": "gpt-6-luna", "messages": msgs})["messages"]
+    assert [m["role"] for m in sent] == ["system", "system", "user", "user", "user"]
+    assert sent[3]["content"] == mp.LATE_SYSTEM_LABEL + "当前时间 20:01" and sent[:3] == msgs[:3]
+    monkeypatch.setenv("VIOLET_LATE_SYSTEM_AS_USER", "0")
+    assert mp.apply({"model": "gpt-6-luna", "messages": msgs})["messages"] == msgs
+
+
 def test_a_relay_that_refuses_a_hint_never_gets_it_again(monkeypatch):
     import openai
     from ai import model_params as mp
