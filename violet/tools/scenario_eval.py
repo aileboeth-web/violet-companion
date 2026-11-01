@@ -526,12 +526,57 @@ def summary_line(r: dict[str, Any]) -> str:
     return line
 
 
+def probe_cache() -> int:
+    """--probe-cache (2026-11-01: the owner's chat began the same every call and still had 0% cache while the groups
+    had 88-92% through the same relay): a few tiny calls of different shapes straight to the configured model -- which
+    shapes does this relay / provider cache? Output is capped at 5 tokens per call."""
+    from openai import OpenAI
+    from ai.agents.base_agent import _local_address
+    from ai.model_params import create
+    url, key = os.environ.get("LLM_API_URL", ""), os.environ.get("LLM_API_KEY", "")
+    model = os.environ.get("CHAT_LLM_MODEL", "")
+    extra = {}
+    if _local_address(url):
+        from openai import DefaultHttpxClient
+        extra["http_client"] = DefaultHttpxClient(trust_env=False)
+    client = OpenAI(api_key=key, base_url=url, max_retries=1, **extra)
+    rules = (APP / "persona" / "chat_prompt_versions" / "chat.v3.txt").read_text(encoding="utf-8")
+    stable = "\n\n".join([rules] * 4)                                   # well over the 1024-token minimum
+    now = lambda: time.strftime("%H:%M:%S")
+
+    def ask(label: str, messages: list[dict[str, Any]], key_name: str) -> None:
+        response = create(client, {"model": model, "messages": messages, "max_tokens": 5, "temperature": 0,
+                                   "cache_key": key_name})
+        usage = getattr(response, "usage", None)
+        details = getattr(usage, "prompt_tokens_details", None)
+        cached = getattr(details, "cached_tokens", None) or getattr(usage, "prompt_cache_hit_tokens", None) or 0
+        print(f"  {label:<44} 输入 {getattr(usage, 'prompt_tokens', '?'):>5}  缓存 {cached}", flush=True)
+    print(f"缓存探测：{model}（每次最多输出 5 个 token）", flush=True)
+    shapes = [
+        ("A1 一条 system + 一条 user", lambda q: [{"role": "system", "content": stable}, {"role": "user", "content": q}]),
+        ("B1 system + user + 末尾再一条变化的 system", lambda q: [
+            {"role": "system", "content": stable}, {"role": "user", "content": "之前的话"},
+            {"role": "system", "content": f"当前时间 {now()} {q}"}, {"role": "user", "content": q}]),
+        ("C1 system + 变化的内容并进最后的 user", lambda q: [
+            {"role": "system", "content": stable}, {"role": "user", "content": "之前的话"},
+            {"role": "user", "content": f"（系统给你的背景：当前时间 {now()}）\n{q}"}]),
+    ]
+    for label, build in shapes:
+        tag = label[:2]
+        ask(label, build("今天好累"), f"probe-{tag}")
+        time.sleep(2)
+        ask(label.replace("1 ", "2 ", 1) + "（同样的开头，再来一次）", build("早安呀"), f"probe-{tag}")
+    print("看第二次的“缓存”：A2 有、B2 没有 = 这个服务把后面的 system 挪到了最前面；三个都没有 = 它不缓存这种请求", flush=True)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Violet scenario eval (abilities used when they should be)")
     parser.add_argument("--env", type=Path, help="the server's violet.env (models, persona, switches)")
     parser.add_argument("--only", default="", help="comma-separated scenario ids")
     parser.add_argument("--mock", action="store_true", help="no model: check the plumbing only")
     parser.add_argument("--max-tokens", type=int, default=400_000)
+    parser.add_argument("--probe-cache", action="store_true", help="6 tiny calls: which prompt shapes are cached")
     parser.add_argument("--out", type=Path, default=None, help="report file (default: in the system temp folder)")
     args = parser.parse_args(argv)
     if not args.mock and not args.env:
@@ -547,6 +592,8 @@ def main(argv: list[str] | None = None) -> int:
         if not os.environ.get("LLM_API_KEY", "").strip() and not args.mock:
             print("没有找到模型的 API Key（violet.env 和管理后台的设置里都没有），停止", flush=True)
             return 1
+        if args.probe_cache:
+            return probe_cache()
         ev = Eval(args.mock)
         from ai.tool_manager import discover
         catalog = discover()
