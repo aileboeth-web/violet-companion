@@ -244,8 +244,9 @@ class ChatAgent(BaseAgent):
         if feeling:
             messages.append({"role": "system", "content": feeling})
         from ai import voice
-        speaking = "" if testing or is_proactive or "<voice>" in str(messages) else voice.prompt_note()
-        if speaking:                                            # 2026-10-31: she can send a voice message
+        speaking = "" if testing or is_proactive else voice.prompt_note()
+        if speaking:                                            # 2026-10-31: she can send a voice message (11-01: also
+            # with a persona that has its own <voice> markup -- those said 语音不要滥用 and she hardly used it)
             messages.append({"role": "system", "content": speaking})
         from ai.images.service import images_enabled
         if not is_proactive and images_enabled():

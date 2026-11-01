@@ -5,6 +5,7 @@ authentication like every route.
                                              the install progress
   POST   /api/control/voice/<install|uninstall>   root task (one-click install from the page)
   POST   /api/control/voice/reference        {data: base64 recording (optional), text}: the voice to clone
+  GET    /api/control/voice/reference/audio  the uploaded recording itself (the page plays it back)
   DELETE /api/control/voice/reference        delete the recording
   POST   /api/control/voice/test             {text}: say it now (about a minute) -> audio/wav, for the page's 试听
 """
@@ -70,6 +71,16 @@ def register_voice_routes(app: Flask) -> None:
             return ok(voice.save_reference(data, str(text) if text is not None else None))
         except voice.VoiceError as exc:
             return bad(str(exc))
+
+    @app.get("/api/control/voice/reference/audio")
+    def control_voice_reference_audio():
+        from ai import voice
+        path = voice.reference_path()
+        if path is None:
+            return bad("还没有上传参考录音", 404)
+        mime = {"mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/mp4", "ogg": "audio/ogg", "flac": "audio/flac"}
+        return Response(path.read_bytes(), mimetype=mime.get(path.suffix[1:], "application/octet-stream"),
+                        headers={"Cache-Control": "no-store"})
 
     @app.delete("/api/control/voice/reference")
     def control_voice_reference_delete():

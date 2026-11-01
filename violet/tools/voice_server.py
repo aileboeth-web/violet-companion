@@ -28,6 +28,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 MAX_CHARS = 300
+MIN_CHARS_PER_SECOND = 1.2     # of the reference recording (people say 3-5 Chinese characters a second)
+MIN_SECONDS_PER_CHAR = 0.12    # of what she says; shorter means the model stopped early (a murmur, not speech)
 PROMPT_PREFIX = "You are a helpful assistant.<|endofprompt|>"      # CosyVoice 3 expects it before the prompt text
 REFERENCE_NAMES = ("reference.wav", "reference.mp3", "reference.m4a", "reference.ogg", "reference.flac")
 log = logging.getLogger("violet.voice")
@@ -59,6 +61,26 @@ def prepared_reference(ref_dir: Path, ffmpeg: str = "ffmpeg") -> tuple[Path, str
         if done.returncode != 0:
             raise VoiceError("参考录音转换失败：" + (done.stderr or "")[-300:])
     return target, text
+
+
+def wav_seconds(path: Path) -> float:
+    with wave.open(str(path), "rb") as w:
+        return w.getnframes() / float(w.getframerate() or 1)
+
+
+def spoken_chars(text: str) -> int:
+    """Letters, digits and Chinese characters (punctuation and spaces are not said)."""
+    return sum(ch.isalnum() for ch in text)
+
+
+def check_reference_text(seconds: float, text: str) -> None:
+    """2026-11-01 (user's server: 15.6 s recording, text 我是大肥鱼呀): CosyVoice takes the text as all that is said
+    in the recording; when most of it is missing the voice comes out as a 0.1-2 s murmur. People say 3-5 characters a
+    second, so fewer than MIN_CHARS_PER_SECOND means the text is not the whole recording."""
+    chars = spoken_chars(text)
+    if seconds >= 2 and chars < seconds * MIN_CHARS_PER_SECOND:
+        raise VoiceError(f"“录音的原文”只有 {chars} 个字，可录音有 {seconds:.1f} 秒：要把录音里说的每一个字都照抄进去"
+                         "（不是一句介绍），不然生成出来只有一两秒的哼声")
 
 
 def wav_bytes(samples, sample_rate: int) -> bytes:
@@ -109,6 +131,7 @@ class Voice:
         if not text:
             raise VoiceError("没有要说的话")
         reference, ref_text = prepared_reference(self.ref_dir, self.ffmpeg)
+        check_reference_text(wav_seconds(reference), ref_text)
         prompt = (PROMPT_PREFIX if self.v3 else "") + ref_text
         with self.lock:
             parts = [out["tts_speech"] for out in self.model.inference_zero_shot(
@@ -116,6 +139,10 @@ class Voice:
         if not parts:
             raise VoiceError("没有生成声音")
         speech = self.torch.cat(parts, dim=1)
+        seconds = speech.shape[-1] / float(self.model.sample_rate)
+        if seconds < max(0.8, MIN_SECONDS_PER_CHAR * spoken_chars(text)):
+            raise VoiceError(f"只生成了 {seconds:.1f} 秒的声音（这句话应该有好几秒）：多半是“录音的原文”和录音对不上，"
+                             "检查一下是不是一字不差")
         return wav_bytes(speech.cpu().numpy(), self.model.sample_rate)
 
 

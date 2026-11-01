@@ -13,16 +13,20 @@ from __future__ import annotations
 
 import json
 import os
+import queue
+import re
+import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ai.settings import env_bool, env_int
 
 FORMATS = {"mp3": b"ID3", "wav": b"RIFF", "ogg": b"OggS", "flac": b"fLaC"}
 MAX_REFERENCE = 10 * 1024 * 1024
-TIMEOUT = 240.0
+CHUNK = 30                     # characters in one voice message (~7 s of speech, ~4 minutes on 4 CPU cores)
+TIMEOUT = 600.0
 
 
 class VoiceError(RuntimeError):
@@ -38,10 +42,15 @@ def service() -> dict[str, Any] | None:
     return voice_export()
 
 
+def reference_path() -> Path | None:
+    d = ref_dir()
+    return next((p for p in sorted(d.glob("reference.*")) if p.suffix[1:] in ("mp3", "wav", "m4a", "ogg", "flac")
+                 and not p.name.endswith(".16k.wav")), None) if d.is_dir() else None
+
+
 def reference() -> dict[str, Any]:
     d = ref_dir()
-    audio = next((p for p in sorted(d.glob("reference.*")) if p.suffix[1:] in ("mp3", "wav", "m4a", "ogg", "flac")
-                  and not p.name.endswith(".16k.wav")), None) if d.is_dir() else None
+    audio = reference_path()
     text_file = d / "reference.txt"
     return {"uploaded": audio is not None, "file": audio.name if audio else None,
             "size": audio.stat().st_size if audio else 0,
@@ -53,7 +62,90 @@ def ready() -> bool:
 
 
 def max_chars() -> int:
-    return max(5, env_int("VIOLET_VOICE_MAX_CHARS", 60))
+    """At most this much of one <voice> line is said (longer is split into several voice messages)."""
+    return max(5, env_int("VIOLET_VOICE_MAX_CHARS", 300))
+
+
+def auto() -> bool:
+    """2026-11-01 (user: 有机会就用): every reply also gets a voice message of one of its lines."""
+    return env_bool("VIOLET_VOICE_AUTO", True)
+
+
+def chunks(text: str, size: int = CHUNK) -> list[str]:
+    """Sentences packed into pieces of at most `size` characters (one voice message each), lyrics line by line."""
+    pieces: list[str] = []
+    for sentence in re.split(r"(?<=[。！？!?；;…~～])|\n", str(text or "")):
+        sentence = " ".join(sentence.split())
+        while len(sentence) > size:                          # a long sentence: at the last comma that fits, else cut
+            cut = max(sentence.rfind(c, 0, size) for c in "，,、 ") + 1 or size
+            pieces.append(sentence[:cut].strip())
+            sentence = sentence[cut:].strip()
+        if sentence:
+            pieces.append(sentence)
+    out: list[str] = []
+    for piece in pieces:                                     # short sentences (lyric lines) share a message
+        if out and len(out[-1]) + len(piece) + 1 <= size:
+            out[-1] += ("，" if out[-1][-1:].isalnum() else "") + piece
+        else:
+            out.append(piece)
+    return out
+
+
+def pick_line(texts: list[str]) -> str | None:
+    """The line of a reply that is said when she marked none: the longest one that is real words and fits in one
+    voice message."""
+    lines = [t.strip() for t in texts if t and t.strip() and sum(ch.isalnum() for ch in t) >= 2
+             and len(t.strip()) <= CHUNK and not t.strip().startswith(("http", "[", "`"))]
+    return max(lines, key=len) if lines else None
+
+
+# ------------------------------------------------------------------------------------------------ the queue
+# one sentence takes minutes on a CPU and the service says one at a time, so voice messages wait in one queue, in order
+
+_jobs: "queue.Queue[tuple[list[str], Callable[[Path, str], None], str]]" = queue.Queue()
+_pending = [0]                                               # sentences waiting or being said
+_lock = threading.Lock()
+_worker: list[threading.Thread] = []
+
+
+def say_later(text: str, deliver: Callable[[Path, str], None], *, automatic: bool = False, label: str = "") -> bool:
+    """Queues `text` (split by chunks()) to be said and handed to deliver(silk file, sentence) one by one. The words
+    were already sent as text, so a sentence that fails is only noted. An automatic line is dropped while others
+    still wait (it would only arrive long after the conversation moved on). False = not queued."""
+    if not ready():
+        return False
+    pieces = chunks(str(text or "")[:max_chars()])
+    if not pieces:
+        return False
+    with _lock:
+        if automatic and _pending[0]:
+            return False
+        _pending[0] += len(pieces)
+        if not _worker or not _worker[0].is_alive():
+            _worker[:] = [threading.Thread(target=_work, daemon=True, name="voice-queue")]
+            _worker[0].start()
+    _jobs.put((pieces, deliver, label))
+    return True
+
+
+def busy() -> int:
+    return _pending[0]
+
+
+def _work() -> None:
+    from ai import trace
+    while True:
+        pieces, deliver, label = _jobs.get()
+        for i, piece in enumerate(pieces, 1):
+            part = f"（{i}/{len(pieces)}）" if len(pieces) > 1 else ""
+            try:
+                deliver(to_file(speak(piece, "silk"), "silk"), piece)
+                trace.step("发语音", 会话=label or None, 结果="已发出" + part, 内容=trace.text(piece))
+            except Exception as exc:                         # noqa: BLE001 -- the words already went out as text
+                trace.step("发语音", 会话=label or None, 结果="失败" + part + "（文字已经发过）", 原因=str(exc)[:200])
+            finally:
+                with _lock:
+                    _pending[0] = max(0, _pending[0] - 1)
 
 
 def _kind(data: bytes) -> str:
@@ -138,9 +230,15 @@ def to_file(audio: bytes, fmt: str = "silk") -> Path:
     return path
 
 
-def prompt_note() -> str:
-    """For prompts without their own voice markup: how she can speak (only when the voice is ready)."""
+def prompt_note(automatic: bool = True) -> str:
+    """How she speaks (only when the voice is ready); added to every prompt, also to personas with their own
+    <voice> markup (2026-11-01: those said 语音不要滥用 and she hardly used it). automatic: replies there get a voice
+    line of their own (private chats; not groups)."""
     if not ready():
         return ""
-    return (f"【语音】你可以发语音：把要说的一句话放进 <voice></voice>（{max_chars()} 字以内），它会变成你的语音条。"
-            "只在情绪重（撒娇、生气、困了）或对方想听你说话时用，一次最多一句；平时打字。语音要一分钟左右才发出去。")
+    auto_line = ("你打的字会自动挑一句补发成语音，不用你管；" if automatic and auto() else "")
+    return (f"【语音】你会发语音（用你自己的声音）。{auto_line}"
+            f"对方让你说话、念东西、唱歌、想听你声音时，一定要发语音：把要说的内容整段放进 <voice></voice>"
+            f"（最多 {max_chars()} 字，长的会自动拆成几条语音一条条发，歌词、故事都可以整段放进去），"
+            "这段话也会先作为文字发出去，不用再重复打一遍。你没法按旋律唱歌，被叫唱歌时就用语音把歌词念出来，"
+            "可以顺口说一句自己唱得不好。语音要几分钟才生成好，别说马上发。")

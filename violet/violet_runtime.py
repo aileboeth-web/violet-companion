@@ -321,9 +321,12 @@ class MessageSender:
         turn_id: str | None = None,
         proactive_event_id: int | None = None,
         record_history: bool = True,
+        auto_voice: bool = False,
     ) -> SendReport:
+        """auto_voice: also say one of the lines in her voice when none is marked <voice> (her replies)."""
         report = SendReport()
         stop_reason: str | None = None
+        spoken: list[str] = []
         # Phase 10: the one outbound checkpoint. Every text of every origin passes it just before a channel sees it:
         # a loaded agent instruction, an internal context header, tool data or internal JSON is never delivered --
         # the whole send is refused (a reply missing one line could still be the wrong reply).
@@ -361,11 +364,10 @@ class MessageSender:
                                            stop_reason, report)
                 continue
             if msg_type == "voice":
-                # 2026-10-31: said in her voice (ai/voice.py) in the background -- a minute on a CPU; the words go
-                # out as text right away when the voice is not ready, the channel has none, or it is too long
-                if content and stop_reason is None and self._voice_later(content, origin, turn_id, record_history):
-                    report.sent.append({**msg, "content": f"[语音] {content}"})
-                    continue
+                # 2026-11-01 (user: 文字先发，语音随后补): the words go out as text now, her voice follows in minutes
+                # (ai/voice.py's queue; a long text as several voice messages)
+                if content and stop_reason is None:
+                    spoken.append(content)
                 msg_type, msg = "text", {**msg, "type": "text"}
             if msg_type != "text" or not content:
                 self.db.add_outbound_message(client_id, origin, str(msg_type or "unknown"), content,
@@ -389,6 +391,15 @@ class MessageSender:
                 stop_reason = f"previous message failed: {error}"[:300]
         if report.failed:
             self.stats["send_failures"] = self.stats.get("send_failures", 0) + len(report.failed)
+        if stop_reason is None:
+            for text in spoken:
+                self._voice_later(text, origin, turn_id, record_history)
+            if not spoken and auto_voice:
+                from ai import voice
+                line = voice.auto() and voice.pick_line([m.get("content") or "" for m in report.sent
+                                                         if m.get("type") == "text"])
+                if line:
+                    self._voice_later(line, origin, turn_id, record_history, automatic=True)
         return report
 
     def _send_image_message(self, msg: dict[str, Any], client_id: str, origin: str, turn_id: str | None,
@@ -455,39 +466,33 @@ class MessageSender:
             return None
         return last_error
 
-    def _voice_later(self, text: str, origin: str, turn_id: str | None, record_history: bool) -> bool:
-        """Starts saying `text` in the background; False when it cannot (then the caller sends it as text)."""
+    def _voice_later(self, text: str, origin: str, turn_id: str | None, record_history: bool,
+                     automatic: bool = False) -> bool:
+        """Queues `text` to follow in her voice (it was already sent as text); False when it cannot."""
         from ai import trace, voice
         supports = getattr(self.client, "supports_voice", None)
-        if not (callable(supports) and supports()) or not voice.ready() or len(text) > voice.max_chars():
+        if not (callable(supports) and supports()):
             return False
 
-        def work():
+        def deliver(path, piece: str) -> None:
             client_id = f"pybot-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
-            outbound_id = self.db.add_outbound_message(client_id, origin, "voice", text, turn_id, None,
+            outbound_id = self.db.add_outbound_message(client_id, origin, "voice", piece, turn_id, None,
                                                        channel=self.channel, peer_id=self.peer_id)
             try:
-                path = voice.to_file(voice.speak(text, "silk"), "silk")
                 self.db.update_outbound_message(outbound_id, status="sending", increment_attempts=True)
                 rejected = _response_error(self.client.send_voice(str(path)))
                 if rejected:
                     raise SendRejected(rejected)
-            except Exception as exc:                     # noqa: BLE001 -- the words still reach the owner
-                error = f"{exc.__class__.__name__}: {exc}"[:300]
-                logger.warning("voice not sent, sending the words instead: %s", error)
-                self.db.update_outbound_message(outbound_id, status="failed", error=error)
-                trace.step("发语音", 结果="失败，改发文字", 原因=error)
-                self._send_one(self.db.add_outbound_message(client_id + "-t", origin, "text", text, turn_id, None,
-                                                            channel=self.channel, peer_id=self.peer_id),
-                               client_id + "-t", text, record_history)
-                return
-            message_id = self.db.add_assistant_message("text", f"[语音] {text}", channel=self.channel,
+            except Exception as exc:
+                self.db.update_outbound_message(outbound_id, status="failed", error=f"{exc.__class__.__name__}: {exc}"[:300])
+                raise
+            message_id = self.db.add_assistant_message("text", f"[语音] {piece}", channel=self.channel,
                                                        peer_id=self.peer_id) if record_history else None
             self.db.update_outbound_message(outbound_id, status="sent", message_id=message_id)
-            trace.step("发语音", 结果="已发出", 内容=trace.text(text))
-        threading.Thread(target=work, daemon=True, name="voice-send").start()
-        trace.step("发语音", 结果="在生成（约一分钟）", 内容=trace.text(text))
-        return True
+        queued = voice.say_later(text, deliver, automatic=automatic)
+        if queued:
+            trace.step("发语音", 结果="排队生成（文字已发，语音几分钟后到）", 自动=automatic or None, 内容=trace.text(text))
+        return queued
 
     def _send_sticker_message(self, msg: dict[str, Any], client_id: str, origin: str, turn_id: str | None,
                               proactive_event_id: int | None, record_history: bool, stop_reason: str | None,
@@ -1237,7 +1242,8 @@ class VioletRuntime:
                 from ai.channels.outbound import build_reply
                 envelope = build_reply(pipeline, turn_key=extra.get("turn_key") or turn.turn_id)
                 if envelope.should_send:
-                    report = sender.send_messages(envelope.send_list(), origin="reply", turn_id=turn.turn_id)
+                    report = sender.send_messages(envelope.send_list(), origin="reply", turn_id=turn.turn_id,
+                                                  auto_voice=True)
                     sent_texts = [m["content"] for m in report.sent]
                     if report.blocked:
                         # internal content in the reply: nothing of it went out; the person gets the fallback line
@@ -1373,7 +1379,8 @@ class VioletRuntime:
             return self.sender
 
     def send_proactive(self, messages: list[dict[str, Any]], proactive_event_id: int | None = None) -> dict[str, Any]:
-        report = self._proactive_sender().send_messages(messages, origin="proactive", proactive_event_id=proactive_event_id)
+        report = self._proactive_sender().send_messages(messages, origin="proactive", proactive_event_id=proactive_event_id,
+                                                        auto_voice=True)
         return report.to_dict()
 
     def voiced(self, note: str, must_say: list[str] | None = None) -> list[dict[str, Any]]:

@@ -123,36 +123,74 @@ def sender(db, client):
     return MessageSender(client, db, simulate_typing=False, channel="napcat", peer_id="9")
 
 
-def test_a_voice_line_is_said_in_the_background_and_falls_back_to_text(db, data, service):
+def test_a_voice_line_is_written_first_and_said_after(db, data, service):
+    """2026-11-01 (user: 文字先发，语音随后补)."""
     from ai import voice
     from ai.channels.outbound import _seal
     voice.save_reference(MP3, "参考")
     client = VoiceClient()
     report = sender(db, client).send_messages(_seal([{"type": "text", "content": "哼"},
                                                      {"type": "voice", "content": "才没有想你"}]), origin="reply")
-    assert [m["content"] for m in report.sent] == ["哼", "[语音] 才没有想你"]
-    assert wait_for(lambda: len(client.sent) == 2)
-    assert client.sent == [("text", "哼"), ("voice", "#!SILK_V3才没有想你".encode())]
+    assert [m["content"] for m in report.sent] == ["哼", "才没有想你"]
+    assert wait_for(lambda: len(client.sent) == 3)
+    assert client.sent == [("text", "哼"), ("text", "才没有想你"), ("voice", "#!SILK_V3才没有想你".encode())]
     assert wait_for(lambda: db.fetch_one("SELECT 1 FROM messages WHERE content = '[语音] 才没有想你'"))
-    service.fail = True                                      # the voice does not come: the words do
+    service.fail = True                                      # the voice does not come: the words are there already
     client.sent.clear()
     sender(db, client).send_messages(_seal([{"type": "voice", "content": "晚安"}]), origin="reply")
-    assert wait_for(lambda: client.sent == [("text", "晚安")])
+    assert wait_for(lambda: voice.busy() == 0) and client.sent == [("text", "晚安")]
 
 
-def test_no_voice_means_the_words_are_written_at_once(db, data, service):
+def test_lyrics_become_several_voice_messages(db, data, service):
+    from ai import voice
+    from ai.channels.outbound import _seal
+    voice.save_reference(MP3, "参考")
+    lyrics = "\n".join(["天青色等烟雨", "而我在等你", "炊烟袅袅升起", "隔江千万里"] * 3)
+    client = VoiceClient()
+    sender(db, client).send_messages(_seal([{"type": "voice", "content": lyrics}]), origin="reply")
+    assert client.sent[0] == ("text", lyrics)
+    pieces = voice.chunks(lyrics)
+    assert len(pieces) == 3 and all(len(p) <= voice.CHUNK for p in pieces) and pieces[0].startswith("天青色等烟雨，而我在等你")
+    assert wait_for(lambda: len(client.sent) == 4)
+    assert [t for kind, t in client.sent[1:]] == [("#!SILK_V3" + p).encode() for p in pieces]
+
+
+def test_chunks_and_the_automatic_line():
+    from ai import voice
+    long = "我今天去了很远很远的地方，看到了一大片金黄色的稻田，风吹过来的时候像海浪一样，真的好好看。"
+    pieces = voice.chunks(long)
+    assert "".join(pieces) == long and all(len(p) <= voice.CHUNK for p in pieces) and len(pieces) == 2
+    assert voice.chunks("哈" * 70) == ["哈" * 30, "哈" * 30, "哈" * 10]
+    assert voice.pick_line(["嗯", "今天的白米饭超好吃", "https://x.y", "长" * 40]) == "今天的白米饭超好吃"
+    assert voice.pick_line(["嗯", "?"]) is None
+
+
+def test_every_reply_gets_a_voice_line_when_automatic(db, data, service, monkeypatch):
+    from ai import voice
+    from ai.channels.outbound import _seal
+    voice.save_reference(MP3, "参考")
+    client = VoiceClient()
+    sender(db, client).send_messages(_seal([{"type": "text", "content": "在呢"},
+                                            {"type": "text", "content": "今天的白米饭超好吃"}]),
+                                     origin="reply", auto_voice=True)
+    assert wait_for(lambda: len(client.sent) == 3) and client.sent[2] == ("voice", "#!SILK_V3今天的白米饭超好吃".encode())
+    client.sent.clear()
+    sender(db, client).send_messages(_seal([{"type": "text", "content": "不说话"}]), origin="system")
+    monkeypatch.setenv("VIOLET_VOICE_AUTO", "0")
+    sender(db, client).send_messages(_seal([{"type": "text", "content": "也不说话"}]), origin="reply", auto_voice=True)
+    time.sleep(0.3)
+    assert client.sent == [("text", "不说话"), ("text", "也不说话")]
+
+
+def test_no_voice_means_only_the_words(db, data, service):
     from ai.channels.outbound import _seal
     client = VoiceClient()                                   # no recording uploaded yet
-    sender(db, client).send_messages(_seal([{"type": "voice", "content": "晚安"}]), origin="reply")
-    assert client.sent == [("text", "晚安")]
+    sender(db, client).send_messages(_seal([{"type": "voice", "content": "晚安"}]), origin="reply", auto_voice=True)
     from ai import voice
     voice.save_reference(MP3, "参考")
-    client = VoiceClient(voice=False)                        # a channel without voice messages
-    sender(db, client).send_messages(_seal([{"type": "voice", "content": "晚安"}]), origin="reply")
-    assert client.sent == [("text", "晚安")]
-    client = VoiceClient()
-    sender(db, client).send_messages(_seal([{"type": "voice", "content": "长" * 100}]), origin="reply")
-    assert client.sent == [("text", "长" * 100)]              # too long for a voice message
+    sender(db, VoiceClient(voice=False)).send_messages(_seal([{"type": "voice", "content": "晚安"}]), origin="reply")
+    time.sleep(0.3)
+    assert client.sent == [("text", "晚安")] and voice.busy() == 0
 
 
 # ------------------------------------------------------------------------------------------------ groups
@@ -176,9 +214,9 @@ def test_a_group_voice_line(db, data, service, monkeypatch):
     monkeypatch.setattr(llm, "decide", lambda system, user, tools=None: (seen.update(system=system) or (
         {"action": "say", "messages": ["来了|||<voice>哼 就说一句</voice>"]}, "f", 1)))
     e.decide(conv["id"])
-    assert "【语音】你可以发语音" in seen["system"]
-    assert wait_for(lambda: len(a.sent) == 2)
-    assert a.sent[0][2] == "来了" and a.sent[1][2] == "voice:#!SILK_V3哼 就说一句"
+    assert "【语音】你会发语音" in seen["system"] and "自动挑一句" not in seen["system"]     # groups: no automatic line
+    assert wait_for(lambda: len(a.sent) == 3)
+    assert [s[2] for s in a.sent] == ["来了", "哼 就说一句", "voice:#!SILK_V3哼 就说一句"]
     assert wait_for(lambda: SocialStore(db).messages(conv["id"])[-1]["content"] == "[语音] 哼 就说一句")
 
 
@@ -276,7 +314,56 @@ def test_voice_routes(admin, data, service, monkeypatch):
     up = admin.post("/api/control/voice/reference", json={"data": "data:audio/mpeg;base64," + base64.b64encode(MP3).decode(),
                                                           "text": "参考的话"}, headers=SAME).get_json()["data"]
     assert up["uploaded"] and up["text"] == "参考的话"
+    played = admin.get("/api/control/voice/reference/audio")
+    assert played.status_code == 200 and played.mimetype == "audio/mpeg" and played.data == MP3
     r = admin.post("/api/control/voice/test", json={"text": "试一下"}, headers=SAME)
     assert r.status_code == 200 and r.mimetype == "audio/wav" and service.texts[-1] == {"text": "试一下", "format": "wav"}
     assert admin.post("/api/control/voice/install", json={}, headers=SAME).status_code == 400      # needs confirm
     assert admin.delete("/api/control/voice/reference", headers=SAME).get_json()["data"]["uploaded"] is False
+    assert admin.get("/api/control/voice/reference/audio").status_code == 404
+
+
+def test_a_text_that_is_not_the_whole_recording_is_refused(tmp_path):
+    """2026-11-01, user's server: 15.6 s of 大肥鱼 with the text 我是大肥鱼呀 -> 0.12 / 0.6 / 2.0 s murmurs."""
+    import wave
+    from tools import voice_server as vs
+    with pytest.raises(vs.VoiceError, match="只有 6 个字.*15.6 秒"):
+        vs.check_reference_text(15.6, "我是大肥鱼呀")
+    vs.check_reference_text(15.6, "傲娇怎么了？我就傲娇，再说了，同样一句话，你说两遍，我都没嫌你啰嗦呢，听出来了吗？")
+    vs.check_reference_text(1.5, "嗯")                                   # too short to judge
+    path = tmp_path / "r.wav"
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1), w.setsampwidth(2), w.setframerate(16000), w.writeframes(b"\x00\x00" * 16000 * 3)
+    assert vs.wav_seconds(path) == 3.0 and vs.spoken_chars("哼，谁要你夸啦！ ok") == 8
+
+
+def test_a_murmur_instead_of_the_sentence_is_an_error(tmp_path, monkeypatch):
+    """The model stopping after 0.12 s gives an error (QQ then gets the words as text), not a broken voice message."""
+    from tools import voice_server as vs
+
+    class Speech:
+        def __init__(self, n):
+            self.shape = (1, n)
+
+        def cpu(self):
+            return self
+
+        def numpy(self):
+            return self
+    monkeypatch.setattr(vs, "wav_bytes", lambda samples, rate: b"RIFF" + bytes(samples.shape[1] // 1000))
+
+    class Model:
+        sample_rate, length = 24000, 0
+
+        def inference_zero_shot(self, *a, **k):
+            yield {"tts_speech": Speech(self.length)}
+    v = vs.Voice.__new__(vs.Voice)
+    v.model, v.v3, v.ref_dir, v.ffmpeg, v.lock = Model(), True, tmp_path, "ffmpeg", threading.Lock()
+    v.torch = SimpleNamespace(cat=lambda parts, dim: parts[0])
+    monkeypatch.setattr(vs, "prepared_reference", lambda *a: (tmp_path / "r.wav", "我是大肥鱼呀我是大肥鱼呀"))
+    monkeypatch.setattr(vs, "wav_seconds", lambda p: 5.0)
+    v.model.length = int(0.12 * 24000)
+    with pytest.raises(vs.VoiceError, match="只生成了 0.1 秒"):
+        v.speak("哼，谁要你夸啦，不过今天的白米饭确实好好吃。")
+    v.model.length = 4 * 24000
+    assert v.speak("哼，谁要你夸啦，不过今天的白米饭确实好好吃。").startswith(b"RIFF")

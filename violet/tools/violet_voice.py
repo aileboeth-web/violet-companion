@@ -368,7 +368,7 @@ def install(layout: Any, state: dict[str, Any], *, python: Path, app: Path, port
     _say(progress, 98, "交给 Violet")
     _export(layout, state)
     return {"ok": True, "installed": True, "url": f"http://127.0.0.1:{port}", "port": port,
-            "notes": ["下一步：在“工具 → 语音”上传参考录音并填写录音里说的话，然后点“试听”"]}
+            "notes": ["下一步：在“工具 → 语音”上传参考录音并照抄录音的原文，然后在“试听”里写一句想让她说的话"]}
 
 
 def _export(layout: Any, state: dict[str, Any]) -> None:
