@@ -387,6 +387,32 @@ class Eval:
         if mock:
             BaseAgent.client_factory = staticmethod(lambda cfg: MockClient(cfg))
         self.db = violetdb
+        # what each model call sends, as fingerprints: where does a call stop beginning like the previous one of its
+        # kind (the provider's prompt cache serves only an unchanged beginning)
+        import hashlib
+        import ai.model_params as mp
+        create = mp.create
+        self.requests: list[dict[str, Any]] = []
+        self._last: dict[str, dict[str, Any]] = {}
+
+        def recording(client, kwargs):
+            sent = mp.apply(dict(kwargs))
+            digest = lambda v: hashlib.sha1(json.dumps(v, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:10]
+            items = [("tools", digest(sent.get("tools")), "")] + [
+                (m.get("role"), digest(m.get("content")), str(m.get("content"))[:40].replace("\n", " "))
+                for m in sent.get("messages") or []]
+            kind = str(kwargs.get("cache_key") or "?")
+            before = self._last.get(kind)
+            same = 0
+            if before is not None:
+                while same < min(len(items), len(before["items"])) and items[same][1] == before["items"][same][1]:
+                    same += 1
+            self._last[kind] = {"items": items}
+            self.requests.append({"kind": kind, "items": len(items), "same": same if before else None,
+                                  "changed": items[same] if before is not None and same < len(items) else None,
+                                  "extra": sorted((sent.get("extra_body") or {}).keys())})
+            return create(client, kwargs)
+        mp.create = recording
         voice.ready = lambda: True                           # "spoken" at once, without the voice service
         voice.speak = lambda text, fmt="silk", timeout=0: b"#!SILK_V3" + str(text).encode("utf-8")
 
@@ -429,6 +455,7 @@ class Eval:
     def run(self, index: int, sc: dict[str, Any]) -> dict[str, Any]:
         _reset_events()
         mark = self._usage_mark()
+        first_request = len(self.requests)
         commitments = self.db.fetch_one("SELECT COUNT(*) AS n FROM commitments")["n"]
         started = time.monotonic()
         error = None
@@ -476,7 +503,7 @@ class Eval:
             ok, problems = False, problems + [error]
         return {"id": sc["id"], "where": sc["where"], "say": sc["say"], "ok": ok, "problems": problems,
                 "did": ev, "usage": usage, "seconds": round(time.monotonic() - started, 1),
-                "note": sc["note"]}
+                "note": sc["note"], "requests": self.requests[first_request:]}
 
 
 def summary_line(r: dict[str, Any]) -> str:
@@ -488,9 +515,15 @@ def summary_line(r: dict[str, Any]) -> str:
     said = " / ".join(t.replace("\n", " ") for t in did["texts"])[:90]
     u = r["usage"]
     cache = f"{100 * u['cached'] // u['prompt']}%" if u["prompt"] else "-"
-    return (f"{'✔' if r['ok'] else '✘'} {r['id']:<20} {' '.join(a for a in acts if a) or '只打字' if did['texts'] else '没说话'}"
+    line = (f"{'✔' if r['ok'] else '✘'} {r['id']:<20} {' '.join(a for a in acts if a) or '只打字' if did['texts'] else '没说话'}"
             f" | {said}" + (f" | 问题：{'；'.join(r['problems'])}" if r["problems"] else "")
             + f" | {u['calls']} 次调用 {u['prompt']} 输入 缓存 {cache}")
+    first = (r.get("requests") or [None])[0]
+    if first and first["same"] is not None:              # the first call against the previous one of its kind
+        changed = first["changed"]
+        line += (f"\n    前缀：和上一次 {first['kind']} 相同到第 {first['same']}/{first['items']} 项"
+                 + (f"，先变的是 {changed[0]}「{changed[2]}」" if changed else "") + f"；附带 {first['extra'] or '无'}")
+    return line
 
 
 def main(argv: list[str] | None = None) -> int:
