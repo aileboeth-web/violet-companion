@@ -223,6 +223,14 @@ def prepare(env_file: Path | None, work: Path, servers: list[dict[str, Any]], mo
     (data / "voice" / "reference.wav").write_bytes(b"RIFF" + b"\0" * 40)
     (data / "voice" / "reference.txt").write_text("评测用的参考录音", encoding="utf-8")
     env = dict(real)
+    # what was changed in the Control Center (models, the API key, switches) sits on top of violet.env
+    for name in ("settings.json", "secrets.json"):
+        try:
+            values = json.loads((real_data / "control" / name).read_text(encoding="utf-8")).get("values") or {}
+        except (OSError, ValueError):
+            values = {}
+        for key, value in values.items():
+            env[key] = "1" if value is True else "0" if value is False else str(value)
     env.update({
         "VIOLET_DB_PATH": str(work / "eval.db"), "VIOLET_DATA_DIR": str(data), "VIOLET_MEDIA_DIR": str(work / "media"),
         "VIOLET_LOG_FILE": "", "MCP_SERVERS": json.dumps(servers, ensure_ascii=False), "VIOLET_WEB_ENABLED": "0",
@@ -434,10 +442,13 @@ class Eval:
         ev = {k: list(v) for k, v in EVENTS.items()}
         ev["reminders"] = self.db.fetch_one("SELECT COUNT(*) AS n FROM commitments")["n"] - commitments
         ok, problems = check(sc, ev)
+        usage = self._usage_since(mark)
+        if not usage["calls"]:
+            ok, problems = False, problems + ["一次模型都没调用成功（多半是出错了）"]
         if error:
             ok, problems = False, problems + [error]
         return {"id": sc["id"], "where": sc["where"], "say": sc["say"], "ok": ok, "problems": problems,
-                "did": ev, "usage": self._usage_since(mark), "seconds": round(time.monotonic() - started, 1),
+                "did": ev, "usage": usage, "seconds": round(time.monotonic() - started, 1),
                 "note": sc["note"]}
 
 
@@ -472,9 +483,10 @@ def main(argv: list[str] | None = None) -> int:
         servers = start_fake_tools()
         prepare(args.env, work, servers, args.mock)
         import logging
-        logging.basicConfig(level=logging.ERROR, force=True)
-        for name in ("httpx", "mcp", "violet", "uvicorn"):
-            logging.getLogger(name).setLevel(logging.ERROR)
+        logging.basicConfig(level=logging.CRITICAL, force=True)   # failures show up in the scenario's problems
+        if not os.environ.get("LLM_API_KEY", "").strip() and not args.mock:
+            print("没有找到模型的 API Key（violet.env 和管理后台的设置里都没有），停止", flush=True)
+            return 1
         ev = Eval(args.mock)
         from ai.tool_manager import discover
         catalog = discover()
