@@ -148,8 +148,10 @@ class ContextPacket:
 # prompt cache; the persona, the relationship and the preferences stay in front
 _HISTORY_ANCHORS: dict[tuple[str, str], Any] = {}      # (database, mode) -> id of the first history message shown
 
+# "relationship" too: "第一次聊天在 11-01 19:52（1 分钟前）" changed every call (second eval on the server: the owner's
+# chat had 0% cache on every first call while the groups had 88-92%)
 VOLATILE_SECTIONS = {"profile", "situation", "commitments", "recall", "restricted", "known_keys", "onboarding", "base",
-                     "persona_dynamic", "violet_life", "external_info", "social", "ai_experience"}
+                     "persona_dynamic", "violet_life", "external_info", "social", "ai_experience", "relationship"}
 
 
 class ContextEngine:

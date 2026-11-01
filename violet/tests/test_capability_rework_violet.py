@@ -130,6 +130,27 @@ def test_chat_puts_this_turn_after_the_history(agents, violetdb):
     assert all("_cache_break" not in m for m in messages)
 
 
+def test_two_different_turns_begin_the_same(agents, violetdb):
+    """Everything before the history is the same from turn to turn (the provider's prompt cache serves it). The second
+    server eval: "【你们的相处】第一次聊天在 …（1 分钟前）" sat in front and changed every call -> 0% cache."""
+    fake, a = agents
+    for text in ("今天好累", "发语音给我听听"):
+        violetdb.execute("DELETE FROM messages")
+        violetdb.add_message("user", "incoming", "text", "随便聊聊" + text)
+        _run(a, text)
+    first, second = fake.calls_for("fake-chat")[-2:]
+
+    def front(call):
+        out = []
+        for m in call["messages"]:
+            if m["role"] != "system":
+                break
+            out.append(m)
+        return out
+    assert front(first) == front(second) and len(front(first)) >= 3
+    assert [t["function"]["name"] for t in first.get("tools") or []] == [t["function"]["name"] for t in second.get("tools") or []]
+
+
 def test_the_history_window_keeps_its_start(monkeypatch, violetdb):
     from ai.context_engine import ContextEngine, _HISTORY_ANCHORS
     monkeypatch.setenv("VIOLET_CONTEXT_STABLE_HISTORY", "1")
