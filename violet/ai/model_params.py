@@ -111,6 +111,8 @@ def _late_system_as_user(messages: list[Any]) -> list[Any]:
     messages go as labelled user messages. VIOLET_LATE_SYSTEM_AS_USER=0: as they are."""
     if not env_str("VIOLET_LATE_SYSTEM_AS_USER", "1").strip().lower() in ("1", "true", "yes", "on"):
         return messages
+    # the unchanging beginning ends at the first CACHE_MARK (ChatAgent marks it; with an empty history this turn's notes
+    # follow the fixed system messages directly -- the second probe run: still 0%), else at the first non-system one
     out, started = [], False
     for m in messages:
         if isinstance(m, dict) and m.get("role") == "system" and started:
@@ -119,7 +121,7 @@ def _late_system_as_user(messages: list[Any]) -> list[Any]:
                 m = {**m, "role": "user", "content": LATE_SYSTEM_LABEL + content}
             elif isinstance(content, list):
                 m = {**m, "role": "user", "content": [{"type": "text", "text": LATE_SYSTEM_LABEL.strip()}, *content]}
-        elif isinstance(m, dict) and m.get("role") != "system":
+        elif isinstance(m, dict) and (m.get("role") != "system" or m.get(CACHE_MARK)):
             started = True
         out.append(m)
     return out

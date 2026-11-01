@@ -101,8 +101,29 @@ def test_system_messages_after_the_conversation_began_go_as_user(monkeypatch):
     sent = mp.apply({"model": "gpt-6-luna", "messages": msgs})["messages"]
     assert [m["role"] for m in sent] == ["system", "system", "user", "user", "user"]
     assert sent[3]["content"] == mp.LATE_SYSTEM_LABEL + "当前时间 20:01" and sent[:3] == msgs[:3]
+    # no history yet: the fixed part ends at the cache mark, this turn's notes right after it are not system either
+    fresh = [{"role": "system", "content": "规则", mp.CACHE_MARK: True}, {"role": "system", "content": "当前时间 20:14"},
+             {"role": "user", "content": "早安"}]
+    assert [m["role"] for m in mp.apply({"model": "gpt-6-luna", "messages": fresh})["messages"]] == ["system", "user", "user"]
     monkeypatch.setenv("VIOLET_LATE_SYSTEM_AS_USER", "0")
     assert mp.apply({"model": "gpt-6-luna", "messages": msgs})["messages"] == msgs
+
+
+def test_chat_sends_only_the_fixed_part_as_system(agents, monkeypatch, violetdb):
+    """With and without history, every system message the model gets is part of the fixed beginning."""
+    fake, a = agents
+    monkeypatch.setenv("VIOLET_LATE_SYSTEM_AS_USER", "1")
+    _run(a, "早安")                                                            # no history
+    violetdb.add_message("user", "incoming", "text", "昨天的话")
+    _run(a, "今天好累")                                                        # with history
+    first, second = fake.calls_for("fake-chat")[-2:]
+    for call in (first, second):
+        roles = [m["role"] for m in call["messages"]]
+        last_system = max(i for i, r in enumerate(roles) if r == "system")
+        assert all(r == "system" for r in roles[:last_system + 1])            # one block at the front
+        assert not any("当前时间" in str(m["content"]) for m in call["messages"] if m["role"] == "system")
+    systems = lambda call: [m for m in call["messages"] if m["role"] == "system"]
+    assert systems(first) == systems(second)
 
 
 def test_a_relay_that_refuses_a_hint_never_gets_it_again(monkeypatch):
