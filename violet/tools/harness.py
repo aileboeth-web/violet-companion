@@ -195,6 +195,9 @@ def prepare_environment(workdir: Path | None = None, config_file: Path | None = 
         # 2026-11-01: the scripted rounds and their call caps were written with the Intent call (VTEST_: the test
         # launchers pass no VIOLET_ variable on to the tools they start)
         environ["VIOLET_INTENT_STEP"] = intent
+    late = environ.get("VTEST_LATE_SYSTEM_AS_USER")
+    if late in ("0", "1"):                       # 2026-11-01: the scripted checks look for those system messages
+        environ["VIOLET_LATE_SYSTEM_AS_USER"] = late
     if (environ.get("VIOLET_TEST_WEB_AUTO_READ") or "").isdigit():
         # 2026-10-30: a test that counts every web request can switch the automatic page reads off
         environ["VIOLET_WEB_AUTO_READ"] = environ["VIOLET_TEST_WEB_AUTO_READ"]

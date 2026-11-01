@@ -59,6 +59,7 @@ os.environ.update({
     # 2026-11-01: production sends system messages after the conversation began as labelled user messages
     # (ai/model_params._late_system_as_user); the many tests that look for those system messages see them as built
     "VIOLET_LATE_SYSTEM_AS_USER": "0",
+    "VTEST_LATE_SYSTEM_AS_USER": "0",                  # ... also in tools/harness.py sessions and tools a test starts
 })
 for _key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
     os.environ.pop(_key, None)
