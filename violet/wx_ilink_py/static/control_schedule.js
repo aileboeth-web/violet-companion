@@ -80,7 +80,7 @@
     S.overview = await api("GET", base);
     const o = S.overview, sel = $("#sch-term");
     const banner = [];
-    if (!o.enabled) banner.push("Violet 现在不会查课表（“设置 → 工具与 MCP（含课表）→ 课表查询”没有打开）；这里仍然可以录入和整理。");
+    if (!o.enabled) banner.push("Violet 现在不会查课表（上面的“课表查询”没有打开）；这里仍然可以录入和整理。");
     if (o.server_disabled) banner.push("工具页里停用了 violet-schedule，Violet 现在不会查课表。");
     if (o.tools_disabled && o.tools_disabled.length) banner.push("工具页里停用了：" + o.tools_disabled.join("、") + "。");
     $("#sch-guide").open = !o.terms.length;
@@ -112,7 +112,24 @@
       await showView(S.view);
     } catch (e) { toast("课表读取失败：" + e.message, false); }
   }
-  loaders.schedule = () => refresh(true);
+  // 2026-11-02: the three timetable switches live here (they were under 设置 → 工具与 MCP / 主动联系)
+  const switches = {};
+  async function loadSwitches() {
+    const box = $("#sch-switches");
+    let d;
+    try { d = await api("GET", "/api/control/settings"); } catch (e) { box.replaceChildren(h("p", { class: "err", text: e.message })); return; }
+    for (const k of Object.keys(switches)) delete switches[k];
+    const btn = h("button", { type: "button", text: "保存", disabled: true, onclick: async () => {
+      try {
+        await api("PUT", "/api/control/settings", { changes: { ...switches }, reason: "课表页" });
+        toast("已保存"); loadSwitches(); refresh(true);
+      } catch (e) { toast(e.message, false); }
+    } });
+    box.replaceChildren(h("h3", { text: "让她知道你的课表" }),
+      ...d.settings.filter((s) => s.group === "schedule").map((s) => settingInput(s, { pending: switches, changed: () => { btn.disabled = false; } })),
+      h("div", { class: "row" }, btn));
+  }
+  loaders.schedule = () => { loadSwitches(); return refresh(true); };
 
   async function showView(view) {
     S.view = view;

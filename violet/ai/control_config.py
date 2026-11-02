@@ -36,7 +36,7 @@ from ai.settings import ENV_PATH, PROJECT_ROOT
 
 logger = logging.getLogger("violet.control")
 
-ROLES = (("INTENT", "IntentAgent（理解每句话）"), ("CHAT", "ChatAgent（写回复）"), ("MEMORY", "MemoryAgent（记忆）"),
+ROLES = (("INTENT", "IntentAgent（理解每句话；默认不用，见 设置 → 聊天行为）"), ("CHAT", "ChatAgent（写回复）"), ("MEMORY", "MemoryAgent（记忆）"),
          ("PROACTIVE", "ProactiveAgent（主动联系决策）"), ("PERFORMER", "PerformerAgent（执行任务）"))
 MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,119}$")
 HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -120,7 +120,8 @@ SETTINGS: list[Setting] = [
             target="proactive", path=("quiet_hours", "start")),
     Setting("proactive.quiet_end", "静默时段结束", "proactive", "hhmm", "now", "", "08:00",
             target="proactive", path=("quiet_hours", "end")),
-    Setting("proactive.daily_limit", "每天最多主动几次", "proactive", "int", "now", "", 3, 0, 20,
+    # 2026-11-02: up to 100 (the user's Eve had 50; ai/eve_import.py brings it over)
+    Setting("proactive.daily_limit", "每天最多主动几次", "proactive", "int", "now", "", 3, 0, 100,
             target="proactive", path=("daily_message_limit",)),
     Setting("proactive.after_user_minutes", "对方说话后至少隔多久（分钟）", "proactive", "int", "now", "", 90, 0, 1440,
             target="proactive", path=("min_minutes_after_user_message",)),
@@ -137,7 +138,7 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_WEB_ENABLED", "联网搜索和网页阅读", "web", "bool", "now",
             "开启后 Violet 在需要实时信息时可以搜索（需要下面的 SearXNG 地址，或在 .env 里配置其他搜索服务）", False),
     Setting("VIOLET_WEB_SEARXNG_URL", "SearXNG 地址", "web", "url", "now",
-            "自建 SearXNG 的地址，例如 http://127.0.0.1:18089（部署方法见 deploy/searxng/README.md）", optional=True),
+            "自建 SearXNG 的地址，例如 http://127.0.0.1:18089；在“工具与手机 → 联网工具”里一键安装会自动填好", optional=True),
     Setting("VIOLET_CHAT_TOOLS_DIRECT", "查询工具直接交给回复", "mcp", "bool", "now",
             "开：每一轮回复都能直接用连上的只读工具（联网搜索、课表、手机状态等），自己判断要不要查；"
             "关：只在意图识别判断要查时才给（以前的做法，少一点 token，但容易漏查）", True),
@@ -157,10 +158,10 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_WEB_AUTO_READ", "搜索时自动打开几个网页", "web", "int", "now",
             "搜索结果只有标题和一句摘要时（必应直连就是这样），自动打开排在前面的几个网页，把正文一起交给她，"
             "她就能按网页内容回答（比如天气的具体温度）；每打开一个算一次网页读取。0 = 只搜索不打开", 2, 0, 3),
-    Setting("VIOLET_SCHEDULE_ENABLED", "课表查询（violet-schedule）", "mcp", "bool", "now",
+    Setting("VIOLET_SCHEDULE_ENABLED", "课表查询（violet-schedule）", "schedule", "bool", "now",
             "Violet 可以查你在“课表”页录入的课表", False),
-    Setting("VIOLET_SCHEDULE_CONTEXT", "聊天时考虑课表", "mcp", "bool", "now", "聊天时知道你现在是不是在上课", False),
-    Setting("VIOLET_SCHEDULE_PROACTIVE", "主动联系避开上课", "proactive", "bool", "now",
+    Setting("VIOLET_SCHEDULE_CONTEXT", "聊天时考虑课表", "schedule", "bool", "now", "聊天时知道你现在是不是在上课", False),
+    Setting("VIOLET_SCHEDULE_PROACTIVE", "主动联系避开上课", "schedule", "bool", "now",
             "上课、考试时不主动找你（按课表计算）", False),
     # Violet stage 3: everything a user may want to change without editing .env. Left out on purpose: what the
     # installer owns (paths, port, HTTPS, data directory, admin token), stdio MCP commands, test switches.
@@ -177,7 +178,7 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_WEB_SEARCH_LANGUAGE", "搜索语言", "web", "choice", "now", "SearXNG 搜索结果的语言", "zh-CN",
             choices=(("zh-CN", "简体中文"), ("zh-TW", "繁體中文"), ("en", "English"), ("ja", "日本語"), ("all", "不限"))),
     Setting("VIOLET_WEB_EXPLORER", "允许自主探索", "web", "bool", "now",
-            "允许 Violet 在空闲时自己上网看看感兴趣的东西（会用模型、计入联网次数）；打开后还要在“联网与探索”页开启", False),
+            "允许 Violet 在空闲时自己上网看看感兴趣的东西（会用模型、计入联网次数）；打开后还要在“工具与手机 → 联网工具”里点“开始探索”", False),
     Setting("VIOLET_WEB_EXPLORER_LLM_MODEL", "自主探索用的模型", "web", "model", "now", "留空 = 不探索", optional=True),
     # 2026-10-29: Violet's social life on the channel "QQ" (ai/social): groups are chosen per group on the channels page
     Setting("VIOLET_SOCIAL_PRIVATE", "别人私聊她", "social", "choice", "now",
@@ -213,18 +214,18 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_SOCIAL_OWNER_DIGEST", "把群里的事告诉你", "social", "bool", "now",
             "和你聊天时，她知道自己最近在群里说过什么（反过来，你私聊的内容永远不会带到群里）", True),
     # 0.7.9 (user: "他不会发表情包，也不能收藏表情包，也不可以发动态"): ai/stickers.py, ai/social/qzone.py
-    Setting("VIOLET_STICKERS", "表情包", "social", "bool", "now",
+    Setting("VIOLET_STICKERS", "表情包", "stickers", "bool", "now",
             "她可以从自己收藏的表情包里挑一个发（和你聊天、在群里都可以）；收藏在“图片”页管理", True),
-    Setting("VIOLET_STICKER_AUTO_COLLECT", "收藏你发的表情包", "social", "bool", "now",
+    Setting("VIOLET_STICKER_AUTO_COLLECT", "收藏你发的表情包", "qq_stickers", "bool", "now",
             "你在 QQ 上发给她的表情包自动存进她的收藏（用识图结果当说明）", True),
-    Setting("VIOLET_STICKER_QQ_SYNC", "用 QQ 号收藏的表情", "social", "bool", "now",
+    Setting("VIOLET_STICKER_QQ_SYNC", "用 QQ 号收藏的表情", "qq_stickers", "bool", "now",
             "QQ 登录后和之后每 6 小时，把这个 QQ 号自己收藏的表情放进她的收藏，并用识图模型分批写好说明（她只会用有说明的表情包）", True),
-    Setting("VIOLET_STICKER_LOOK", "看别人发的表情包", "social", "bool", "now",
+    Setting("VIOLET_STICKER_LOOK", "看别人发的表情包", "qq_stickers", "bool", "now",
             "群里或别人私聊发来没见过的表情包时，用识图模型看一眼（同一个表情包只看一次；会用识图模型）", True),
-    Setting("VIOLET_QZONE_ENABLED", "发 QQ 动态", "social", "bool", "now",
+    Setting("VIOLET_QZONE_ENABLED", "发 QQ 动态", "qzone", "bool", "now",
             "她偶尔在 QQ 空间发一条说说（9:00–23:00，两条至少隔 4 小时，只写她自己的生活，不写你的事）；"
             "发过的动态在“聊天渠道 → QQ”下面能看到", False),
-    Setting("VIOLET_QZONE_DAILY", "每天最多自己发几条动态", "social", "int", "now",
+    Setting("VIOLET_QZONE_DAILY", "每天最多自己发几条动态", "qzone", "int", "now",
             "0 = 不限（仍然至少隔 4 小时）；你在后台手动发的不算", 1, 0, 20),
     Setting("VIOLET_IMAGE_ENABLED", "图片功能", "images", "bool", "now",
             "关闭时收到的图片只用下面的识图模型看一眼，聊天里没有生成 / 编辑图片的工具", False),
@@ -354,8 +355,12 @@ COMMON_KEYS = frozenset({
 })
 GROUPS = {"api": "接口", "models": "模型与 Agent", "prompts": "提示词版本", "messages": "消息发送", "proactive": "主动联系",
           "life": "生活引擎", "behavior": "聊天行为", "memory": "记忆与提醒", "guard": "回复检查", "web": "联网搜索",
-          "voice": "语音", "images": "图片", "social": "QQ 群聊、表情包与动态", "mcp": "工具与 MCP（含课表）",
+          "voice": "语音", "images": "图片", "stickers": "表情包", "social": "QQ 群聊和别人的私聊",
+          "qq_stickers": "QQ 上的表情包", "qzone": "QQ 动态", "mcp": "工具与 MCP", "schedule": "课表",
           "system": "系统", "logs": "日志与排查", "updates": "版本更新"}
+# 2026-11-02 (user: 聊天渠道是分开的，设置里却全归为一类): the settings page has tabs 通用 / 微信 / QQ / Telegram; these
+# groups belong to one channel's tab, every other group to 通用. The QQ ones only work on the personal-QQ channel.
+GROUP_CHANNEL = {"social": "qq", "qq_stickers": "qq", "qzone": "qq"}
 TEXT_MAX = 200
 RESET_KEEPS = ("api", "models")          # "清除所有配置" keeps the model service
 

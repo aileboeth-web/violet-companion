@@ -135,7 +135,7 @@
       d.error ? h("p", { class: "note", text: d.error }) : null,
       ...(groups.length ? groups.map((g) => convCard(g, true)) : [h("p", { class: "note", text: "还没有群。把这个 QQ 号拉进群后点“刷新状态”。" })]),
       h("h3", { text: "别人私聊她" }),
-      h("p", { class: "note", text: `现在的设置：${PRIV[d.settings.private] || d.settings.private}（在“设置 → QQ 群聊、表情包与动态”里改）。你自己的私聊不在这里，照常进你们的对话。` }),
+      h("p", { class: "note", text: `现在的设置：${PRIV[d.settings.private] || d.settings.private}（在“设置 → QQ”里改）。你自己的私聊不在这里，照常进你们的对话。` }),
       ...(d.privates.length ? d.privates.map((c) => convCard(c, false)) : [h("p", { class: "note", text: "还没有别人私聊过她。" })]),
       h("h3", { text: "QQ 动态" }),
       qzone,

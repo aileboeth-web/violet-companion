@@ -358,12 +358,35 @@ class SocialEngine:
         speaking = "" if testing else voice.prompt_note(json_field=True)
         if speaking:                                     # 2026-10-31: she can send a voice message (11-01: always)
             system = system + "\n\n" + speaking
+        # 2026-11-02: the 流程 page records every social decision that reaches the model (ai/pipeline_state.py)
+        from ai import pipeline_state as _ps
+        last = unread[-1] if unread else None
+        _ps.pipeline_start("social", (f"{last.get('sender_name') or last.get('sender_id') or ''}：{last.get('content') or ''}"
+                                      if last else {"wake": "到了她约好的时间", "idle": "群里冷场了"}.get(trigger, trigger)),
+                           channel=conv["channel"], title=conv.get("title") or conv["peer_id"])
+        _ps.node_start("Social", {"trigger": trigger, "kind": conv["kind"], "unread": len(unread),
+                                  "messages": [{"role": "system", "content": system},
+                                               {"role": "user", "content": "\n\n".join(str(p) for p in user)}]})
+        try:
+            return self._decide_and_act(conv, system, user, tools, unread, owner_ids, testing, sticker_lines,
+                                        adapter, today, newest, trigger)
+        except Exception as exc:
+            _ps.pipeline_end(error=f"{exc.__class__.__name__}: {exc}")
+            raise
+
+    def _decide_and_act(self, conv, system, user, tools, unread, owner_ids, testing, sticker_lines, adapter, today,
+                        newest, trigger) -> dict[str, Any] | None:
+        from ai import pipeline_state as _ps
+        from ai.social import llm, prompts
+        conversation_id = conv["id"]
         try:
             decision, model, latency = (llm.decide(system, user, tools=tools) if tools is not None and tools.names
                                         else llm.decide(system, user))
         except llm.SocialLLMError as exc:
             self.store.record_decision(conversation_id, trigger=trigger, action="error", error=str(exc)[:300])
             trace.step("社交决定", 会话=conv["id"], 结果="失败", 原因=str(exc))
+            _ps.node_done("Social", output_data={"error": str(exc)})
+            _ps.pipeline_end(error=str(exc))
             return None
         called = conv["kind"] == "group" and any(m["mentions_self"] for m in unread)
         if called and str(decision.get("action") or "silent").lower() in ("silent", "wait") and not testing \
@@ -377,7 +400,12 @@ class SocialEngine:
                 pass
         if tools is not None and tools.image_asset_ids:
             decision = {**decision, "_images": list(tools.image_asset_ids)}
+        _ps.node_done("Social", "Act", output_data={"decision": decision, "model": model, "latency_ms": latency,
+                                                    "tools_used": list(getattr(tools, "calls", None) or [])})
+        _ps.node_start("Act", {"action": decision.get("action")})
         result = self._act(conv, decision, adapter, today, newest, trigger, model, latency)
+        _ps.node_done("Act", output_data=result)
+        _ps.pipeline_end()
         result["mentioned"] = any(m["mentions_self"] for m in unread)
         if testing:
             # for the diagnosis: what the model said it could not do, and whether the owner asked for a sticker

@@ -13,6 +13,7 @@
   <nav class="tabs" id="tabs">
     <button data-tab="setup">开始</button>
     <button data-tab="overview" class="active">概览</button>
+    <button data-tab="flow">流程</button>
     <div class="nav-label">配置</div>
     <button data-tab="model">模型服务</button>
     <button data-tab="channels">聊天渠道</button>
@@ -24,6 +25,7 @@
     <div class="nav-label">数据</div>
     <button data-tab="chat">聊天记录</button>
     <button data-tab="memories">记忆</button>
+    <button data-tab="import">从 Eve 导入</button>
     <div class="nav-label">维护</div>
     <button data-tab="diagnostics">诊断</button>
     <button data-tab="logs">日志</button>
@@ -101,6 +103,16 @@
     <p class="note" id="ov-note"></p>
   </section>
 
+  <section id="tab-flow" class="tab">
+    <div class="row"><h2>流程</h2><button class="ghost" id="flow-refresh" type="button">刷新</button>
+      <label class="check"><input type="checkbox" id="flow-live" checked> 实时更新</label></div>
+    <p class="note">她处理每一轮消息时走过的步骤：你的消息、主动联系、QQ 群聊和别人的私聊都算。点一步看它收到了什么、给出了什么（包括发给模型的完整内容）。只保留最近 20 轮，存在内存里，重启后清空。</p>
+    <div class="flow">
+      <aside class="flow-side"><div id="flow-list" class="flow-list"></div></aside>
+      <div class="flow-main" id="flow-run"></div>
+    </div>
+  </section>
+
   <section id="tab-chat" class="tab">
     <div id="hist-chans" class="hist-chans" role="tablist" aria-label="聊天渠道"></div>
     <div class="hist">
@@ -125,6 +137,24 @@
     </details>
   </section>
 
+  <section id="tab-import" class="tab">
+    <h2>从 Eve 导入</h2>
+    <p class="note">把以前 Project Eve 的聊天记录、记忆和发送频率设置搬过来。先预览（只显示条数和设置值，不显示聊天内容），确认后才导入。</p>
+    <div class="card">
+      <h3>1. 在 Eve 的服务器上打包</h3>
+      <p class="note">用 root 登录 Eve 所在的服务器，粘贴下面这一行。它会找到 Eve 的数据库并复制一份（Eve 开着也行），带上 proactive_config.json 和 .env 里的普通设置（不带任何 Key、密码、提示词和地址），打成 /root/eve-export.tar.gz。</p>
+      <pre class="prompt-part" id="eve-pack"></pre>
+      <div class="row"><button class="ghost" id="eve-pack-copy" type="button">复制命令</button></div>
+      <h3>2. 下载到电脑，在这里上传</h3>
+      <div class="filters">
+        <label class="grow">文件 <input type="file" id="eve-file" accept=".gz,.tgz,.tar,.zip,.db,.json"></label>
+        <button id="eve-upload" type="button">上传并预览</button>
+      </div>
+      <p class="note" id="eve-status"></p>
+    </div>
+    <div id="eve-preview" class="stack-wide"></div>
+  </section>
+
   <section id="tab-memories" class="tab">
     <div class="filters">
       <label>类型 <select id="mem-kind"><option value="event">事件记忆</option><option value="core">核心记忆</option></select></label>
@@ -139,21 +169,30 @@
 
   <section id="tab-settings" class="tab">
     <h2>设置</h2>
-    <nav class="jump" id="set-jump" aria-label="设置分类"></nav>
-    <p class="note">模型和 API 在“模型服务”页。只列出代码里真正会读取的设置。“立即生效”保存后马上用于新的请求；“重启后生效”需要重启 Violet。保存前会整体检查，有任何一项不合格就一项也不改。</p>
-    <div class="set-group" id="set-g-permissions"><h3>她能自己做的事</h3><div id="set-permissions"></div></div>
-    <div id="set-groups"></div>
+    <!-- 2026-11-02 (user: 聊天渠道是分开的，设置里却全归为一类): 通用 / 微信 / QQ / Telegram -->
+    <nav class="subtabs" id="set-tabs" aria-label="设置分页">
+      <button type="button" data-set="general" class="active">通用</button><button type="button" data-set="wechat">微信</button>
+      <button type="button" data-set="qq">QQ</button><button type="button" data-set="telegram">Telegram</button>
+    </nav>
+    <div class="set-panel" id="set-p-general">
+      <nav class="jump" id="set-jump" aria-label="设置分类"></nav>
+      <p class="note">对所有聊天渠道都生效的设置。模型和 API 在“模型服务”页，图片在“图片”页，课表的开关在“课表”页。“立即生效”保存后马上用于新的请求；“重启后生效”需要重启 Violet。保存前会整体检查，有任何一项不合格就一项也不改。</p>
+      <div class="set-group" id="set-g-permissions"><h3>她能自己做的事</h3><div id="set-permissions"></div></div>
+      <div id="set-groups"></div>
+    </div>
+    <div class="set-panel" id="set-p-wechat" hidden></div>
+    <div class="set-panel" id="set-p-qq" hidden></div>
+    <div class="set-panel" id="set-p-telegram" hidden></div>
     <div class="savebar"><input id="set-reason" maxlength="200" placeholder="修改原因（可选，会记在修改记录里）">
       <button id="set-save" disabled>保存修改</button>
       <button class="ghost" id="set-restart" type="button">重启 Violet</button></div>
     <p class="note" id="set-restart-note"></p>
-    <h3>生活引擎</h3>
-    <div class="row"><span id="life-mode" class="pill"></span>
-      <button class="ghost" data-life="pause">暂停</button><button class="ghost" data-life="resume">恢复</button></div>
-    <h3>清除数据 / 翻篇</h3>
-    <div class="card danger-zone">
-      <p class="note">清除她的全部记忆、把全部配置恢复默认、翻篇（她看不到以前的聊天，像重新开始），可以任选。聊天记录不会删除。</p>
-      <button class="danger" id="set-reset" type="button">清除记忆 / 配置 / 翻篇…</button>
+    <div id="set-danger">
+      <h3>清除数据 / 翻篇</h3>
+      <div class="card danger-zone">
+        <p class="note">清除她的全部记忆、把全部配置恢复默认、翻篇（她看不到以前的聊天，像重新开始），可以任选。聊天记录不会删除。</p>
+        <button class="danger" id="set-reset" type="button">清除记忆 / 配置 / 翻篇…</button>
+      </div>
     </div>
   </section>
 
@@ -206,13 +245,14 @@
 
   <section id="tab-schedule" class="tab">
     <p class="note" id="sch-banner"></p>
+    <div class="card" id="sch-switches"></div>
     <details class="card sch-guide" id="sch-guide">
       <summary>第一次用？四步录好课表</summary>
       <ol>
         <li><strong>新建学期</strong>：点下面的“新建学期”，名称写教务系统课表上的学年学期（例如 2026-2027-1），再填“今天是第几周”，其他日期会自动算。</li>
         <li><strong>导入课表</strong>：到“导入 / 导出”，直接选教务系统导出的 <strong>.xls</strong> 课表（也可以用 .csv / .json 模板），点“预览”，看没问题再点“确认导入”。</li>
         <li><strong>核对</strong>：回到“周视图”，翻到本周和下一周看看。单双周（例如 1,3,5…15 周）、只上前半学期（1-8 周）、换教室的周都按表里的“周次”自动处理，不用一周一周设。</li>
-        <li><strong>让她知道</strong>：到“设置 → 工具与 MCP（含课表）”打开“课表查询”和“聊天时考虑课表”；不想上课时被她找，再到“设置 → 主动联系”打开“主动联系避开上课”。</li>
+        <li><strong>让她知道</strong>：在这一页上面的“让她知道你的课表”里打开“课表查询”和“聊天时考虑课表”；不想上课时被她找，再打开“主动联系避开上课”。</li>
       </ol>
       <p class="note">临时停课、调课：在周视图里点那一节课；考试和放假在“考试、假期、调课”里加。</p>
     </details>
@@ -403,5 +443,7 @@
 <script src="/static/control_images.js"></script>
 <script src="/static/control_stickers.js"></script>
 <script src="/static/control_voice.js"></script>
+<script src="/static/control_flow.js"></script>
+<script src="/static/control_eve_import.js"></script>
 </body>
 </html>

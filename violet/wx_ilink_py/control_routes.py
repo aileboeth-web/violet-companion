@@ -65,7 +65,7 @@ def _inline_stylesheet(html: str, static_folder: str | None) -> str:
 
 def register_control_routes(app: Flask, violetdb, client=None, proactive_scheduler=None, all_agents=None, runtime=None,
                             reload_all: Callable[[], None] | None = None) -> None:
-    from ai.control_config import GROUPS, StoreError, ValidationError, store
+    from ai.control_config import GROUP_CHANNEL, GROUPS, StoreError, ValidationError, store
 
     def ok(data: Any = None, status: int = 200) -> Response:
         return jsonify({"ok": True, "data": data}), status
@@ -199,6 +199,18 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
         from ai.agents.chat_agent import LAST_PROMPT
         return ok(dict(LAST_PROMPT) or None)
 
+    # 2026-11-02 (user: Eve 原来的 Intent 分析、Chat 生成那种页面，放在概览旁边叫“流程”): the last 20 runs, in memory
+    @app.get("/api/control/flow")
+    def control_flow():
+        from ai import pipeline_state
+        return ok({"runs": pipeline_state.recent(), "limit": pipeline_state.RUN_LIMIT})
+
+    @app.get("/api/control/flow/<int:run_id>")
+    def control_flow_run(run_id: int):
+        from ai import pipeline_state
+        run = pipeline_state.get_run(run_id)
+        return ok(run) if run is not None else bad("这一轮已经不在最近的记录里了", 404)
+
     def _usage_summary():
         from ai import usage                    # 2026-10-30: tokens of every model call today
         try:
@@ -270,7 +282,9 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
         if role not in ("", "user", "assistant"):
             return bad("role 只能是 user 或 assistant")
         limit = _int(request.args.get("limit"), 100, 1, MAX_PAGE)
-        before = _int(request.args.get("before_id"), 0, 0, 2**62)
+        # 2026-11-02: messages imported from Eve have ids at or below 0 (ai/eve_import.py), so "no cursor" is the
+        # absent parameter, not 0
+        before = _int(request.args.get("before_id"), None, -(2**62), 2**62) if request.args.get("before_id") else None
         where, params = [], []
         if day:
             where.append("created_at >= ? AND created_at < ?")
@@ -282,7 +296,7 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
         if role:
             where.append("role = ?")
             params.append(role)
-        if before:
+        if before is not None:
             where.append("id < ?")
             params.append(before)
         channel = (request.args.get("channel") or "").strip()[:64]
@@ -430,6 +444,52 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
                            "truncated": len(rows) >= EXPORT_LIMIT, "messages": rows}, ensure_ascii=False, indent=1)
         return Response(body, mimetype="application/json", headers={
             "Content-Disposition": f'attachment; filename="violet-chat-{day_from}-{day_to}.json"'})
+
+    # ------------------------------------------------------------------ 2026-11-02: import from Project Eve
+    # (ai/eve_import.py) upload -> preview (counts only) -> commit with the channel the chat goes to
+    def _eve_preview(token: str):
+        from ai import eve_import
+        data = eve_import.preview(token, violetdb)
+        data["channels"] = [{"id": k, **v} for k, v in _channel_labels().items()]
+        return data
+
+    @app.post("/api/control/eve-import/upload")
+    def control_eve_upload():
+        from ai import eve_import
+        from urllib.parse import unquote
+        name = unquote(request.headers.get("X-Filename") or "")[:200]
+        try:
+            token = eve_import.stage(request.stream, name)
+            return ok(_eve_preview(token))
+        except eve_import.ImportError_ as exc:
+            return bad(str(exc))
+
+    @app.get("/api/control/eve-import/<token>")
+    def control_eve_preview(token: str):
+        from ai import eve_import
+        try:
+            return ok(_eve_preview(token))
+        except eve_import.ImportError_ as exc:
+            return bad(str(exc), 404)
+
+    @app.post("/api/control/eve-import/<token>/commit")
+    def control_eve_commit(token: str):
+        from ai import eve_import
+        body = request.get_json(silent=True) or {}
+        if body.get("confirm") is not True:
+            return bad("需要确认（confirm: true）")
+        channel = str(body.get("channel") or "").strip()[:64] or None
+        if channel is not None and channel not in _channel_labels():
+            return bad("没有这个聊天渠道")
+        settings = [str(k) for k in (body.get("settings") or []) if isinstance(k, str)][:100]
+        try:
+            return ok(eve_import.commit(token, violetdb, channel=channel, messages=bool(body.get("messages")),
+                                        memories=bool(body.get("memories")), settings=settings, actor=actor(),
+                                        apply=apply_now))
+        except eve_import.ImportError_ as exc:
+            return bad(str(exc))
+        except ValidationError as exc:
+            return bad("设置没有导入：" + str(exc), problems=exc.problems)
 
     # ------------------------------------------------------------------ memories
     def _memory(kind: str, memory_id: int) -> dict | None:
@@ -842,7 +902,7 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
 
     @app.get("/api/control/settings")
     def control_settings():
-        return ok({"groups": GROUPS, "settings": described(), "revision": store().revision()})
+        return ok({"groups": GROUPS, "group_channel": GROUP_CHANNEL, "settings": described(), "revision": store().revision()})
 
     @app.put("/api/control/settings")
     def control_settings_save():

@@ -352,4 +352,4 @@ def test_pages_are_reorganised_and_build_no_html():
                      "localStorage", "sessionStorage"):
             assert sink not in js, (name, sink)
     js = (ROOT / "wx_ilink_py" / "static" / "control.js").read_text(encoding="utf-8")
-    assert 'SETTINGS_ELSEWHERE = ["api", "models", "images"]' in js
+    assert 'SETTINGS_ELSEWHERE = ["api", "models", "images", "schedule"]' in js     # 2026-11-02: 课表 page

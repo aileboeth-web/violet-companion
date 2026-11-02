@@ -544,8 +544,12 @@ def run_pipeline(
     # phase 9.4.2: the user's own words of this turn decide which personal timetable fields a lookup may return
     # phase 10.6: the turn id is the correlation id of every log line and diagnosis event of this turn
     with turn_scope(turn_id), tool_turn(), turn_message(user_message):
-        result = _run_pipeline(user_message, intent_agent, chat_agent, performer_agent, memory_agent,
-                               defer_memory=defer_memory, turn_id=turn_id, turn_key=turn_key)
+        try:
+            result = _run_pipeline(user_message, intent_agent, chat_agent, performer_agent, memory_agent,
+                                   defer_memory=defer_memory, turn_id=turn_id, turn_key=turn_key)
+        except Exception as exc:
+            _ps.pipeline_end(error=f"{exc.__class__.__name__}: {exc}")   # the 流程 page: not "running" forever
+            raise
         _record_tool_plan(result)
         return result
 
@@ -597,7 +601,7 @@ def _run_pipeline(
         }
     """
     visualize_pipeline_start(user_message)
-    _ps.pipeline_start("chat", user_message[:60])
+    _ps.pipeline_start("chat", user_message[:60], turn_id=turn_id)
     errors: dict[str, str] = {}
 
     # Step 0 (phase 9.2): the external tools that are really available now -- Intent decides with this list
@@ -634,8 +638,8 @@ def _run_pipeline(
                    工具请求=intent_json.get("tool_query") or "没有", 问题=problem,
                    原始输出=trace.text(intent_result.get("content")))
     else:
-        _ps.node_skip("Intent")
-        intent_result = {"content": "", "messages": [], "raw": {}, "skipped": True}
+        _ps.node_skip("Intent", "意图识别已关闭（默认）：她直接回复，自己决定用不用工具")
+        intent_result ={"content": "", "messages": [], "raw": {}, "skipped": True}
         intent_json = {**DEFAULT_INTENT, "fallback": True, "skipped": True}
 
     def intent_done(*args, **kwargs) -> None:
@@ -757,7 +761,7 @@ def _run_pipeline(
         _ps.node_done("Performer", "Chat", output_data={"messages": performer_result.get("messages", []), "content": performer_result.get("content")})
     else:
         intent_done("Intent", "Chat", output_data={"messages": intent_result.get("messages", []), "content": intent_json})
-        _ps.node_skip("Performer")
+        _ps.node_skip("Performer", "这一轮不需要执行任务")
 
     direct = direct_tools(catalog) if reminder is None and forget is None else []
     # Step 2: 对话生成
@@ -824,11 +828,13 @@ def _run_pipeline(
         logger.exception("ChatAgent failed")
         errors["chat"] = f"{exc.__class__.__name__}: {exc}"
         chat_result = {"content": "", "messages": [], "raw": {}, "error": errors["chat"], "failed": True}
-    _ps.node_done("Chat", "Memory", output_data={"messages": chat_result.get("messages", []), "content": chat_result.get("content")})
+    _ps.node_done("Chat", "Memory", output_data={"messages": chat_result.get("messages", []), "content": chat_result.get("content"),
+                                                "usage": (chat_result.get("raw") or {}).get("usage"),
+                                                "error": chat_result.get("error")})
 
     # Step 3: 记忆判断（以本轮对话为输入）；测试模式不记
     if defer_memory or testing:
-        _ps.node_skip("Memory")
+        _ps.node_skip("Memory", "测试模式不记" if testing else "回复发出后在后台整理记忆")
         memory_result = {"content": "", "messages": [], "raw": {}, "skipped": True, "deferred": True}
         visualize_pipeline_end()
         _ps.pipeline_end(error="; ".join(f"{k}: {v}" for k, v in errors.items())[:500] if errors else None)
