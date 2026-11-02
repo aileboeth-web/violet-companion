@@ -163,6 +163,8 @@ def violetdb():
     for table in _TABLES:
         db.execute(f"DELETE FROM {table}")
     db.execute("UPDATE message_stats SET value = 0")
+    import shutil                                       # 2026-11-02: her look per persona lives in the data folder
+    shutil.rmtree(Path(os.environ["VIOLET_DATA_DIR"]) / "control" / "visual", ignore_errors=True)
     yield db
 
 

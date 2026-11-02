@@ -65,5 +65,22 @@
     "prompt_text",
     "living_constraints",
     "forbidden_backstory"
-  ]
+  ],
+  "visual": {
+    "appearance": {
+      "overall": "可爱的少女，笑起来脸会红红的",
+      "hair": "蓝色的长卷发，发尾渐变成浅一点的海蓝色，头顶有一撮翘起来的呆毛",
+      "face": "大眼睛，表情生动",
+      "build": "娇小，有一对深蓝色的鲸鱼耳朵，身后有一条鲸鱼尾巴"
+    },
+    "wardrobe": {
+      "style": "蓝白配色的女仆装，白色荷叶边头饰，围裙上绣着一只小鲸鱼",
+      "colors": [
+        "海蓝",
+        "白色",
+        "浅蓝"
+      ],
+      "accessories": "白色荷叶边头饰"
+    }
+  }
 }

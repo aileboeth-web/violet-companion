@@ -121,6 +121,9 @@ SETTINGS: list[Setting] = [
             "对方连发几条时，最后一条之后等多久再一起处理", 5.0, 0, 120),
     Setting("DEBOUNCE_EXTRA", "对方像是没说完时多等（秒）", "messages", "float", "now", "", 10.0, 0, 300),
     Setting("VIOLET_SIMULATE_TYPING", "模拟打字间隔", "messages", "bool", "now", "多条消息之间按长度停顿一下", True),
+    # 2026-11-02 (0.7.31's crossed-replies fix had no switch)
+    Setting("VIOLET_REPLY_RECHECK", "她写回复时你又发了消息，就合在一起回", "messages", "bool", "now",
+            "开：那条回复不发，下一轮把你前后说的一起回（不会连续两次这样；用过工具的回复照常发）。关：每条都单独回", True),
     Setting("VIOLET_TYPING_MIN_DELAY_SECONDS", "打字间隔下限（秒）", "messages", "float", "now", "", 1.0, 0, 30),
     Setting("VIOLET_TYPING_MAX_DELAY_SECONDS", "打字间隔上限（秒）", "messages", "float", "now", "", 20.0, 0, 120),
     Setting("proactive.enabled", "主动联系", "proactive", "bool", "now", "关掉后不再主动找对方（约定的提醒不受影响）",

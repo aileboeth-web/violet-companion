@@ -369,6 +369,23 @@ _ACK_ONLY = {
 _STRIP_RE = re.compile(r"[\s\W_]+", re.UNICODE)
 
 
+# 2026-11-02 (server usage: the memory step ran for every turn at ~12k tokens -- a third of the day -- also for a turn
+# that was only a sticker or "哈哈"). A turn is skipped only when, without stickers, emoji, pokes and quoted text, no
+# words are left, or only interjections; a photo, a question, any statement still goes to the memory step.
+_NO_WORDS_LINE = re.compile(r"^\s*\[(?:对方发来一个表情包|用户发来一个表情包|表情包|表情|QQ表情|拍了拍你|引用)[^\]\n]*\][^\n]*$")
+_NO_WORDS_INLINE = re.compile(r"\[(?:表情|QQ表情|表情包|拍了拍你)[^\]\n]*\]|\[引用[^\]\n]*\]")
+_FILLER_CHARS = set("哈嘿嘻呵嗯哦噢喔哇啊呀嘛呢吧啦咯嗷唔诶欸耶哼呜嗨好的行对了")
+_FILLER_WORDS = {"ok", "okk", "okay", "hh", "hhh", "hhhh", "hhhhh", "ha", "haha", "hahaha", "lol", "yes", "yep", "233",
+                 "2333", "23333", "666", "6666"}
+
+
+def nothing_to_remember(text: str | None) -> bool:
+    lines = [line for line in (text or "").splitlines() if not _NO_WORDS_LINE.match(line)]
+    rest = _NO_WORDS_INLINE.sub("", "\n".join(lines))
+    rest = "".join(ch for ch in rest.lower() if ch.isalnum())       # emoji, punctuation, spaces go
+    return not rest or rest in _FILLER_WORDS or (len(rest) <= 6 and all(ch in _FILLER_CHARS for ch in rest))
+
+
 def is_engaged_reply(text: str | None) -> bool:
     """Whether a user turn shows willingness to keep talking (vs. a bare acknowledgement)."""
     cleaned = _STRIP_RE.sub("", (text or "").lower())

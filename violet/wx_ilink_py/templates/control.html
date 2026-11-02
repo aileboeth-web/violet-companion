@@ -86,6 +86,7 @@
       <button class="ghost" id="diag-deep">完整检查（含数据库）</button><button class="ghost" id="diag-net">检查外部网络</button></div>
     <p class="note" id="diag-summary"></p>
     <div id="diag-list" class="cards list"></div>
+    <div id="diag-reconcile" class="cards list"></div>
     <p class="note">每条问题写明原因和建议；带按钮的是可以安全自动修复的。“轮次”是关联 ID：日志里同一轮的每一行都带着它（[turn …]）。最近一小时的模型 / 工具记录在内存里，重启后重新开始。</p>
   </section>
 
@@ -115,6 +116,7 @@
 
   <section id="tab-chat" class="tab">
     <div id="hist-chans" class="hist-chans" role="tablist" aria-label="聊天渠道"></div>
+    <div id="hist-persona" class="row"></div>
     <div class="hist">
       <aside class="hist-side"><div id="hist-list" class="hist-list"></div></aside>
       <div class="hist-main">
@@ -159,7 +161,7 @@
 
   <section id="tab-memories" class="tab">
     <div class="filters">
-      <label>类型 <select id="mem-kind"><option value="event">事件记忆</option><option value="core">核心记忆</option><option value="profile">关于你的档案（喜好、称呼、学校……）</option><option value="situation">你此刻的状态</option><option value="pref">你希望她怎么聊</option></select></label>
+      <label>类型 <select id="mem-kind"><option value="event">事件记忆</option><option value="core">核心记忆</option><option value="profile">关于你的档案（喜好、称呼、学校……）</option><option value="situation">你此刻的状态</option><option value="pref">你希望她怎么聊</option><option value="reminder">提醒</option></select></label>
       <label>状态 <select id="mem-status"><option value="">全部</option></select></label>
       <label class="grow">搜索 <input id="mem-q" type="search" maxlength="100" placeholder="记忆内容"></label>
       <button id="mem-search">查询</button>
@@ -381,6 +383,8 @@
     <div class="card" id="pl-relationship"></div>
     <h3>不同聊天渠道用不同人设 <span class="note">（不设就和上面一样。用别的人设的渠道是另一个人：聊天记录、记忆、生活和心情都是她自己的，互相不知道）</span></h3>
     <div class="card" id="pl-channels"></div>
+    <h3>她的样子 <span class="note">（画她自己时用；每个人设一份）</span></h3>
+    <div class="card" id="pl-look"></div>
     <div class="card" id="pl-core"></div>
     <h3>人设动态 <span class="note">（缓慢变化，需要你批准）</span></h3>
     <div id="pl-dynamics" class="cards list"></div>

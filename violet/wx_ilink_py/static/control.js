@@ -288,7 +288,20 @@ $("#ov-refresh").addEventListener("click", () => loaders.overview());
 const KIND = { user: "对方", violet: "Violet 回复", proactive: "Violet 主动", reminder: "提醒", system: "系统" };
 // 2026-10-29: channel -> conversations (left) -> messages (right). The owner's chat is one window per bound account
 // (2026-10-30: by QQ name and number, key "owner:<peer>"); groups and other people are Violet's own conversations.
-const hist = { channel: null, conv: "owner", before: null, channels: [], items: [] };
+const hist = { channel: null, conv: "owner", before: null, channels: [], items: [], persona: null };
+// 2026-11-02: a channel's chat from the time it used another persona is in that persona's memory; hist.persona shows it
+function withPersona(q) { if (hist.persona) q.set("persona", hist.persona); return q; }
+function renderPersonaNote(d) {
+  const box = $("#hist-persona");
+  const others = (d.elsewhere || []).filter((e) => e.scope !== hist.persona);
+  if (!hist.persona && !others.length) { box.replaceChildren(); return; }
+  box.replaceChildren(h("span", { class: "note", text: hist.persona ? "现在看的是这个渠道以前用别的人设时的聊天。" :
+      `这里是这个渠道现在的人设（${d.persona}）的聊天。` }),
+    ...others.map((e) => h("button", { class: "ghost", type: "button", text: `看“${e.label}”时期的 ${e.count} 条`,
+      onclick: () => { hist.persona = e.scope; hist.conv = "owner"; loadHistoryList(); } })),
+    hist.persona ? h("button", { class: "ghost", type: "button", text: "回到现在的人设",
+      onclick: () => { hist.persona = null; hist.conv = "owner"; loadHistoryList(); } }) : null);
+}
 const KIND_ICON = { owner: "★", group: "群", private: "人" };
 function convName(item) { return item ? item.title : ""; }
 function isOwner(key) { return key === "owner" || String(key).startsWith("owner:"); }
@@ -297,15 +310,16 @@ function renderChannels() {
   $("#hist-chans").replaceChildren(...(hist.channels.length ? hist.channels.map((c) => h("button", {
     type: "button", role: "tab", class: "chip" + (c.id === hist.channel ? " active" : ""), "aria-selected": String(c.id === hist.channel),
     text: c.label + (c.conversations || c.owner_windows > 1 ? `（${c.conversations + (c.owner_windows || 0)}）` : ""),
-    onclick: () => { hist.channel = c.id; hist.conv = "owner"; loadHistoryList(); } }))
+    onclick: () => { hist.channel = c.id; hist.conv = "owner"; hist.persona = null; loadHistoryList(); } }))
     : [h("p", { class: "note", text: "还没有聊天记录" })]));
 }
 async function loadHistoryList() {
   renderChannels();
   if (!hist.channel) { $("#hist-list").replaceChildren(); $("#chat-list").replaceChildren(); return; }
   try {
-    const d = await api("GET", `/api/control/history/${encodeURIComponent(hist.channel)}`);
+    const d = await api("GET", `/api/control/history/${encodeURIComponent(hist.channel)}?` + withPersona(new URLSearchParams()));
     hist.items = d.items;
+    renderPersonaNote(d);
     if (!hist.items.some((i) => i.key === hist.conv)) hist.conv = hist.items.length ? hist.items[0].key : "owner";
     renderList();
     await loadDays();
@@ -330,7 +344,7 @@ async function loadDays() {
   const sel = $("#chat-day");
   if (!isOwner(hist.conv)) { sel.replaceChildren(h("option", { value: "", text: "全部" })); return; }
   try {
-    const q = new URLSearchParams({ channel: hist.channel });
+    const q = withPersona(new URLSearchParams({ channel: hist.channel }));
     if (ownerPeer() !== null) q.set("peer", ownerPeer());
     const days = await api("GET", "/api/control/messages/days?" + q);
     const keep = sel.value;
@@ -340,7 +354,7 @@ async function loadDays() {
 }
 async function loadChat(append) {
   if (!hist.channel) return;
-  const params = new URLSearchParams({ limit: "100" });
+  const params = withPersona(new URLSearchParams({ limit: "100" }));
   if ($("#chat-day").value) params.set("date", $("#chat-day").value);
   if ($("#chat-q").value.trim()) params.set("q", $("#chat-q").value.trim());
   if (append && hist.before !== null && hist.before !== undefined) params.set("before_id", hist.before);   // 11-02: Eve's ids are <= 0
@@ -406,7 +420,14 @@ async function loadProfileKind(kind) {
     let rows = kind === "profile" ? d.facts : kind === "situation" ? d.situations.recent : d.preferences.all;
     rows = (rows || []).filter((r) => !q || JSON.stringify(r).includes(q));
     $("#mem-total").textContent = `共 ${rows.length} 条`;
-    $("#mem-list").replaceChildren(...(rows.length ? rows.map((r) => profileCard(kind, r)) : [h("p", { class: "note", text: "没有记录" })]));
+    // 2026-11-02: she asks a few getting-to-know-you questions over time; one you declined is never asked again
+    const reset = kind === "profile" ? h("div", { class: "row" }, h("span", { class: "note grow", text:
+      "她会在聊天里慢慢问一些了解你的问题（怎么称呼、上学还是上班……）；你拒绝过的不会再问。" }),
+      h("button", { class: "ghost", text: "让她可以重新问", onclick: async () => {
+        if (!(await confirmBox("让她可以重新问你拒绝过的了解类问题？已经记下的档案不变。", { danger: false }))) return;
+        try { await api("POST", "/api/profile/questions/reset"); toast("好了，之后合适的时候她会再问"); }
+        catch (e) { toast(e.message, false); } } })) : null;
+    $("#mem-list").replaceChildren(...[reset, ...(rows.length ? rows.map((r) => profileCard(kind, r)) : [h("p", { class: "note", text: "没有记录" })])].filter(Boolean));
   } catch (e) { toast("读取失败：" + e.message, false); }
 }
 function profileCard(kind, r) {
@@ -427,9 +448,33 @@ function profileCard(kind, r) {
     h("div", { class: "badges" }, ...badges.filter(Boolean).map((b) => pill(b))),
     h("div", { class: "row", style: "justify-content:flex-end;margin-top:6px" }, toggle, del));
 }
+// 2026-11-02: her reminders ("明天 8 点提醒我…"): the ones still to come can be cancelled here
+const REMINDER_STATUS = { pending: "待提醒", sending: "正在发", sent: "已提醒", cancelled: "已取消", failed: "没发出去",
+  expired: "过期没发", unknown: "不确定发没发出去" };
+async function loadReminders() {
+  $("#mem-status").disabled = true; $("#mem-prev").disabled = true; $("#mem-next").disabled = true;
+  try {
+    const d = await api("GET", "/api/control/reminders");
+    const q = $("#mem-q").value.trim();
+    const rows = [...d.pending, ...d.recent].filter((r) => !q || (r.content || "").includes(q));
+    $("#mem-total").textContent = `还没到时间的 ${d.pending.length} 条，下面也列出最近已经结束的`;
+    $("#mem-list").replaceChildren(...(rows.length ? rows.map((r) => h("div", { class: "card" },
+      h("div", { text: r.content }),
+      r.evidence ? h("div", { class: "note", text: "你的原话：" + r.evidence }) : null,
+      h("div", { class: "badges" }, pill(REMINDER_STATUS[r.status] || r.status, r.status === "pending" ? "warn" : ""),
+        pill("时间 " + when(r.due_at)), r.delivered_at ? pill("发出 " + when(r.delivered_at)) : null),
+      r.status === "pending" ? h("div", { class: "row", style: "justify-content:flex-end;margin-top:6px" },
+        h("button", { class: "danger", text: "取消这个提醒", onclick: async () => {
+          if (!(await confirmBox("取消这个提醒？到时间她就不会再提醒你。\n\n" + r.content))) return;
+          try { await api("POST", `/api/control/reminders/${r.id}/cancel`); toast("已取消"); loadMemories(); }
+          catch (e) { toast(e.message, false); } } })) : null))
+      : [h("p", { class: "note", text: "没有提醒。跟她说“明天早上八点提醒我……”就会出现在这里。" })]));
+  } catch (e) { toast("读取失败：" + e.message, false); }
+}
 async function loadMemories() {
   const kind = $("#mem-kind").value;
   if (["profile", "situation", "pref"].includes(kind)) return loadProfileKind(kind);
+  if (kind === "reminder") return loadReminders();
   const params = new URLSearchParams({ kind, limit: String(MEM_PAGE), offset: String(memOffset) });
   if ($("#mem-q").value.trim()) params.set("q", $("#mem-q").value.trim());
   if (kind === "event" && $("#mem-status").value) params.set("status", $("#mem-status").value);
@@ -583,7 +628,35 @@ function renderWeb(web) {
         try { await api("POST", "/api/web/explorer/" + (on ? "disable" : "enable")); toast(on ? "已停止" : "已开始"); loaders.tools(); } catch (e) { toast(e.message, false); }
       } }));
   })();
-  box.replaceChildren(h("div", { class: "card" }, h("h3", { text: "联网工具（violet-web）" }), oneClick, explorer,
+  // 2026-11-02: what she read on the web (chat searches and her own exploring) and the sites she may not read
+  const ORIGIN = { chat: "聊天时查的", explorer: "自己逛到的", proactive: "主动找你前查的" };
+  const read = h("details", {}, h("summary", { text: "她在网上看过的（最近 50 条）和不许看的网站" }));
+  read.addEventListener("toggle", async () => {
+    if (!read.open) return;
+    let f, s;
+    try { [f, s] = await Promise.all([api("GET", "/api/web/findings?limit=50"), api("GET", "/api/web/sources")]); }
+    catch (e) { read.append(h("p", { class: "err", text: e.message })); return; }
+    const blocked = (s.sources || []).filter((x) => x.status === "disabled");
+    const domain = h("input", { maxlength: 120, placeholder: "例如 example.com", "aria-label": "网站" });
+    read.replaceChildren(read.firstChild,
+      ...((f.findings || []).length ? f.findings.map((x) => h("div", { class: "card" },
+        h("div", { class: "row" }, h("strong", { text: x.title || x.url }), pill(ORIGIN[x.origin] || x.origin),
+          pill(x.status === "active" ? "她会用" : "停用了", x.status === "active" ? "ok" : ""), h("span", { class: "note", text: `${x.domain} · ${when(x.fetched_at)}` })),
+        x.summary ? h("p", { class: "note", text: x.summary }) : null,
+        h("div", { class: "row", style: "justify-content:flex-end" }, h("button", { class: "ghost",
+          text: x.status === "active" ? "不让她再用这条" : "恢复", onclick: async () => {
+            try { await api("POST", `/api/web/findings/${x.id}/${x.status === "active" ? "disable" : "enable"}`); read.open = false; read.open = true; }
+            catch (e) { toast(e.message, false); } } }))))
+        : [h("p", { class: "note", text: "她还没有在网上看过东西。" })]),
+      h("h4", { text: "不许她看的网站" }),
+      ...blocked.map((x) => h("div", { class: "row" }, h("span", { text: x.domain }), h("button", { class: "ghost", text: "解除", onclick: async () => {
+        try { await api("POST", "/api/web/sources", { domain: x.domain, status: "enabled" }); read.open = false; read.open = true; }
+        catch (e) { toast(e.message, false); } } }))),
+      h("div", { class: "row" }, domain, h("button", { class: "ghost", text: "不许看这个网站", onclick: async () => {
+        try { await api("POST", "/api/web/sources", { domain: domain.value.trim(), status: "disabled", reason: "后台设置" }); toast("已记下"); read.open = false; read.open = true; }
+        catch (e) { toast(e.message, false); } } })));
+  });
+  box.replaceChildren(h("div", { class: "card" }, h("h3", { text: "联网工具（violet-web）" }), oneClick, explorer, read,
     h("details", {}, h("summary", { text: "详细状态和限额" }),
     ...facts.map((t) => h("div", { class: "note", text: t })), ...settings,
     h("div", { class: "row" },

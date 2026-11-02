@@ -75,8 +75,9 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
     def _persona_scope():
         from ai import memory_scope
         channel = (request.args.get("channel") or (request.view_args or {}).get("channel") or "").strip()[:64]
-        scope = memory_scope.for_channel(channel) if channel else (request.headers.get("X-Violet-Persona")
-                                                                   or request.args.get("persona"))
+        # an explicit ?persona= wins (the history page looking at a channel's chat from its earlier persona)
+        scope = request.args.get("persona") or (memory_scope.for_channel(channel) if channel
+                                                else request.headers.get("X-Violet-Persona"))
         g._violet_scope = memory_scope._SCOPE.set(memory_scope.clean(scope))
 
     @app.teardown_request
@@ -442,7 +443,19 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
                           if c["kind"] == "group" else " · ".join(x for x in ["QQ " + c["peer_id"], role] if x),
                           "last_text": c.get("last_text"), "last_at": c.get("last_message_at"), "count": c["message_count"]})
         items.sort(key=lambda i: i.get("last_at") or "", reverse=True)
-        return ok({"channel": channel, "items": items})
+        # 2026-11-02: the channel's chat from the time it used another persona is in that persona's memory -- say so,
+        # or it looks lost (the persona picker in the menu shows it)
+        from ai import memory_scope
+        here, elsewhere = memory_scope.current(), []
+        for scope in [*memory_scope.all_scopes(), *violetdb.scope_files()]:
+            if scope == here or any(e["scope"] == scope for e in elsewhere):
+                continue
+            with memory_scope.use(scope):
+                n = violetdb.fetch_one("SELECT COUNT(*) AS n FROM messages WHERE COALESCE(channel, 'wechat') = ?",
+                                       (channel,))["n"]
+            if n:
+                elsewhere.append({"scope": scope, "label": memory_scope.label(scope), "count": n})
+        return ok({"channel": channel, "items": items, "persona": memory_scope.label(here), "elsewhere": elsewhere})
 
     @app.get("/api/control/history/<channel>/<int:conversation_id>")
     def control_history_social(channel: str, conversation_id: int):
@@ -523,6 +536,25 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
             return bad(str(exc))
         except ValidationError as exc:
             return bad("设置没有导入：" + str(exc), problems=exc.problems)
+
+    # ------------------------------------------------------------------ 2026-11-02: reminders (commitments)
+    # "明天 8 点提醒我…" became a row here and was sent on time, but nothing listed them and only the chat could cancel one
+    @app.get("/api/control/reminders")
+    def control_reminders():
+        rows = violetdb.list_commitments(["pending", "sending"], limit=200)
+        done = violetdb.fetch_all("SELECT * FROM commitments WHERE status NOT IN ('pending', 'sending') "
+                                  "ORDER BY due_at DESC, id DESC LIMIT 50")
+        return ok({"pending": rows, "recent": done})
+
+    @app.post("/api/control/reminders/<int:reminder_id>/cancel")
+    def control_reminder_cancel(reminder_id: int):
+        row = violetdb.get_commitment(reminder_id)
+        if row is None:
+            return bad("没有这个提醒", 404)
+        if row["status"] != "pending":
+            return bad("这个提醒已经不是“待提醒”了，不能取消")
+        violetdb.update_commitment(reminder_id, status="cancelled", last_error="cancelled in the Control Center")
+        return ok(violetdb.get_commitment(reminder_id))
 
     # ------------------------------------------------------------------ memories
     def _memory(kind: str, memory_id: int) -> dict | None:

@@ -52,7 +52,9 @@ def test_normal_chat_turn(env):
     # what Violet actually sent (the old prompt claimed this but the code never passed it).
     assert env["rt"].wait_memory_idle()
     memory_call = env["llm"].calls_for("fake-memory")[0]
-    assert memory_call["messages"][-1]["content"] == "用户说：我回来啦\nViolet 实际回复：哼\n终于想起我了"
+    # 2026-11-02 (0.7.34): the time comes last, together with this turn (cache-friendly order)
+    assert memory_call["messages"][-1]["content"].startswith("当前时间：")
+    assert memory_call["messages"][-1]["content"].endswith("\n\n用户说：我回来啦\nViolet 实际回复：哼\n终于想起我了")
 
 
 def test_silent_route_sends_nothing_but_keeps_history(env):

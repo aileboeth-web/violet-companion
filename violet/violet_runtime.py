@@ -1268,8 +1268,13 @@ class VioletRuntime:
                 silent = pipeline is not None and pipeline.get("should_reply") is False
                 # Phase 9.1 (A6): a silent turn ("晚安啦，对了明早八点去复查") may still carry news; only a bare
                 # closing word ("晚安" / "嗯嗯") skips the memory call.
-                from ai.memory_model import is_engaged_reply
-                if self.memory_worker is not None and not testing and (not silent or is_engaged_reply(combined)):
+                from ai.memory_model import is_engaged_reply, nothing_to_remember
+                empty = nothing_to_remember(combined)          # 2026-11-02: a sticker / "哈哈" alone: nothing to keep
+                if empty and self.memory_worker is not None and not testing:
+                    from ai import pipeline_state as _ps
+                    _ps.turn_node(turn.turn_id, "Memory", "skipped", note="这一轮只有表情、拍一拍或语气词，没有要记的")
+                if self.memory_worker is not None and not testing and not empty and \
+                        (not silent or is_engaged_reply(combined)):
                     try:
                         memory_job = self.memory_worker.enqueue(turn.turn_id, combined, message_id) is not None
                     except Exception:

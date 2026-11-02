@@ -207,3 +207,71 @@ def test_the_flow_page_shows_the_background_memory_step():
     node = ps.get_run(run["id"])["nodes"]["Memory"]
     assert node["status"] == "done" and node["note"] == "记下 1 条" and node["input"]["memory_input"].endswith("杨枝甘露")
     ps.clear()
+
+
+# ---------------------------------------------------------------- 2026-11-02 third round
+KEEP = ["我喜欢喝杨枝甘露奶茶", "好的明天八点叫我", "嗯，我考完了", "对了我下周去北京", "ok明天见", "哈哈哈我也是", "晚安",
+        "在吗", "拍拍你", "wash", "[对方发来一个表情包：熊猫头]（图片编号 62）\n不是你要蹭我吗",
+        "[用户发来一张图片]（图片编号 3）\n图片内容（识别结果，仅供参考）：一碗牛肉面", "[引用你之前说的：去哪]\n去公园"]
+SKIP = ["[对方发来一个表情包：熊猫头，写着“九年义务教育教出来”]（图片编号 62，已收藏为表情包 54）", "哈哈哈哈", "嗯嗯",
+        "好的", "[拍了拍你]", "😂😂", "ok", "hhh", "[引用你之前说的：卖掉你]\n哈哈", "[表情：微笑][QQ表情]", "好的好的～"]
+
+
+@pytest.mark.parametrize("text", KEEP)
+def test_a_turn_with_words_still_goes_to_the_memory_step(text):
+    from ai.memory_model import nothing_to_remember
+    assert nothing_to_remember(text) is False
+
+
+@pytest.mark.parametrize("text", SKIP)
+def test_a_sticker_or_interjection_alone_skips_the_memory_step(text):
+    from ai.memory_model import nothing_to_remember
+    assert nothing_to_remember(text) is True
+
+
+def test_reminders_can_be_listed_and_cancelled(violetdb):
+    from flask import Flask
+    now = violetdb.now()
+    violetdb.execute("INSERT INTO commitments (kind, content, due_at, status, created_at, updated_at) "
+                     "VALUES ('reminder', '提醒交作业', ?, 'pending', ?, ?)", (now, now, now))
+    rid = violetdb.fetch_one("SELECT id FROM commitments")["id"]
+    from wx_ilink_py.control_routes import register_control_routes
+    app = Flask(__name__)
+    register_control_routes(app, violetdb)
+    client = app.test_client()
+    listed = client.get("/api/control/reminders").get_json()["data"]
+    assert [r["content"] for r in listed["pending"]] == ["提醒交作业"]
+    assert client.post(f"/api/control/reminders/{rid}/cancel").get_json()["data"]["status"] == "cancelled"
+    assert client.post(f"/api/control/reminders/{rid}/cancel").status_code == 400      # only a pending one
+
+
+def test_her_look_follows_the_persona_and_lives_in_the_data_folder(personas):
+    from ai.images.visual import VisualIdentityManager
+    main = VisualIdentityManager(personas)
+    assert main.scope == "main" and "深色及肩短发" in main.load()["appearance"]["hair"]
+    pt._write(pt.control_dir() / pt.CHANNEL_FILE, {"tg": {"template": "dafeiyu"}})
+    fish = VisualIdentityManager(personas, scope="dafeiyu")
+    assert "蓝色的长卷发" in fish.load()["appearance"]["hair"] and fish.name() == "大肥鱼"
+    assert "人物（大肥鱼）" in fish.prompt_for({"description": "在窗边"}, shot="selfie")
+    fish.update({"palette": ["海蓝"]}, note="test")
+    assert fish.path.is_file() and fish.path.parent.name == "visual" and not main.path.is_file()
+    assert VisualIdentityManager(personas, scope="dafeiyu").load()["palette"] == ["海蓝"]
+
+
+def test_the_history_page_points_to_a_channels_chat_under_another_persona(personas):
+    from flask import Flask
+    from wx_ilink_py.control_routes import register_control_routes
+    db = personas
+    pt._write(pt.control_dir() / memory_scope.SPLIT_FILE, {"tg": {"scope": "genki"}})     # no automatic move here
+    db.add_user_message("text", "以前在主人设时说的", channel="tg")
+    with memory_scope.use("genki"):
+        db.add_user_message("text", "现在说的", channel="tg")
+    app = Flask(__name__)
+    register_control_routes(app, db)
+    client = app.test_client()
+    now = client.get("/api/control/history/tg").get_json()["data"]
+    assert [e["scope"] for e in now["elsewhere"]] == ["main"] and now["elsewhere"][0]["count"] == 1
+    old = client.get("/api/control/messages?channel=tg&persona=main").get_json()["data"]["messages"]
+    assert [m["content"] for m in old] == ["以前在主人设时说的"]
+    cur = client.get("/api/control/messages?channel=tg").get_json()["data"]["messages"]
+    assert [m["content"] for m in cur] == ["现在说的"]

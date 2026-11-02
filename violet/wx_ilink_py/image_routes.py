@@ -202,7 +202,8 @@ def register_image_routes(app: Flask, violetdb) -> None:
         manager = VisualIdentityManager(violetdb)
         history = violetdb.fetch_all("SELECT id, version, sha256, actor, note, created_at FROM visual_profile_versions "
                                   "ORDER BY id DESC LIMIT 50")
-        return ok({"profile": manager.load(), "sha256": manager.sha(), "versions": history})
+        return ok({"profile": manager.load(), "sha256": manager.sha(), "versions": history, "scope": manager.scope,
+                   "persona": manager.name()})
 
     @app.put("/api/images/visual-profile")
     def images_visual_profile_update():

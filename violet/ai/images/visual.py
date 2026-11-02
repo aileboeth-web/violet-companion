@@ -119,17 +119,49 @@ class SceneError(ValueError):
 
 
 class VisualIdentityManager:
+    """2026-11-02 (user: 锦上添花也做): her look belongs to the persona -- Eve or 大肥鱼 drawing a selfie used to come
+    out looking like Violet -- and an edit lives in the data folder (the program folder is replaced by every update):
+        <data>/control/visual/<memory scope>.json   edited on the persona page
+        else the persona template's own "visual" (e.g. dafeiyu: blue hair, whale ears, maid dress) over the shipped one
+        else persona/visual_profile.json (the shipped Violet)."""
     FILE = "visual_profile.json"
 
-    def __init__(self, db=None):
+    def __init__(self, db=None, scope: str | None = None):
         self.db = db
+        from ai import memory_scope
+        self.scope = memory_scope.clean(scope or memory_scope.current())
+
+    @property
+    def shipped_path(self):
+        return persona_dir() / self.FILE
 
     @property
     def path(self):
-        return persona_dir() / self.FILE
+        from ai.persona_templates import control_dir
+        return control_dir() / "visual" / f"{self.scope}.json"
+
+    def persona(self) -> dict[str, Any]:
+        """The persona of this scope (its name, and its template's own look if it has one)."""
+        from ai import memory_scope
+        from ai.persona import PersonaCore
+        channel = "" if self.scope == memory_scope.MAIN else next(iter(memory_scope.channels_of(self.scope)), "")
+        try:
+            return PersonaCore.load(channel=channel).data
+        except Exception:                                 # noqa: BLE001
+            return {}
+
+    def name(self) -> str:
+        return str((self.persona().get("identity") or {}).get("name") or "Violet")
 
     def load(self) -> dict[str, Any]:
-        return json.loads(self.path.read_text(encoding="utf-8"))
+        if self.path.is_file():
+            return json.loads(self.path.read_text(encoding="utf-8"))
+        data = json.loads(self.shipped_path.read_text(encoding="utf-8"))
+        own = self.persona().get("visual")
+        if isinstance(own, dict):
+            for key, value in own.items():
+                data[key] = {**data[key], **value} if isinstance(value, dict) and isinstance(data.get(key), dict) else value
+        return data
 
     def sha(self, data: dict[str, Any] | None = None) -> str:
         raw = json.dumps(data or self.load(), ensure_ascii=False, sort_keys=True)
@@ -149,7 +181,7 @@ class VisualIdentityManager:
         if shot:
             lines.append(f"拍法：{SHOTS[shot]}")
         if shot != "scene":
-            lines += [f"人物（Violet）：{a.get('overall', '')}；发型：{a.get('hair', '')}；{a.get('face', '')}；"
+            lines += [f"人物（{self.name()}）：{a.get('overall', '')}；发型：{a.get('hair', '')}；{a.get('face', '')}；"
                       f"{a.get('build', '')}",
                       f"服饰：{w.get('style', '')}；颜色：{'、'.join(w.get('colors', []))}；配饰：{w.get('accessories', '')}"]
         if style == "illustration":
@@ -183,13 +215,15 @@ class VisualIdentityManager:
         history.append({"version": data["version"], "changed_at": (self.db.now() if self.db else "")[:19],
                         "actor": actor, "note": note[:200], "fields": sorted(patch)})
         data["history"] = history[-50:]
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.replace(tmp, self.path)
         if self.db is not None:
             self.db.execute("INSERT INTO visual_profile_versions (version, sha256, content, actor, note, created_at) "
                             "VALUES (?, ?, ?, ?, ?, ?)",
-                            (data["version"], self.sha(data), json.dumps(data, ensure_ascii=False), actor, note[:200],
+                            (data["version"], self.sha(data), json.dumps(data, ensure_ascii=False), actor,
+                             f"[{self.scope}] {note}"[:200],
                              self.db.now()))
         return data
 

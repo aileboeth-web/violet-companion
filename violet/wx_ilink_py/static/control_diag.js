@@ -30,7 +30,35 @@
       f.turns && f.turns.length ? h("p", { class: "note", text: "相关轮次：" + f.turns.join("、") }) : null);
   }
 
-  loaders.diagnostics = () => load(false);
+  // 2026-11-02: things that were going out when Violet stopped (a crash, a restart mid-send) -- whether they arrived is
+  // unknown, so they are never sent again by themselves; the page that let a person decide was removed in 0.7.1
+  const KIND = { outbound: "消息", media: "图片", commitment: "提醒", image_task: "画图任务" };
+  const CHOICE = { sent: "她收到了（算已发）", not_sent: "没收到", charged_no_result: "扣了费但没出图", not_charged: "没扣费" };
+  const RESEND = { commitment: "没收到（重新提醒）" };
+  async function loadReconcile() {
+    const box = $("#diag-reconcile");
+    let d;
+    try { d = await api("GET", "/api/reconciliation"); } catch (e) { box.replaceChildren(); return; }
+    const items = [];
+    for (const kind of Object.keys(KIND)) {
+      for (const row of d[kind] || []) items.push([kind, row]);
+    }
+    if (!items.length) { box.replaceChildren(); return; }
+    box.replaceChildren(h("h3", { text: `没确定有没有发出去的（${items.length}）` }),
+      h("p", { class: "note", text: "Violet 正在发的时候停了（重启、崩溃），不知道对方收没收到。为了不重复发，她不会自己重发；请看一眼聊天软件，告诉她结果。" }),
+      ...items.map(([kind, row]) => {
+        const id = kind === "image_task" ? row.task_id : row.id;
+        const text = row.content || row.caption || row.kind || "";
+        return h("div", { class: "card" },
+          h("div", { class: "row" }, pill(KIND[kind]), h("span", { text: text }), h("span", { class: "note", text: when(row.updated_at) })),
+          h("div", { class: "row", style: "justify-content:flex-end" }, ...(d.resolutions[kind] || []).map((choice) =>
+            h("button", { class: "ghost", text: (choice === "not_sent" && RESEND[kind]) || CHOICE[choice] || choice, onclick: async () => {
+              try { await api("POST", `/api/reconciliation/${kind}/${encodeURIComponent(id)}`, { resolution: choice }); toast("已记下"); loadReconcile(); }
+              catch (e) { toast(e.message, false); } } }))));
+      }));
+  }
+
+  loaders.diagnostics = () => { load(false); loadReconcile(); };
   $("#diag-refresh").addEventListener("click", () => load(false));
   $("#diag-deep").addEventListener("click", () => load(true));
   $("#diag-net").addEventListener("click", async () => {

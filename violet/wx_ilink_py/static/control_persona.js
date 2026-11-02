@@ -303,8 +303,38 @@
     }), own);
   }
 
+  // 2026-11-02: her look (what a selfie / a picture of her shows) -- per persona (the picker in the menu), kept in the
+  // data folder; GET / PUT /api/images/visual-profile
+  const LOOK = [["appearance", "overall", "整体"], ["appearance", "hair", "头发"], ["appearance", "face", "脸"],
+    ["appearance", "build", "身形和特征"], ["wardrobe", "style", "衣服"], ["wardrobe", "accessories", "配饰"]];
+  async function renderLook() {
+    const box = $("#pl-look");
+    let d;
+    try { d = await api("GET", "/api/images/visual-profile"); } catch (e) { box.replaceChildren(h("p", { class: "err", text: e.message })); return; }
+    const p = d.profile || {};
+    const inputs = LOOK.map(([group, key, label]) => {
+      const area = h("textarea", { rows: 2, maxlength: 300, "aria-label": label });
+      area.value = ((p[group] || {})[key]) || "";
+      area.dataset.group = group; area.dataset.key = key;
+      return h("label", { class: "stack" }, h("span", { class: "note", text: label }), area);
+    });
+    const colors = h("input", { maxlength: 120, "aria-label": "衣服颜色" });
+    colors.value = ((p.wardrobe || {}).colors || []).join("、");
+    box.replaceChildren(
+      h("p", { class: "note", text: `她画自己（自拍、照片）时按这里画。现在看的是：${d.persona || "主人设"}（左边菜单上方可以换）。改了会记一个新版本，升级 Violet 不会冲掉。` }),
+      ...inputs, h("label", { class: "stack" }, h("span", { class: "note", text: "衣服颜色（用顿号隔开）" }), colors),
+      h("div", { class: "row" }, h("button", { type: "button", text: "保存她的样子", onclick: async () => {
+        const patch = { appearance: { ...(p.appearance || {}) }, wardrobe: { ...(p.wardrobe || {}) } };
+        box.querySelectorAll("textarea").forEach((a) => { patch[a.dataset.group][a.dataset.key] = a.value.trim(); });
+        patch.wardrobe.colors = colors.value.split(/[、,，\s]+/).map((c) => c.trim()).filter(Boolean);
+        try { await api("PUT", "/api/images/visual-profile", { patch, note: "人设页修改" }); toast("已保存，下一张图起生效"); renderLook(); }
+        catch (e) { toast(e.message, false); } } }),
+        h("span", { class: "note", text: `版本 ${p.version || "—"}` })));
+  }
+
   loaders.persona = async () => {
     renderTemplates();
+    renderLook();
     try {
       const [p, l] = await Promise.all([api("GET", "/api/persona"), api("GET", "/api/life")]);
       renderCore(p);
