@@ -814,6 +814,11 @@ class ContextEngine:
         turn_limit = env_int("VIOLET_CONTEXT_HISTORY_TURNS", 24)
         limit = limit or max(env_int("VIOLET_CONTEXT_HISTORY_MESSAGES", 20), turn_limit * 3 if turn_limit > 0 else 0)
         max_chars = env_int("VIOLET_CONTEXT_HISTORY_MAX_CHARS", 4000)
+        if mode == "decision":
+            # 2026-11-02 (token): whether to write now needs how the talk went lately, not the whole window; the message
+            # itself (mode "proactive") is still written with the full history
+            turn_limit = env_int("VIOLET_DECISION_HISTORY_TURNS", 8)
+            max_chars = env_int("VIOLET_DECISION_HISTORY_MAX_CHARS", 1500)
         stepped = env_bool("VIOLET_CONTEXT_STABLE_HISTORY", True) and mode in ("chat", "proactive")
         turns, times, ids, chans = [], {}, {}, {}
         from ai import context_cut

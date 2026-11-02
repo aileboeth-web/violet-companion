@@ -12,6 +12,13 @@ DEBOUNCE_NORMAL=10.0
 DEBOUNCE_EXTRA=15.0
 # 2026-11-02: new messages arrived while she wrote a reply -> that reply is not sent, the next turn answers both (never twice in a row)
 VIOLET_REPLY_RECHECK=1
+# 2026-11-02 (token): the proactive decision sees only the last turns (the message itself is written with the full history)
+VIOLET_DECISION_HISTORY_TURNS=8
+VIOLET_DECISION_HISTORY_MAX_CHARS=1500
+# 2026-11-02 (token): shorter memory tool descriptions (what the memory rules already say); 0 = the full ones
+VIOLET_MEMORY_COMPACT_TOOLS=1
+# 1 = send the proactive task rules even when no task is allowed (only for comparing, tools/decision_eval.py)
+VIOLET_DECISION_ALWAYS_TASK_RULES=0
 
 # ── 管理面板（Dashboard）安全 ─────────────────────────────────────────────────
 # 默认只监听本机回环地址；远程访问请用 SSH 隧道或带 TLS 的反向代理。

@@ -278,7 +278,8 @@ class MemoryAgent(BaseAgent):
             hidden.add(DONE_TOOL)
         if self._nothing_to_search():
             hidden.add("query_memory")       # phase 9.4 (r1): an empty store cannot answer a duplicate check
-        return [t for t in tools if t.get("function", {}).get("name") not in hidden]
+        from ai import memory_tools_compact  # 2026-11-02: descriptions the rules already say, shortened
+        return memory_tools_compact.apply([t for t in tools if t.get("function", {}).get("name") not in hidden])
 
     def _nothing_to_search(self) -> bool:
         """query_memory searches event memories (disabled ones included): with none at all, a lookup can only come back

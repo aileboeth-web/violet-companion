@@ -13,6 +13,20 @@ from ai.context_engine import ContextEngine
 from .base_agent import BaseAgent
 
 
+def _has_tasks(user_message: str) -> bool:
+    """Whether the event context allows any proactive task (unparsable: assume it may). VIOLET_DECISION_ALWAYS_TASK_RULES
+    =1 sends the task rules anyway (tools/decision_eval.py compares both forms)."""
+    from ai.settings import env_bool
+    if env_bool("VIOLET_DECISION_ALWAYS_TASK_RULES", False):
+        return True
+    try:
+        context = json.loads(user_message)
+    except (TypeError, ValueError):
+        return True
+    tasks = context.get("allowed_tasks") if isinstance(context, dict) else None
+    return bool(tasks) or bool(isinstance(context, dict) and context.get("force_task"))
+
+
 class ProactiveAgent(BaseAgent):
     """
     主动触达决策 agent。
@@ -84,8 +98,16 @@ class ProactiveAgent(BaseAgent):
             "大多数时候不必提；要提就写进 mentioned_web_finding_ids，说成“看到一篇…”，并说明来源网站。\n"
             "以上第 10–12、14、15 条由系统代码校验，违反的决定会被直接丢弃。"
         )
+        # 2026-11-02 (token): the proactive tasks (McDonald's, weather...) left with Eve -- allowed_tasks is empty, so
+        # the task rules and the task part of the answer were sent for nothing. They come back when a task is allowed.
+        if not _has_tasks(user_message):
+            guardrails = "硬性规则：\n" + "\n".join(
+                line for line in guardrails.splitlines()[1:] if not line.startswith(("1.", "2.", "3.", "4.", "5.")))
+            guardrails += "\n现在没有可下发的任务：action_type 只能是 none 或 chat，不填 task。"
+            output_contract = {k: v for k, v in output_contract.items() if k != "task"}
+            output_contract["action_type"] = "none/chat，none 表示不触达，chat 表示发消息"
         # Phase 3: profile / situation / preferences come from the shared ContextEngine;
-        # recent chat is passed as real dialogue turns.
+        # recent chat is passed as real dialogue turns (2026-11-02: the last few -- VIOLET_DECISION_HISTORY_TURNS).
         packet = ContextEngine(violetdb).build("decision", "", {})
         from ai.agents.chat_agent import adapt_messages_for_channel      # phase 10: where the message will go
         return adapt_messages_for_channel([

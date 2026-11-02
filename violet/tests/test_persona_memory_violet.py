@@ -275,3 +275,56 @@ def test_the_history_page_points_to_a_channels_chat_under_another_persona(person
     assert [m["content"] for m in old] == ["以前在主人设时说的"]
     cur = client.get("/api/control/messages?channel=tg").get_json()["data"]["messages"]
     assert [m["content"] for m in cur] == ["现在说的"]
+
+
+# ---------------------------------------------------------------- 2026-11-02 token round (decision_eval plumbing)
+def test_compact_memory_tools_keep_names_params_and_enums(monkeypatch):
+    from ai import memory_tools_compact
+    from ai.agents.memory_agent import MemoryAgent
+    full = {t["function"]["name"]: t for t in MemoryAgent()._tools}
+    for name, tool in full.items():
+        short = memory_tools_compact.compact(tool)
+        p, q = tool["function"]["parameters"], short["function"]["parameters"]
+        assert short["function"]["name"] == name and q.get("required") == p.get("required")
+        assert set(q["properties"]) == set(p["properties"])
+        for key, spec in p["properties"].items():
+            assert q["properties"][key].get("enum") == spec.get("enum") and q["properties"][key]["type"] == spec["type"]
+    import json as _json
+    assert len(_json.dumps([memory_tools_compact.compact(t) for t in full.values()], ensure_ascii=False)) < \
+        0.9 * len(_json.dumps(list(full.values()), ensure_ascii=False))
+
+
+def test_decision_without_tasks_drops_the_task_rules_and_keeps_the_rest(monkeypatch):
+    import json as _json
+    from ai.agents.proactive_agent import ProactiveAgent
+    msgs = ProactiveAgent().build_context_messages(_json.dumps({"allowed_tasks": {}}))
+    rules, contract = msgs[1]["content"], msgs[2]["content"]
+    assert "allowed_tasks 中明确允许的任务" not in rules and "10. conversation_state.restricted_memories" in rules
+    assert '"task"' not in contract and "should_act" in contract
+    with_tasks = ProactiveAgent().build_context_messages(_json.dumps({"allowed_tasks": {"x": {}}}))
+    assert "allowed_tasks 中明确允许的任务" in with_tasks[1]["content"] and '"task"' in with_tasks[2]["content"]
+    monkeypatch.setenv("VIOLET_DECISION_ALWAYS_TASK_RULES", "1")
+    assert "allowed_tasks 中明确允许的任务" in ProactiveAgent().build_context_messages("{}")[1]["content"]
+
+
+def test_decision_sees_the_last_turns_only(violetdb):
+    from ai.context_engine import ContextEngine
+    for i in range(30):
+        violetdb.add_user_message("text", f"第{i}句")
+        violetdb.add_assistant_message("text", f"回{i}")
+    decision = [m for m in ContextEngine(violetdb).history([], mode="decision") if m["role"] != "system"]
+    proactive = [m for m in ContextEngine(violetdb).history([], mode="proactive") if m["role"] != "system"]
+    assert len(decision) == 8 and decision[-1]["content"] == "回29" and len(proactive) > len(decision)
+
+
+def test_decision_eval_runs_end_to_end_with_a_fake_model(monkeypatch, violetdb):
+    from tests.fakes import FakeLLM, completion, install_fake_llm
+    install_fake_llm(monkeypatch, FakeLLM(default=lambda kw: completion(
+        '{"should_act": false, "action_type": "none", "reason": "eval"}')))
+    from tools import decision_eval
+    for case in decision_eval.MEMORY_CASES[:2]:
+        result = decision_eval.memory_case(violetdb, case)
+        assert result["error"] is None and result["tools"] == []
+    for case in decision_eval.DECISION_CASES:
+        result = decision_eval.decision_case(violetdb, case)
+        assert result["error"] is None and result["act"] is False
