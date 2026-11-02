@@ -60,7 +60,7 @@ def register_persona_routes(app: Flask, violetdb) -> None:
         return ok({"templates": pt.templates(), "current": pt.current(), "custom": pt.custom_preview(),
                    "test_mode": test_mode.status(),
                    # 2026-10-30: the second layer, and per channel
-                   "relationship": pt.relationship(),
+                   "relationship": pt.relationship(), "in_effect": pt.in_effect(),
                    "relationships": [{"key": k, "label": v[0], "text": v[1]} for k, v in pt.RELATIONSHIPS.items()],
                    "channels": _channel_rows(pt)})
 
@@ -73,7 +73,8 @@ def register_persona_routes(app: Flask, violetdb) -> None:
                 names[cid] = entry.get("label") or cid
         own = pt.channel_map()
         return [{"id": cid, "label": label, "template": (own.get(cid) or {}).get("template"),
-                 "relationship": (own.get(cid) or {}).get("relationship")} for cid, label in names.items()]
+                 "relationship": (own.get(cid) or {}).get("relationship"), "in_effect": pt.in_effect(cid)}
+                for cid, label in names.items()]
 
     @app.post("/api/persona/relationship")
     def persona_relationship():

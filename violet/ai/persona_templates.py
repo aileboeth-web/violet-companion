@@ -63,15 +63,22 @@ def preview(data: dict[str, Any]) -> dict[str, Any]:
             "flaws": _labels(data.get("flaws"))}
 
 
-def custom_preview() -> dict[str, Any] | None:
-    """The admin's own persona, when one is in use."""
-    path = active_path()
-    if path is None or current()["template"] != "custom":
-        return None
+def custom_saved() -> dict[str, Any] | None:
+    """The admin's own persona as last written (2026-11-01: kept and shown after switching to a template, so it can
+    be edited or used again instead of starting over from the template)."""
+    path = control_dir() / CUSTOM_COPY
+    if not path.is_file() and current()["template"] == "custom":
+        path = active_path() or path                      # written before the copy existed
     try:
-        return preview(json.loads(path.read_text(encoding="utf-8")))
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+def custom_preview() -> dict[str, Any] | None:
+    """The admin's own persona (in use or not), for the page."""
+    data = custom_saved()
+    return {**preview(data), "summary": data.get("_summary") or ""} if data else None
 
 
 def current() -> dict[str, Any]:
@@ -195,25 +202,31 @@ CUSTOM_COPY = "persona_custom.json"            # the admin's own persona, kept f
 
 
 def relationship(channel: str | None = None) -> dict[str, Any]:
-    """{"kind", "label", "call"} for this channel (its own choice, else the main one)."""
-    rel = None
-    if channel:
-        rel = (channel_map().get(channel) or {}).get("relationship")
-    if not rel:
-        try:
-            rel = json.loads((control_dir() / "persona.json").read_text(encoding="utf-8")).get("relationship")
-        except (OSError, ValueError):
-            rel = None
-    rel = rel if isinstance(rel, dict) and rel.get("kind") in RELATIONSHIPS else {"kind": "close"}
-    kind = rel["kind"]
-    return {"kind": kind, "label": RELATIONSHIPS[kind][0], "call": str(rel.get("call") or DEFAULT_CALL.get(kind) or "")[:12]}
+    """{"kind", "label", "call"} for this channel: its own relationship and / or its own call (2026-11-01: a call
+    alone is kept too -- it was dropped when the relationship stayed "和主设定一样"), else the main one's."""
+    try:
+        main = json.loads((control_dir() / "persona.json").read_text(encoding="utf-8")).get("relationship")
+    except (OSError, ValueError):
+        main = None
+    main = main if isinstance(main, dict) and main.get("kind") in RELATIONSHIPS else {"kind": "close"}
+    own = (channel_map().get(channel) or {}).get("relationship") if channel else None
+    own = own if isinstance(own, dict) else {}
+    kind = own.get("kind") if own.get("kind") in RELATIONSHIPS else main["kind"]
+    if own.get("call"):
+        call = own["call"]
+    elif own.get("kind") in RELATIONSHIPS:                   # its own relationship: its own default call
+        call = DEFAULT_CALL.get(kind) or ""
+    else:
+        call = main.get("call") or DEFAULT_CALL.get(kind) or ""
+    return {"kind": kind, "label": RELATIONSHIPS[kind][0], "call": str(call)[:12]}
 
 
-def _clean_relationship(kind: str, call: str | None) -> dict[str, Any]:
-    if kind not in RELATIONSHIPS:
+def _clean_relationship(kind: str | None, call: str | None) -> dict[str, Any]:
+    """kind None: only a call (a channel keeping the main relationship)."""
+    if kind is not None and kind not in RELATIONSHIPS:
         raise ValueError("没有这种关系")
     call = " ".join(str(call or "").split())[:12]
-    return {"kind": kind, **({"call": call} if call else {})}
+    return {**({"kind": kind} if kind else {}), **({"call": call} if call else {})}
 
 
 def set_relationship(kind: str, call: str | None = None) -> dict[str, Any]:
@@ -256,8 +269,9 @@ def set_channel(channel: str, template: str | None, kind: str | None = None, cal
     entry = {}
     if template:
         entry["template"] = template
-    if kind:
-        entry["relationship"] = _clean_relationship(kind, call)
+    rel = _clean_relationship(kind or None, call)
+    if rel:
+        entry["relationship"] = rel
     if entry:
         data[channel] = entry
     else:
@@ -275,6 +289,21 @@ def core_path(channel: str | None) -> Path | None:
         if template and (TEMPLATE_DIR / f"{template}.json").is_file():
             return TEMPLATE_DIR / f"{template}.json"
     return active_path()
+
+
+def in_effect(channel: str | None = None) -> dict[str, Any]:
+    """What a channel really uses now (2026-11-01, user: 切换过人设之后也不显示，我也不知道还有没有生效): the
+    persona's name, the relationship and the call, after the channel's own choices and the main ones are merged."""
+    path = core_path(channel) or TEMPLATE_DIR / "violet.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    ident = data.get("identity") or {}
+    title = data.get("_title") or ident.get("name") or "人设"
+    name = ident.get("name") or ""
+    rel = relationship(channel)
+    return {"persona": title + (f"（{name}）" if name and name not in title else ""), **rel}
 
 
 def switch(db, key: str, memory: str, name: str | None = None) -> dict[str, Any]:

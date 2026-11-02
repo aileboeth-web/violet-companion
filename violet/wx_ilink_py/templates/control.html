@@ -206,6 +206,16 @@
 
   <section id="tab-schedule" class="tab">
     <p class="note" id="sch-banner"></p>
+    <details class="card sch-guide" id="sch-guide">
+      <summary>第一次用？四步录好课表</summary>
+      <ol>
+        <li><strong>新建学期</strong>：点下面的“新建学期”，名称写教务系统课表上的学年学期（例如 2026-2027-1），再填“今天是第几周”，其他日期会自动算。</li>
+        <li><strong>导入课表</strong>：到“导入 / 导出”，直接选教务系统导出的 <strong>.xls</strong> 课表（也可以用 .csv / .json 模板），点“预览”，看没问题再点“确认导入”。</li>
+        <li><strong>核对</strong>：回到“周视图”，翻到本周和下一周看看。单双周（例如 1,3,5…15 周）、只上前半学期（1-8 周）、换教室的周都按表里的“周次”自动处理，不用一周一周设。</li>
+        <li><strong>让她知道</strong>：到“设置 → 工具与 MCP（含课表）”打开“课表查询”和“聊天时考虑课表”；不想上课时被她找，再到“设置 → 主动联系”打开“主动联系避开上课”。</li>
+      </ol>
+      <p class="note">临时停课、调课：在周视图里点那一节课；考试和放假在“考试、假期、调课”里加。</p>
+    </details>
     <div class="filters">
       <label class="grow">学期 <select id="sch-term"></select></label>
       <button id="sch-term-new" class="ghost">新建学期</button>
@@ -246,18 +256,18 @@
       <div id="sch-exceptions" class="cards list"></div>
     </div>
     <div class="sch-view" id="sch-view-import">
-      <h3>导入 CSV / JSON</h3>
+      <h3>导入课表（教务系统的 .xls，或 CSV / JSON）</h3>
       <p class="note">先预览：预览不会改动课表。确认后在一个事务里写入，任何一项失败都整体不改。
         模板：<a id="sch-tpl-csv" href="/api/control/schedule/template/csv">CSV</a> ·
         <a id="sch-tpl-json" href="/api/control/schedule/template/json">JSON</a> ·
         <a id="sch-tpl-readme" href="/api/control/schedule/template/readme">填写说明</a></p>
       <div class="filters">
-        <label class="grow">文件 <input type="file" id="sch-file" accept=".csv,.json,text/csv,application/json"></label>
+        <label class="grow">文件 <input type="file" id="sch-file" accept=".xls,.xlsx,.csv,.json,text/csv,application/json,application/vnd.ms-excel"></label>
         <label>导入到 <select id="sch-import-target"><option value="selected">当前选中的学期</option><option value="file">按文件里的学期（仅 JSON）</option></select></label>
         <button id="sch-preview">预览</button>
       </div>
       <fieldset class="card" id="sch-import-mode">
-        <legend>CSV 导入方式</legend>
+        <legend>导入方式（.xls / CSV）</legend>
         <label class="check"><input type="radio" name="sch-import-mode" id="sch-mode-merge" value="merge" checked> 追加 / 更新（推荐）：只新增、更新文件里的课程，其他课程保持不变</label>
         <label class="check"><input type="radio" name="sch-import-mode" id="sch-mode-replace" value="replace"> 整学期替换：这个学期以前导入的课程里，文件中没有的会被删除</label>
         <p class="note">手动录入或手动改过的课程两种方式都不会覆盖、不会删除；只影响导入到的那个学期。JSON 文件不用选：按文件里写了的部分整体替换。</p>

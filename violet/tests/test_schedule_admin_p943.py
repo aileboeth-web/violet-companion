@@ -377,7 +377,7 @@ def test_bad_files_are_reported_line_by_line_and_never_applied(admin, violetdb, 
 
 def test_limits_and_no_file_paths(admin, violetdb, term, monkeypatch):
     from ai.schedule import importer
-    huge = "课程,星期,节次,周次\n" + "高数（虚构）,1,1-2,1-16\n" * 20000
+    huge = "课程,星期,节次,周次\n" + "高数（虚构）,1,1-2,1-16\n" * 50000      # 2026-11-01: the body may be 1 MB (.xls)
     resp = post(admin, f"{B}/import/preview", {"file_name": "t.csv", "content": huge, "term_id": term})
     assert resp.status_code == 413
     monkeypatch.setitem(importer.LIMITS, "max_csv_rows", 3)

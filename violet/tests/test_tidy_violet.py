@@ -27,7 +27,8 @@ def test_common_settings_exist_and_the_rest_is_advanced():
     assert BY_KEY["VIOLET_SOCIAL_OBEY_OWNER"].default is True and BY_KEY["VIOLET_SOCIAL_OBEY_OWNER"].public()["common"]
     assert BY_KEY["LLM_MAX_RETRY_ATTEMPTS"].public()["common"] is False
     js = open(os.path.join(os.path.dirname(__file__), "..", "wx_ilink_py", "static", "control.js"), encoding="utf-8").read()
-    assert "set-advanced" in js and "s.common" in js
+    # 2026-11-01: no separate "高级设置" -- the rest of each group follows its common settings
+    assert "set-advanced" not in js and "s.common" in js and "不常改的" in js
 
 
 # ------------------------------------------------------------------------------------------------ the owner in groups

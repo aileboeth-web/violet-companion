@@ -199,6 +199,7 @@ code{background:var(--panel-hover);border:1px solid var(--line);border-radius:7p
 .set-group{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:6px 20px 8px;margin-bottom:16px;
   box-shadow:var(--shadow);animation:rise .45s both}
 .set-group h3{margin:16px 0 6px}
+.set-more{color:var(--muted);font-size:12px;padding:14px 0 2px;border-bottom:1px dashed var(--line)}
 .set-row{display:grid;grid-template-columns:minmax(190px,280px) 1fr;gap:8px 20px;padding:12px 0;border-bottom:1px solid var(--line);
   transition:background .2s}
 .set-row:last-child{border-bottom:0}
@@ -257,6 +258,8 @@ dialog .stack{max-width:none}
 label.field{display:flex;flex-direction:column;gap:4px;font-size:13px}
 label.field .help{color:var(--muted);font-size:12px}label.field .err,.err{color:var(--bad);font-size:12px}
 label.check{flex-direction:row;align-items:center;gap:8px}label.check input{width:auto;accent-color:var(--accent)}
+.sch-guide{margin-bottom:12px}.sch-guide summary{cursor:pointer;font-weight:600}
+.sch-guide ol{margin:10px 0 6px;padding-left:22px;line-height:1.7}
 .warnbox{border-color:color-mix(in srgb,var(--warn) 50%,transparent);margin-top:8px}
 .danger-zone{border-color:color-mix(in srgb,var(--bad) 50%,transparent);margin-bottom:12px}
 .muted{opacity:.65}

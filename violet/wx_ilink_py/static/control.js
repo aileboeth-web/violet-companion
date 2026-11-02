@@ -532,7 +532,7 @@ function renderWeb(web) {
         if (!value) return;
         try { await api("POST", "/api/control/tools/web/secret", { value, confirm: true }); toast("凭据已替换"); loaders.tools(); } catch (e) { toast("替换失败：" + e.message, false); }
       } })),
-    h("p", { class: "note", text: "搜索服务、SearXNG 地址和搜索语言在“设置 → 功能开关”里改。" }),
+    h("p", { class: "note", text: "搜索服务、SearXNG 地址和搜索语言在“设置 → 联网搜索”里改。" }),
     ...(failures.length ? [h("div", { class: "note", text: "今天的失败：" }), ...failures] : [])),
     h("details", {}, h("summary", { text: "工具开关和授权（搜索 / 读网页，给 Chat、主动消息…）" }),
       h("div", { id: "web-server-slot" }))));
@@ -581,7 +581,7 @@ async function loadSearxng(box) {
   if (running) {
     buttons.append(h("button", { type: "button", text: "正在执行…查看进度", onclick: () => watchSearxng("联网搜索", p.task === "searxng-install" ? "enable" : p.task === "searxng-uninstall" ? "disable" : null) }));
   } else if (!s.available) {
-    buttons.append(h("p", { class: "note", text: "这种安装方式不能在网页上安装。以 root 在服务器上运行：/opt/violet/violet searxng install，再在“设置 → 功能开关”里打开联网搜索。" }));
+    buttons.append(h("p", { class: "note", text: "这种安装方式不能在网页上安装。以 root 在服务器上运行：/opt/violet/violet searxng install，再在“设置 → 联网搜索”里打开联网搜索。" }));
   } else if (!s.installed) {
     buttons.append(h("button", { class: "ghost", type: "button", text: "一键安装 SearXNG", onclick: async () => {
       // switched to SearXNG afterwards only when nothing else is searching yet
@@ -668,7 +668,7 @@ function showWebTest(box, t, installed) {
       Object.entries(t.by_engine).map(([k, v]) => `${k} ${v} 条`).join("、") }) : null,
     t.dead_engines && t.dead_engines.length ? h("p", { class: "note", text: "没有响应的搜索引擎：" + t.dead_engines.join("、") }) : null,
     !s.ok && installed ? h("p", { class: "note", text: "搜不到东西时点“选择搜索引擎”：只勾国内能访问的；如果每个引擎都是“超时”，再勾上“只用 IPv4”。还不行就用上面的“必应直连”。" }) : null,
-    !s.ok && t.provider === "bing" ? h("p", { class: "note", text: "必应没有给结果：可以在“设置 → 功能开关 → 必应地址”换成另一个地址再试；还不行，说明必应拒绝了这台服务器，可以改用博查等付费搜索（同一页的“搜索服务”）。" }) : null,
+    !s.ok && t.provider === "bing" ? h("p", { class: "note", text: "必应没有给结果：可以在“设置 → 联网搜索 → 必应地址”换成另一个地址再试；还不行，说明必应拒绝了这台服务器，可以改用博查等付费搜索（同一页的“搜索服务”）。" }) : null,
     h("div", { class: "row" }, pill(f.ok ? "网页阅读正常" : "网页阅读失败", f.ok ? "ok" : "bad"),
       h("span", { class: "note", text: f.ok ? `打开了 ${f.url}（${f.latency_ms} 毫秒）` : `打不开 ${f.url}：${f.error}` })),
   ];
@@ -729,8 +729,8 @@ function settingInput(s, ctx = SETTINGS_PAGE) {
   return row;
 }
 const SETTINGS_ELSEWHERE = ["api", "models", "images"];          // the model page; 0.7.2: the images page
-const SETTINGS_ORDER = ["behavior", "messages", "proactive", "life", "memory", "features", "images", "guard", "prompts",
-  "mcp", "system", "logs", "updates"];
+const SETTINGS_ORDER = ["behavior", "messages", "proactive", "life", "memory", "web", "voice", "social", "mcp", "images",
+  "guard", "prompts", "system", "logs", "updates"];
 loaders.settings = async () => {
   try {
     const d = await api("GET", "/api/control/settings");
@@ -740,22 +740,16 @@ loaders.settings = async () => {
     // Violet stage 3: API and models are on the model page; the rest in a useful order, with a jump bar on top
     const order = SETTINGS_ORDER.filter((g) => g in d.groups).concat(Object.keys(d.groups).filter((g) => !SETTINGS_ORDER.includes(g)));
     const shown = [];
-    // 2026-10-30: the common settings by group; everything else folded under "高级设置"
-    const advanced = h("div", { class: "stack" });
+    // 2026-11-01 (user: 高级设置很奇怪，不如全部融合在设置里): every setting in its own group, the common ones first,
+    // then the rest of the group under a small "不常改的" line -- no separate "高级设置" any more
     for (const g of order) {
       if (SETTINGS_ELSEWHERE.includes(g)) continue;
       const rows = d.settings.filter((s) => s.group === g && s.common);
       const more = d.settings.filter((s) => s.group === g && !s.common);
-      if (rows.length) {
-        box.append(h("div", { class: "set-group", id: "set-g-" + g }, h("h3", { text: d.groups[g] }), ...rows.map((s) => settingInput(s))));
-        shown.push([d.groups[g], "set-g-" + g]);
-      }
-      if (more.length) advanced.append(h("div", { class: "set-group" }, h("h3", { text: d.groups[g] }), ...more.map((s) => settingInput(s))));
-    }
-    if (advanced.children.length) {
-      box.append(h("details", { class: "set-advanced", id: "set-g-advanced" },
-        h("summary", { text: "高级设置（一般不用改：超时、重试、长度上限、检查用的模型、提示词版本等）" }), advanced));
-      shown.push(["高级", "set-g-advanced"]);
+      if (!rows.length && !more.length) continue;
+      box.append(h("div", { class: "set-group", id: "set-g-" + g }, h("h3", { text: d.groups[g] }), ...rows.map((s) => settingInput(s)),
+        more.length && rows.length ? h("div", { class: "set-more", text: "不常改的" }) : null, ...more.map((s) => settingInput(s))));
+      shown.push([d.groups[g], "set-g-" + g]);
     }
     jumpNav($("#set-jump"), [["她能自己做的事", "set-g-permissions"], ...shown]);
     renderPermissions();

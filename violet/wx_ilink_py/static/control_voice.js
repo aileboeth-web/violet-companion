@@ -132,7 +132,8 @@
     box.replaceChildren(h("div", { class: "card", id: "voice-card" },
       h("div", { class: "row" }, h("h3", { text: "语音（可选）" }), status),
       h("p", { class: "note", text: "让她用一段录音里的声音发 QQ 语音条（CosyVoice，在这台服务器上运行，不用联网服务）。"
-        + "没有显卡时一秒语音大约要算 30 秒，所以文字先发，语音几分钟后补上；私聊里每次回复都会挑一句发成语音，"
+        + "平时她打字，偶尔（你让她说话、念东西，或者她想撒娇、道晚安时）发语音：只发语音、不再先发一遍文字；"
+        + "没有显卡时一秒语音大约要算 30 秒，所以语音要几分钟后才到，生成失败就改发成文字。"
         + "让她念歌词、故事时会拆成几条语音一条条发。她只能念，不能按旋律唱。" }),
       h("details", { open: !v.installed }, h("summary", { text: "服务器需要的条件" }),
         ...v.requirements.map((r) => h("div", { class: "note", text: "· " + r }))),

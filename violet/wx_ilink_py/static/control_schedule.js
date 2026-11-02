@@ -80,10 +80,11 @@
     S.overview = await api("GET", base);
     const o = S.overview, sel = $("#sch-term");
     const banner = [];
-    if (!o.enabled) banner.push("Violet 现在不会查课表（.env 的 VIOLET_SCHEDULE_ENABLED 没有打开）；这里仍然可以录入和整理。");
+    if (!o.enabled) banner.push("Violet 现在不会查课表（“设置 → 工具与 MCP（含课表）→ 课表查询”没有打开）；这里仍然可以录入和整理。");
     if (o.server_disabled) banner.push("工具页里停用了 violet-schedule，Violet 现在不会查课表。");
     if (o.tools_disabled && o.tools_disabled.length) banner.push("工具页里停用了：" + o.tools_disabled.join("、") + "。");
-    if (!o.terms.length) banner.push("还没有课表：先新建一个学期，或在“导入 / 导出”里导入 JSON。");
+    $("#sch-guide").open = !o.terms.length;
+    if (!o.terms.length) banner.push("还没有课表：按下面“四步录好课表”来，先新建一个学期。");
     else if (!o.terms.some((t) => t.state === "active")) banner.push("今天不在任何进行中的学期里（Violet 会说课表还没开始或已经结束）。如果新学期开始了，请录入新学期。");
     $("#sch-banner").textContent = banner.join(" ");
     const keep = S.termId;
@@ -124,20 +125,39 @@
   $("#sch-term").addEventListener("change", (ev) => { S.termId = Number(ev.target.value); S.week = null; refresh(true); });
 
   // ---------------------------------------------------------------- terms
+  // 2026-11-01 (user: 课表没有标识清楚): "今天是第几周" is enough -- the first Monday (and, for a new term, the start and
+  // the end) are worked out from it; single / double weeks and "1-8 周" in the timetable all count from that Monday
   function termFields(t) {
-    return [{ name: "name", label: "名称", value: t && t.name, required: true, max: 60, placeholder: "例如 2026 秋" },
-      { name: "start_date", label: "开学日期", type: "date", value: t && t.start_date, required: true },
-      { name: "end_date", label: "结束日期", type: "date", value: t && t.end_date, required: true },
+    return [{ name: "name", label: "名称", value: t && t.name, required: true, max: 60, placeholder: "例如 2026-2027-1（教务系统课表左上角的学年学期）" },
+      { name: "current_week", label: "今天是第几周", type: "number", min: 1, maxValue: 30,
+        value: t && t.current_week, help: "填了就自动算出“第一周的星期一”；不知道开学日期时，下面两个日期也可以留空（按 20 周算）" },
+      { name: "start_date", label: "开学日期", type: "date", value: t && t.start_date },
+      { name: "end_date", label: "结束日期", type: "date", value: t && t.end_date },
       { name: "week1_monday", label: "第一周的星期一", type: "date", value: t && t.week1_monday, help: "留空 = 开学那一周的星期一；第几周、单双周都从这一天算" },
       { name: "timezone", label: "学期时区", value: (t && t.timezone) || "Asia/Shanghai", required: true, max: 64, help: "IANA 名称，例如 Asia/Shanghai；上课时间都是这个时区的钟点" }];
   }
+  const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  function fromWeek(v, t) {
+    const week = v.current_week; delete v.current_week;
+    if (week && !(t && week === t.current_week)) {
+      const d = new Date(); d.setHours(12, 0, 0, 0);
+      d.setDate(d.getDate() - ((d.getDay() + 6) % 7) - (week - 1) * 7);           // this week's Monday, back (week - 1) weeks
+      v.week1_monday = isoDay(d);
+      if (!v.start_date) v.start_date = v.week1_monday;
+      if (!v.end_date) { const e = new Date(d); e.setDate(e.getDate() + 20 * 7 - 1); v.end_date = isoDay(e); }
+    }
+    if (!v.start_date || !v.end_date) throw new Error("请填“今天是第几周”，或者填开学和结束日期");
+    return v;
+  }
   $("#sch-term-new").addEventListener("click", () => formDialog("新建学期", termFields(null), async (v) => {
-    const r = await api("POST", `${base}/terms`, v); S.termId = r.id; toast("学期已创建"); refresh(false);
-  }));
+    const r = await api("POST", `${base}/terms`, fromWeek(v, null)); S.termId = r.id; toast("学期已创建，下一步：导入课表"); refresh(false);
+    showView("import");
+  }, "只要填名称和“今天是第几周”就行，其他的会自动算。"));
   $("#sch-term-edit").addEventListener("click", () => {
     if (!S.detail) return;
     const t = S.detail.term;
     formDialog("编辑学期", termFields(t), async (v) => {
+      v = fromWeek(v, t);
       const changes = {}; for (const [k, val] of Object.entries(v)) if ((val || null) !== (t[k] || null)) changes[k] = val;
       if (!Object.keys(changes).length) return;
       await api("POST", `${base}/terms/${t.id}`, changes); toast("已保存"); refresh(true);
@@ -423,16 +443,24 @@
   }
   async function readUpload() {
     const file = $("#sch-file").files[0];
-    if (!file) throw new Error("先选择一个 .csv 或 .json 文件");
+    if (!file) throw new Error("先选择文件：教务系统导出的 .xls，或者 .csv / .json");
+    const target = $("#sch-import-target").value;
+    // 2026-11-01: the .xls a school's 教务系统 exports goes as it is; the server reads it (ai/schedule/school_xls.py)
+    if (isXls(file.name)) {
+      if (target !== "selected" || !S.termId) throw new Error("先新建学期（或在上面选好学期），再导入教务系统的课表");
+      if (file.size > 700 * 1024) throw new Error("文件太大（最大 700 KB）");
+      const data = await new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = () => reject(new Error("读不了这个文件")); r.readAsDataURL(file); });
+      return { file_name: file.name, data_base64: data, term_id: S.termId, mode: importMode() };
+    }
     const max = (S.overview && S.overview.limits.max_bytes) || 262144;
     if (file.size > max) throw new Error(`文件太大（最大 ${Math.round(max / 1024)} KB）`);
     const content = await file.text();
-    const target = $("#sch-import-target").value;
     const upload = { file_name: file.name, content, term_id: target === "selected" ? S.termId : null };
     if (isCsv(file.name)) upload.mode = importMode();          // JSON has its own rule (no mode)
     return upload;
   }
   const isCsv = (name) => /\.csv$/i.test(name || "");
+  const isXls = (name) => /\.xlsx?$/i.test(name || "");
   const importMode = () => (document.querySelector('input[name="sch-import-mode"]:checked') || { value: "merge" }).value;
   // a preview belongs to the mode it was made with: changing the mode asks for a new preview
   for (const r of document.querySelectorAll('input[name="sch-import-mode"]')) {
@@ -451,7 +479,10 @@
       const p = await api("POST", `${base}/import/preview`, upload);
       S.preview = p; S.previewFile = upload;
       box.replaceChildren(previewView(p));
-    } catch (e) { box.replaceChildren(h("p", { class: "err", text: e.message })); }
+    } catch (e) {
+      const problems = Object.values((e.data && e.data.problems) || {});
+      box.replaceChildren(h("p", { class: "err", text: e.message + (problems.length ? "：" + problems.join("；") : "") }));
+    }
   });
   function previewView(p) {
     const parts = [h("div", { class: "row" }, h("strong", { text: `${p.file_name}（${p.format.toUpperCase()}${p.rows ? "，" + p.rows + " 行" : ""}）→ ${p.term || "?"}${p.new_term ? "（新学期）" : ""}` }),

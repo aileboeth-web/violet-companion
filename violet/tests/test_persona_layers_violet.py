@@ -108,6 +108,21 @@ def test_a_channel_with_its_own_persona_and_relationship(db, data_dir):
     assert "telegram" not in pt.channel_map()
 
 
+def test_a_channel_call_alone_is_kept_and_shown(db, data_dir):
+    """2026-11-01 (user: 设置了称呼，切换人设之后也不显示): a call with the relationship left at "和主设定一样" was dropped."""
+    from ai import persona_templates as pt
+    pt.set_relationship("partner", "宝")
+    pt.set_channel("napcat", None, None, "主人")
+    assert pt.relationship("napcat") == {"kind": "partner", "label": "恋人", "call": "主人"}
+    assert pt.relationship("wechat")["call"] == "宝"
+    pt.switch(db, "ai", "keep")
+    assert pt.relationship("napcat")["call"] == "主人" and pt.relationship()["call"] == "宝"     # a switch keeps both
+    shown = pt.in_effect("napcat")
+    assert shown["call"] == "主人" and shown["label"] == "恋人" and shown["persona"]
+    pt.set_channel("napcat", None, "daughter")                 # its own relationship: its own default call
+    assert pt.relationship("napcat")["call"] == "爸爸"
+
+
 def test_persona_page_routes(admin, data_dir):
     d = admin.get("/api/persona/templates").get_json()
     d = d.get("data", d)

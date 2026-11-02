@@ -10,6 +10,8 @@ markupsafe==3.0.3
 # Imported directly by Violet (phase 5B/6); also pulled in by mcp -- pinned so an mcp upgrade cannot move them
 httpx==0.28.1
 anyio==4.15.1
+# Timetable .xls exported by school systems (ai/schedule/school_xls.py); pure Python
+xlrd==2.0.1
 # IANA time zones (VIOLET_TIMEZONE); required on Windows, harmless on Linux
 tzdata==2026.1
 

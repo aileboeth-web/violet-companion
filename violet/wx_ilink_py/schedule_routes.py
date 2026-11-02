@@ -12,6 +12,7 @@ Violet sees a change on her next lookup: the violet-schedule tools read the stor
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from typing import Any, Callable
 
@@ -19,7 +20,7 @@ from flask import Flask, Response, jsonify, request
 
 logger = logging.getLogger("violet.schedule")
 MAX_BODY = 64 * 1024
-MAX_IMPORT_BODY = 400 * 1024          # the file (256 KB of text, JSON-escaped) plus the other fields
+MAX_IMPORT_BODY = 1024 * 1024         # the file (256 KB of text JSON-escaped, or a .xls of 700 KB as base64) + fields
 
 
 def register_schedule_routes(app: Flask, violetdb) -> None:
@@ -309,6 +310,28 @@ def register_schedule_routes(app: Flask, violetdb) -> None:
             if not str(data["term_id"]).isdigit() or term_or_404(int(data["term_id"])) is None:
                 raise ScheduleValidationError({"term_id": "选择的学期不存在"})
             term = term_or_404(int(data["term_id"]))
+        if data.get("data_base64") is not None:
+            # 2026-11-01: the .xls a school's 教务系统 exports, read into the CSV format (ai/schedule/school_xls.py)
+            import base64
+            import binascii
+            from ai.schedule import school_xls
+            try:
+                raw = base64.b64decode(str(data["data_base64"]).split(",", 1)[-1], validate=True)
+                table = school_xls.convert(raw)
+            except (binascii.Error, ValueError) as exc:
+                raise ScheduleValidationError({"file": str(exc) if isinstance(exc, school_xls.SchoolTableError)
+                                               else "文件内容不对（要 base64）"}) from None
+            if term is None:
+                raise ScheduleValidationError({"term_id": "先新建或选好学期，再导入教务系统的课表"
+                                               + (f"（表里写的学期是 {table['term']}）" if table["term"] else "")})
+            name = re.sub(r"\.xls$", "", str(data.get("file_name") or "课表"), flags=re.I) + ".xls.csv"
+            parsed = importer.parse(table["csv"], name, "csv", term)
+            parsed.fmt = "csv"
+            if table["untimed"]:
+                parsed.warn(f"有 {table['untimed']} 节课所在的行没写上课时间，没有导入")
+            if table["term"] and importer.name_key(table["term"]) != importer.name_key(term["name"]):
+                parsed.warn(f"表里写的学期是“{table['term']}”，会导入到选中的学期“{term['name']}”")
+            return parsed, data
         content = data.get("content")
         if not isinstance(content, str):
             raise ScheduleValidationError({"content": "要把文件内容作为文字发送"})

@@ -245,7 +245,6 @@ VIOLET_IMAGE_STYLE=photo
 VIOLET_IMAGE_QUALITY=medium
 # 2026-10-31: her voice (optional install: violet voice install)
 VIOLET_VOICE=1
-VIOLET_VOICE_AUTO=1
 VIOLET_VOICE_MAX_CHARS=300
 # 2026-11-01: 0 = no Intent call before the reply (Chat decides about tools and memories itself)
 VIOLET_INTENT_STEP=0

@@ -144,10 +144,13 @@
       document.body.append(d); d.showModal();
     });
   }
-  // the admin's own persona: starts from the persona in use; one item per line
-  async function customDialog() {
+  // the admin's own persona: starts from what was written last time (2026-11-01: it was lost from view after switching
+  // to a template), else from the persona in use; one item per line
+  async function customDialog(saved) {
     let core = {};
-    try { core = ((await api("GET", "/api/persona")).core || {}).data || {}; } catch (_) { /* empty form */ }
+    if (saved) core = { identity: { name: saved.name, self_description: saved.self_description }, personality: saved.personality,
+      communication_habits: saved.habits, long_term_interests: saved.interests, values: saved.values, flaws: saved.flaws };
+    else try { core = ((await api("GET", "/api/persona")).core || {}).data || {}; } catch (_) { /* empty form */ }
     const ident = core.identity || {};
     const area = (value, rows, ph) => { const t = h("textarea", { rows, placeholder: ph }); t.value = value; return t; };
     const lines = (list) => (list || []).map((x) => (typeof x === "string" ? x : x.label)).join("\n");
@@ -162,11 +165,12 @@
       flaws: area(lines(core.flaws), 2, "小缺点，每行一条"),
     };
     f.name.value = ident.name || "";
+    f.summary.value = (saved && saved.summary) || "";
     const keep = h("input", { type: "radio", name: "pc-mem", checked: true }), clear = h("input", { type: "radio", name: "pc-mem" });
     const err = h("p", { class: "err" });
     const d = h("dialog", { class: "wide" }, h("form", { method: "dialog", class: "stack" },
       h("h3", { text: "自定义人设" }),
-      h("p", { class: "note", text: "从现在用的人设开始改。不能编造家人、工作、学校这些背景，也不会自称真人，这两条是固定的。" }),
+      h("p", { class: "note", text: (saved ? "这是你上次写的人设。" : "从现在用的人设开始改。") + "不能编造家人、工作、学校这些背景，也不会自称真人，这两条是固定的。" }),
       h("label", {}, "名字 ", f.name), h("label", {}, "介绍 ", f.summary), h("label", {}, "日常 ", f.self_description),
       h("label", {}, "性格 ", f.personality), h("label", {}, "说话习惯 ", f.communication_habits),
       h("label", {}, "兴趣 ", f.interests), h("label", {}, "看重 ", f.values), h("label", {}, "小缺点 ", f.flaws),
@@ -227,20 +231,24 @@
       h("button", { type: "button", text: "保存", onclick: async () => {
         try { await api("POST", "/api/persona/relationship", { kind: sel.value, call: call.value }); toast("已保存，下一条消息起生效"); loaders.persona(); }
         catch (e) { toast(e.message, false); }
-      } })), text);
+      } })), text, d.in_effect ? inEffect(d.in_effect) : null);
   }
+  // 2026-11-01 (user: 设置了称呼，切换人设之后也不显示，不知道还有没有生效): what is really used now, after merging
+  const inEffect = (x) => h("p", { class: "note", text: `现在生效：${x.persona} · 关系“${x.label}” · ${x.call ? `叫你“${x.call}”` : "不特别称呼你"}` });
   function renderChannelPersonas(d) {
     const options = [h("option", { value: "", text: "和主人设一样" }),
       ...d.templates.map((t) => h("option", { value: t.key, text: t.title })), ...(d.custom ? [h("option", { value: "custom", text: "自定义人设" })] : [])];
+    const mainCall = (d.relationship || {}).call;
     const rows = (d.channels || []).map((c) => {
       const tpl = h("select", { "aria-label": "人设" }, ...options.map((o) => o.cloneNode(true))); tpl.value = c.template || "";
       const rel = relationshipSelect(d, (c.relationship || {}).kind, true);
-      const call = h("input", { maxlength: 12, placeholder: "称呼（可空）" }); call.value = (c.relationship || {}).call || "";
-      return h("div", { class: "row" }, h("strong", { text: c.label, style: "min-width:7em" }), tpl, rel, call,
+      const call = h("input", { maxlength: 12, placeholder: mainCall ? `称呼（空 = 和主设定一样：${mainCall}）` : "称呼（可空）" });
+      call.value = (c.relationship || {}).call || "";
+      return h("div", { class: "stack" }, h("div", { class: "row" }, h("strong", { text: c.label, style: "min-width:7em" }), tpl, rel, call,
         h("button", { class: "ghost", type: "button", text: "保存", onclick: async () => {
-          try { await api("POST", "/api/persona/channel", { channel: c.id, template: tpl.value || null, kind: rel.value || null, call: call.value }); toast(`${c.label} 已保存`); }
+          try { await api("POST", "/api/persona/channel", { channel: c.id, template: tpl.value || null, kind: rel.value || null, call: call.value }); toast(`${c.label} 已保存`); loaders.persona(); }
           catch (e) { toast(e.message, false); }
-        } }));
+        } })), c.in_effect ? inEffect(c.in_effect) : null);
     });
     $("#pl-channels").replaceChildren(...(rows.length ? rows : [h("p", { class: "note", text: "还没有聊天渠道。" })]),
       h("p", { class: "note", text: "比如：微信上是“Violet + 恋人”，QQ 上是“AI + 开发者”。记忆、提醒和课表是共用的；QQ 群里也按 QQ 这一行的设定。" }));
@@ -253,10 +261,10 @@
     renderChannelPersonas(d);
     const own = h("div", { class: "card platform" },
       h("div", { class: "platform-head" }, h("strong", { text: "自定义人设" }), d.current.template === "custom" ? pill("正在使用", "ok") : pill("自己写", "")),
-      h("p", { class: "note platform-intro", text: "名字、性格、说话方式、兴趣都自己写；从现在用的人设开始改。" }),
+      h("p", { class: "note platform-intro", text: d.custom ? `你写过的：${d.custom.name}${d.custom.summary ? "，" + d.custom.summary : ""}` : "名字、性格、说话方式、兴趣都自己写；从现在用的人设开始改。" }),
       h("div", { class: "platform-body" }),
       h("div", { class: "row platform-foot" }, h("button", { type: "button", class: "ghost",
-        text: d.current.template === "custom" ? "修改" : "自己写一个", onclick: customDialog })));
+        text: d.current.template === "custom" ? "修改" : (d.custom ? "修改并换回它" : "自己写一个"), onclick: () => customDialog(d.custom) })));
     withPreview(own, d.custom);
     // 2026-10-30: test mode -- on top of the persona in use (which stays as it is), switches itself off
     const tm = d.test_mode || { on: false };

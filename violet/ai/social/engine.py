@@ -355,7 +355,7 @@ class SocialEngine:
         if note:
             system = system + "\n\n" + note
         from ai import voice
-        speaking = "" if testing else voice.prompt_note(automatic=conv["kind"] == "private", json_field=True)
+        speaking = "" if testing else voice.prompt_note(json_field=True)
         if speaking:                                     # 2026-10-31: she can send a voice message (11-01: always)
             system = system + "\n\n" + speaking
         try:
@@ -463,13 +463,16 @@ class SocialEngine:
                 action, error = "silent", "QQ 没有连接，没有发出去"
             else:
                 from ai.chat_output import VOICE_LINE
-                spoken: list[str] = []
                 for i, text in enumerate(texts):
                     if conv["daily_message_limit"] and today["messages"] + sent >= conv["daily_message_limit"]:
                         break
-                    if text.startswith(VOICE_LINE):           # 2026-11-01: written now, her voice follows (queue)
+                    if text.startswith(VOICE_LINE):
+                        # 2026-11-01 (user: 先发文字会让人以为她话说完了): only her voice, minutes later; as text
+                        # now when there is no voice, later when it fails
                         text = texts[i] = text[len(VOICE_LINE):].strip()
-                        spoken.append(text)
+                        if self._voice_later(conv, adapter, text):
+                            sent += 1
+                            continue
                     try:
                         msg_id = adapter.send_to(conv["kind"], conv["peer_id"], text,
                                                  reply_to=reply_to if action == "reply" and i == 0 else None)
@@ -478,14 +481,6 @@ class SocialEngine:
                         break
                     self.store.add_message(conv["id"], content=text, is_self=True, platform_msg_id=msg_id)
                     sent += 1
-                if error is None and sent:
-                    from ai import voice
-                    for text in spoken:
-                        self._voice_later(conv, adapter, text)
-                    line = (not spoken and conv["kind"] == "private" and voice.auto()
-                            and voice.pick_line(texts[:sent]))
-                    if line:                              # private chats: one of her lines in her voice too
-                        self._voice_later(conv, adapter, line, automatic=True)
                 if sticker is not None and error is None and not (
                         conv["daily_message_limit"] and today["messages"] + sent >= conv["daily_message_limit"]):
                     try:
@@ -548,10 +543,12 @@ class SocialEngine:
         return {"action": action, "sent": sent, "check_back": check_back, "error": error, "reason": reason,
                 "sticker_wanted": bool(wanted), "collect_wanted": bool(decision.get("collect"))}
 
-    def _voice_later(self, conv: dict[str, Any], adapter, text: str, automatic: bool = False) -> bool:
-        """Queues `text` (already sent as text) to follow in her voice, a long one as several voice messages."""
+    def _voice_later(self, conv: dict[str, Any], adapter, text: str) -> bool:
+        """Queues `text` to go out in her voice (only), a long one as several voice messages; a sentence that cannot
+        be said goes out as text then. The chat record has it at once, so a decision in between knows she said it.
+        False = no voice here (the caller sends the text now)."""
         from ai import voice
-        if not text or adapter is None:
+        if not text or adapter is None or not voice.ready():
             return False
         try:
             import inspect
@@ -561,13 +558,15 @@ class SocialEngine:
             return False
 
         def deliver(path, piece: str) -> None:
-            msg_id = adapter.send_to(conv["kind"], conv["peer_id"], None, voice_path=str(path))
-            self.store.add_message(conv["id"], content=f"[语音] {piece}", is_self=True, platform_msg_id=msg_id,
-                                   message_type="voice")
-        queued = voice.say_later(text, deliver, automatic=automatic, label=str(conv["id"]))
+            adapter.send_to(conv["kind"], conv["peer_id"], None, voice_path=str(path))
+
+        def fallback(piece: str) -> None:
+            adapter.send_to(conv["kind"], conv["peer_id"], piece)
+
+        queued = voice.say_later(text, deliver, fallback=fallback, label=str(conv["id"]))
         if queued:
-            trace.step("发语音", 会话=conv["id"], 结果="排队生成（文字已发，语音几分钟后到）", 自动=automatic or None,
-                       内容=trace.text(text))
+            self.store.add_message(conv["id"], content=f"[语音] {text}", is_self=True, message_type="voice")
+            trace.step("发语音", 会话=conv["id"], 结果="排队生成（几分钟后发出，失败就改发文字）", 内容=trace.text(text))
         return queued
 
     # -- stickers (0.7.9) ---------------------------------------------------------------------------------------

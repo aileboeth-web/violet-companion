@@ -134,19 +134,19 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_CONTEXT_HISTORY_TURNS", "聊天历史保留几轮", "behavior", "int", "now", "同一方连发的几行算一轮", 24, 0, 60),
     Setting("VIOLET_REPLY_HABIT_NOTE", "回复习惯提示", "behavior", "bool", "now", "提醒 Chat 最近已经问过、关心过什么", True),
     # phase 10.7: feature switches that used to need .env (the code reads them at every agent (re)load / call)
-    Setting("VIOLET_WEB_ENABLED", "联网搜索和网页阅读", "features", "bool", "now",
+    Setting("VIOLET_WEB_ENABLED", "联网搜索和网页阅读", "web", "bool", "now",
             "开启后 Violet 在需要实时信息时可以搜索（需要下面的 SearXNG 地址，或在 .env 里配置其他搜索服务）", False),
-    Setting("VIOLET_WEB_SEARXNG_URL", "SearXNG 地址", "features", "url", "now",
+    Setting("VIOLET_WEB_SEARXNG_URL", "SearXNG 地址", "web", "url", "now",
             "自建 SearXNG 的地址，例如 http://127.0.0.1:18089（部署方法见 deploy/searxng/README.md）", optional=True),
-    Setting("VIOLET_CHAT_TOOLS_DIRECT", "查询工具直接交给回复", "features", "bool", "now",
+    Setting("VIOLET_CHAT_TOOLS_DIRECT", "查询工具直接交给回复", "mcp", "bool", "now",
             "开：每一轮回复都能直接用连上的只读工具（联网搜索、课表、手机状态等），自己判断要不要查；"
             "关：只在意图识别判断要查时才给（以前的做法，少一点 token，但容易漏查）", True),
     # 2026-11-01 (capability rework: the Intent call cost 7-22 s and ~7.7k tokens per message)
-    Setting("VIOLET_INTENT_STEP", "回复前先做意图识别", "features", "bool", "now",
+    Setting("VIOLET_INTENT_STEP", "回复前先做意图识别", "behavior", "bool", "now",
             "关（推荐）：她直接回复，自己决定要不要用工具、查记忆，快一倍、省一半 token；"
             "开：先多调用一次模型判断意图（以前的做法，出问题时可以切回来）", False),
     # 2026-10-30 (user: "比较自由调用工具，在聊天的时候知道要用什么工具")
-    Setting("VIOLET_CHAT_ACTION_TOOLS", "会改动东西的工具也交给回复", "features", "bool", "now",
+    Setting("VIOLET_CHAT_ACTION_TOOLS", "会改动东西的工具也交给回复", "mcp", "bool", "now",
             "开：会改动东西的工具（例如手机上的操作）也由她在聊天里直接调用，不再单独建任务；没单独放行的，每次都先问你"
             "（“设置 → 她能自己做的事”）。关：这些工具走任务执行（以前的做法）", True),
     Setting("VIOLET_CHAT_MAX_TOOL_ROUNDS", "一次回复最多用几轮工具", "mcp", "int", "now",
@@ -154,31 +154,31 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_MCP_AUTO_CLASSIFY", "没分类的 MCP 工具自动处理", "mcp", "bool", "now",
             "开：你加的 MCP 服务器里没分类的工具，声明自己只读的当查询工具用，其余的当“会改动东西”的工具（要你放行或同意）；"
             "关：没分类的工具全部藏起来（以前的做法）", True),
-    Setting("VIOLET_WEB_AUTO_READ", "搜索时自动打开几个网页", "features", "int", "now",
+    Setting("VIOLET_WEB_AUTO_READ", "搜索时自动打开几个网页", "web", "int", "now",
             "搜索结果只有标题和一句摘要时（必应直连就是这样），自动打开排在前面的几个网页，把正文一起交给她，"
             "她就能按网页内容回答（比如天气的具体温度）；每打开一个算一次网页读取。0 = 只搜索不打开", 2, 0, 3),
-    Setting("VIOLET_SCHEDULE_ENABLED", "课表查询（violet-schedule）", "features", "bool", "now",
+    Setting("VIOLET_SCHEDULE_ENABLED", "课表查询（violet-schedule）", "mcp", "bool", "now",
             "Violet 可以查你在“课表”页录入的课表", False),
-    Setting("VIOLET_SCHEDULE_CONTEXT", "聊天时考虑课表", "features", "bool", "now", "聊天时知道你现在是不是在上课", False),
-    Setting("VIOLET_SCHEDULE_PROACTIVE", "主动联系避开上课", "features", "bool", "now",
+    Setting("VIOLET_SCHEDULE_CONTEXT", "聊天时考虑课表", "mcp", "bool", "now", "聊天时知道你现在是不是在上课", False),
+    Setting("VIOLET_SCHEDULE_PROACTIVE", "主动联系避开上课", "proactive", "bool", "now",
             "上课、考试时不主动找你（按课表计算）", False),
     # Violet stage 3: everything a user may want to change without editing .env. Left out on purpose: what the
     # installer owns (paths, port, HTTPS, data directory, admin token), stdio MCP commands, test switches.
-    Setting("VIOLET_WEB_SEARCH_PROVIDER", "搜索服务", "features", "choice", "now",
+    Setting("VIOLET_WEB_SEARCH_PROVIDER", "搜索服务", "web", "choice", "now",
             "必应直连不用安装、国内服务器也能用；SearXNG 是自建的开源搜索；博查 / Brave 是付费搜索 API（Key 在“工具”页的联网工具里替换）",
             "searxng",
             choices=(("bing", "必应直连（不用安装）"), ("searxng", "SearXNG（自建）"), ("bocha", "博查（付费 API）"),
                      ("brave", "Brave Search（付费 API）"), ("none", "不搜索"))),
-    Setting("VIOLET_WEB_BING_HOST", "必应地址", "features", "choice", "now",
+    Setting("VIOLET_WEB_BING_HOST", "必应地址", "web", "choice", "now",
             "必应直连用哪个地址：国内服务器用 cn.bing.com", "cn.bing.com",
             choices=(("cn.bing.com", "cn.bing.com（国内）"), ("www.bing.com", "www.bing.com（国际）"))),
-    Setting("VIOLET_WEB_SEARCH_ENDPOINT", "搜索 API 地址", "features", "url", "now",
+    Setting("VIOLET_WEB_SEARCH_ENDPOINT", "搜索 API 地址", "web", "url", "now",
             "只对博查 / Brave：换成别的接口地址；留空 = 官方地址", optional=True),
-    Setting("VIOLET_WEB_SEARCH_LANGUAGE", "搜索语言", "features", "choice", "now", "SearXNG 搜索结果的语言", "zh-CN",
+    Setting("VIOLET_WEB_SEARCH_LANGUAGE", "搜索语言", "web", "choice", "now", "SearXNG 搜索结果的语言", "zh-CN",
             choices=(("zh-CN", "简体中文"), ("zh-TW", "繁體中文"), ("en", "English"), ("ja", "日本語"), ("all", "不限"))),
-    Setting("VIOLET_WEB_EXPLORER", "允许自主探索", "features", "bool", "now",
+    Setting("VIOLET_WEB_EXPLORER", "允许自主探索", "web", "bool", "now",
             "允许 Violet 在空闲时自己上网看看感兴趣的东西（会用模型、计入联网次数）；打开后还要在“联网与探索”页开启", False),
-    Setting("VIOLET_WEB_EXPLORER_LLM_MODEL", "自主探索用的模型", "features", "model", "now", "留空 = 不探索", optional=True),
+    Setting("VIOLET_WEB_EXPLORER_LLM_MODEL", "自主探索用的模型", "web", "model", "now", "留空 = 不探索", optional=True),
     # 2026-10-29: Violet's social life on the channel "QQ" (ai/social): groups are chosen per group on the channels page
     Setting("VIOLET_SOCIAL_PRIVATE", "别人私聊她", "social", "choice", "now",
             "不是你的人私聊 Violet 时：不理 / 只回群里认识的人 / 谁都回（她仍然自己决定说不说）", "all",
@@ -191,10 +191,10 @@ SETTINGS: list[Setting] = [
             "会改动东西的工具群里永远不给。关：群里不用任何工具（以前的做法）", True),
     Setting("VIOLET_SOCIAL_ANSWER_WHEN_CALLED", "叫她名字一定回", "social", "bool", "now",
             "群里有人叫她名字、@她、拍一拍她，她这次选了不说话时再问她一次（多一次模型调用）", True),
-    Setting("VIOLET_MOOD", "她自己的心情", "features", "bool", "now",
+    Setting("VIOLET_MOOD", "她自己的心情", "behavior", "bool", "now",
             "被夸、被谢会开心，被骂会不高兴，几个小时里慢慢平复；心情明显时影响她说话的语气、发表情包的多少和群里主动说话的次数"
             "（按关键词判断，不多用模型）", True),
-    Setting("VIOLET_MOOD_HALF_LIFE_HOURS", "心情平复的半衰期（小时）", "features", "float", "now",
+    Setting("VIOLET_MOOD_HALF_LIFE_HOURS", "心情平复的半衰期（小时）", "behavior", "float", "now",
             "过这么久，心情的变化就淡一半", 3.0, 0.1, 72),
     Setting("VIOLET_SOCIAL_INITIATIVE", "群里冷场时自己说话", "social", "bool", "now",
             "“自己决定”的群安静了一阵（15 分钟以上、3 天以内有人说过话），她偶尔会想想要不要自己起个话题；"
@@ -236,12 +236,14 @@ SETTINGS: list[Setting] = [
             choices=(("photo", "生活照（像手机拍的）"), ("illustration", "插画"), ("anime", "动漫"))),
     Setting("VIOLET_IMAGE_QUALITY", "画图质量", "images", "choice", "now",
             "质量越高画得越慢；你的中转如果 60 秒就断（504 Gateway Timeout），用“中”或“低”。auto = 不指定，用模型自己的默认",
-            "medium", choices=(("low", "低（最快）"), ("medium", "中"), ("high", "高（最慢）"), ("auto", "不指定"))),    Setting("VIOLET_VOICE", "她的语音", "features", "bool", "now",
-            "装好语音（工具页 → 语音）并上传参考录音后，她会发语音条：文字先发，语音几分钟后补上；关掉就只打字", True),
-    Setting("VIOLET_VOICE_AUTO", "每次回复都补一条语音", "features", "bool", "now",
-            "私聊里她每次回复都挑一句话再发成语音（上一条还没生成完就跳过）；关掉就只在你让她说话、念、唱时才发", True),
-    Setting("VIOLET_VOICE_MAX_CHARS", "一次念多少字", "features", "int", "now",
-            "让她念歌词、故事时最多念几个字，按句子拆成每条约 30 字的语音一条条发（每条在 CPU 上约几分钟）", 300, 5, 1000),    Setting("VISION_LLM_MODEL", "识图模型", "images", "model", "now",
+            "medium", choices=(("low", "低（最快）"), ("medium", "中"), ("high", "高（最慢）"), ("auto", "不指定"))),
+    # 2026-11-01 (user: 没让她发语音但每句都发；先发文字会让人以为她话说完了): no automatic voice line; voice only
+    Setting("VIOLET_VOICE", "她的语音", "voice", "bool", "now",
+            "装好语音（工具页 → 语音）并上传参考录音后，她偶尔会发语音条（你让她说话、念东西，或者她想撒娇、道晚安时）："
+            "只发语音，几分钟后到，生成失败就改发文字；关掉就只打字", True),
+    Setting("VIOLET_VOICE_MAX_CHARS", "一次念多少字", "voice", "int", "now",
+            "让她念歌词、故事时最多念几个字，按句子拆成每条约 30 字的语音一条条发（每条在 CPU 上约几分钟）", 300, 5, 1000),
+    Setting("VISION_LLM_MODEL", "识图模型", "images", "model", "now",
             "看懂你发来的图片用的模型；留空 = 和 Chat 用同一个模型", optional=True),
     Setting("VISION_TIMEOUT_SECONDS", "识图超时（秒）", "images", "float", "now", "", 60.0, 5, 300),
     Setting("VIOLET_IMAGE_LEGACY_VISION", "没有图片功能时也识图", "images", "bool", "now",
@@ -292,7 +294,7 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_AI_NATURAL", "AI 人设用模型本来的说话方式", "behavior", "bool", "now",
             "开：用 AI 人设时，不再给她“像手机上随手回消息”这类陪聊规则、性格和说话习惯清单，也不加每句话的小提示，"
             "她用底层模型自己的方式说话（只保留诚实和格式）；关：和其他人设一样", True),
-    Setting("VIOLET_PROACTIVE_TOPIC_GUARD", "主动消息避开不该提的话题", "behavior", "bool", "now",
+    Setting("VIOLET_PROACTIVE_TOPIC_GUARD", "主动消息避开不该提的话题", "proactive", "bool", "now",
             "主动消息谈到已结束的事、冷却中的话题时不发送", True),
     Setting("VIOLET_PERSONA_REPLY_GUARD", "回复一致性检查", "guard", "choice", "now",
             "检查回复有没有和人设、生活记录矛盾", "enforce",
@@ -339,9 +341,9 @@ SETTINGS: list[Setting] = [
             choices=(("auto", "自动更新"), ("notify", "自动检查，只提醒"), ("manual", "手动检查"))),
 ]
 BY_KEY = {s.key: s for s in SETTINGS}
-# 2026-10-30 (user: "很多开关，现在给我的感觉就是很冗余"): what the settings page shows by default; everything else is under
-# a folded "高级设置" (timeouts, retries, sizes, check models, prompt versions...). Nothing is removed: a value saved
-# before keeps working.
+# 2026-10-30 (user: "很多开关，现在给我的感觉就是很冗余"): the settings most people change; the page shows them first in
+# their group. 2026-11-01 (user: 高级设置真的很奇怪，不如全部都融合在设置里面): the rest follows in the same group under
+# "不常改的", no separate "高级设置" any more.
 COMMON_KEYS = frozenset({
     "VIOLET_ONBOARDING", "VIOLET_FOLLOW_UP_CHECK", "DEBOUNCE_NORMAL", "VIOLET_SIMULATE_TYPING",
     "proactive.enabled", "proactive.quiet_start", "proactive.quiet_end", "proactive.daily_limit",
@@ -351,8 +353,9 @@ COMMON_KEYS = frozenset({
     "VIOLET_SOCIAL_INITIATIVE", "VIOLET_AI_NATURAL",                  # 2026-10-30
 })
 GROUPS = {"api": "接口", "models": "模型与 Agent", "prompts": "提示词版本", "messages": "消息发送", "proactive": "主动联系",
-          "life": "生活引擎", "behavior": "聊天行为", "memory": "记忆与提醒", "guard": "回复检查", "features": "功能开关",
-          "images": "图片", "social": "QQ 群聊、表情包与动态", "mcp": "MCP 工具调用", "system": "系统", "logs": "日志与排查", "updates": "版本更新"}
+          "life": "生活引擎", "behavior": "聊天行为", "memory": "记忆与提醒", "guard": "回复检查", "web": "联网搜索",
+          "voice": "语音", "images": "图片", "social": "QQ 群聊、表情包与动态", "mcp": "工具与 MCP（含课表）",
+          "system": "系统", "logs": "日志与排查", "updates": "版本更新"}
 TEXT_MAX = 200
 RESET_KEEPS = ("api", "models")          # "清除所有配置" keeps the model service
 

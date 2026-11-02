@@ -123,8 +123,8 @@ def sender(db, client):
     return MessageSender(client, db, simulate_typing=False, channel="napcat", peer_id="9")
 
 
-def test_a_voice_line_is_written_first_and_said_after(db, data, service):
-    """2026-11-01 (user: 文字先发，语音随后补)."""
+def test_a_voice_line_is_only_said(db, data, service):
+    """2026-11-01 (user: 先发文字会让人以为她话说完了): only her voice; as text when the voice fails."""
     from ai import voice
     from ai.channels.outbound import _seal
     voice.save_reference(MP3, "参考")
@@ -132,13 +132,15 @@ def test_a_voice_line_is_written_first_and_said_after(db, data, service):
     report = sender(db, client).send_messages(_seal([{"type": "text", "content": "哼"},
                                                      {"type": "voice", "content": "才没有想你"}]), origin="reply")
     assert [m["content"] for m in report.sent] == ["哼", "才没有想你"]
-    assert wait_for(lambda: len(client.sent) == 3)
-    assert client.sent == [("text", "哼"), ("text", "才没有想你"), ("voice", "#!SILK_V3才没有想你".encode())]
-    assert wait_for(lambda: db.fetch_one("SELECT 1 FROM messages WHERE content = '[语音] 才没有想你'"))
-    service.fail = True                                      # the voice does not come: the words are there already
+    assert db.fetch_one("SELECT 1 FROM messages WHERE content = '[语音] 才没有想你'")      # in the history at once
+    assert wait_for(lambda: len(client.sent) == 2)
+    assert client.sent == [("text", "哼"), ("voice", "#!SILK_V3才没有想你".encode())]
+    service.fail = True                                      # the voice does not come: the words go out as text
     client.sent.clear()
     sender(db, client).send_messages(_seal([{"type": "voice", "content": "晚安"}]), origin="reply")
-    assert wait_for(lambda: voice.busy() == 0) and client.sent == [("text", "晚安")]
+    assert client.sent == []
+    assert wait_for(lambda: voice.busy() == 0) and wait_for(lambda: client.sent == [("text", "晚安")])
+    assert db.fetch_one("SELECT COUNT(*) AS n FROM messages WHERE content LIKE '%晚安'")["n"] == 1
 
 
 def test_lyrics_become_several_voice_messages(db, data, service):
@@ -148,50 +150,44 @@ def test_lyrics_become_several_voice_messages(db, data, service):
     lyrics = "\n".join(["天青色等烟雨", "而我在等你", "炊烟袅袅升起", "隔江千万里"] * 3)
     client = VoiceClient()
     sender(db, client).send_messages(_seal([{"type": "voice", "content": lyrics}]), origin="reply")
-    assert client.sent[0] == ("text", lyrics)
     pieces = voice.chunks(lyrics)
     assert len(pieces) == 3 and all(len(p) <= voice.CHUNK for p in pieces) and pieces[0].startswith("天青色等烟雨，而我在等你")
-    assert wait_for(lambda: len(client.sent) == 4)
-    assert [t for kind, t in client.sent[1:]] == [("#!SILK_V3" + p).encode() for p in pieces]
+    assert wait_for(lambda: len(client.sent) == 3)
+    assert [t for kind, t in client.sent] == [("#!SILK_V3" + p).encode() for p in pieces]
 
 
-def test_chunks_and_the_automatic_line():
+def test_chunks():
     from ai import voice
     long = "我今天去了很远很远的地方，看到了一大片金黄色的稻田，风吹过来的时候像海浪一样，真的好好看。"
     pieces = voice.chunks(long)
     assert "".join(pieces) == long and all(len(p) <= voice.CHUNK for p in pieces) and len(pieces) == 2
     assert voice.chunks("哈" * 70) == ["哈" * 30, "哈" * 30, "哈" * 10]
-    assert voice.pick_line(["嗯", "今天的白米饭超好吃", "https://x.y", "长" * 40]) == "今天的白米饭超好吃"
-    assert voice.pick_line(["嗯", "?"]) is None
 
 
-def test_every_reply_gets_a_voice_line_when_automatic(db, data, service, monkeypatch):
+def test_plain_replies_get_no_voice(db, data, service):
+    """2026-11-01 (user: 没主动让她发语音但每回一句都会发): no automatic voice line any more."""
     from ai import voice
     from ai.channels.outbound import _seal
     voice.save_reference(MP3, "参考")
     client = VoiceClient()
     sender(db, client).send_messages(_seal([{"type": "text", "content": "在呢"},
-                                            {"type": "text", "content": "今天的白米饭超好吃"}]),
-                                     origin="reply", auto_voice=True)
-    assert wait_for(lambda: len(client.sent) == 3) and client.sent[2] == ("voice", "#!SILK_V3今天的白米饭超好吃".encode())
-    client.sent.clear()
-    sender(db, client).send_messages(_seal([{"type": "text", "content": "不说话"}]), origin="system")
-    monkeypatch.setenv("VIOLET_VOICE_AUTO", "0")
-    sender(db, client).send_messages(_seal([{"type": "text", "content": "也不说话"}]), origin="reply", auto_voice=True)
+                                            {"type": "text", "content": "今天的白米饭超好吃"}]), origin="reply")
     time.sleep(0.3)
-    assert client.sent == [("text", "不说话"), ("text", "也不说话")]
+    assert client.sent == [("text", "在呢"), ("text", "今天的白米饭超好吃")] and voice.busy() == 0
+    note = voice.prompt_note()
+    assert "偶尔" in note and "不会再发一遍文字" in note and "自动挑一句" not in note
 
 
 def test_no_voice_means_only_the_words(db, data, service):
     from ai.channels.outbound import _seal
     client = VoiceClient()                                   # no recording uploaded yet
-    sender(db, client).send_messages(_seal([{"type": "voice", "content": "晚安"}]), origin="reply", auto_voice=True)
+    sender(db, client).send_messages(_seal([{"type": "voice", "content": "晚安"}]), origin="reply")
     from ai import voice
     voice.save_reference(MP3, "参考")
-    sender(db, VoiceClient(voice=False)).send_messages(_seal([{"type": "voice", "content": "晚安"}]), origin="reply")
+    other = VoiceClient(voice=False)
+    sender(db, other).send_messages(_seal([{"type": "voice", "content": "晚安"}]), origin="reply")
     time.sleep(0.3)
-    assert client.sent == [("text", "晚安")] and voice.busy() == 0
-
+    assert client.sent == [("text", "晚安")] and other.sent == [("text", "晚安")] and voice.busy() == 0
 
 # ------------------------------------------------------------------------------------------------ groups
 
@@ -214,11 +210,11 @@ def test_a_group_voice_line(db, data, service, monkeypatch):
     monkeypatch.setattr(llm, "decide", lambda system, user, tools=None: (seen.update(system=system) or (
         {"action": "say", "messages": ["来了|||<voice>哼 就说一句</voice>"]}, "f", 1)))
     e.decide(conv["id"])
-    assert "【语音】你会发语音" in seen["system"] and "自动挑一句" not in seen["system"]     # groups: no automatic line
+    assert "【语音】你会发语音" in seen["system"]
     assert "voice 字段" in seen["system"] and '"voice"' in seen["system"]               # 11-01: a field of the JSON
-    assert wait_for(lambda: len(a.sent) == 3)
-    assert [s[2] for s in a.sent] == ["来了", "哼 就说一句", "voice:#!SILK_V3哼 就说一句"]
-    assert wait_for(lambda: SocialStore(db).messages(conv["id"])[-1]["content"] == "[语音] 哼 就说一句")
+    assert SocialStore(db).messages(conv["id"])[-1]["content"] == "[语音] 哼 就说一句"         # recorded at once
+    assert wait_for(lambda: len(a.sent) == 2)
+    assert [s[2] for s in a.sent] == ["来了", "voice:#!SILK_V3哼 就说一句"]
 
 
 def test_the_group_decision_voice_field(db, data, service, monkeypatch):
@@ -240,8 +236,8 @@ def test_the_group_decision_voice_field(db, data, service, monkeypatch):
     monkeypatch.setattr(llm, "decide", lambda system, user, tools=None: (
         {"action": "silent", "messages": [], "voice": "床前明月光，疑是地上霜。"}, "f", 1))
     e.decide(conv["id"])
-    assert wait_for(lambda: len(a.sent) == 2)
-    assert a.sent == ["床前明月光，疑是地上霜。", "voice:#!SILK_V3床前明月光，疑是地上霜。"]
+    assert wait_for(lambda: len(a.sent) == 1)
+    assert a.sent == ["voice:#!SILK_V3床前明月光，疑是地上霜。"]
 
 
 def test_qq_voice_messages_are_record_segments(tmp_path, monkeypatch):
