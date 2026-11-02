@@ -467,16 +467,22 @@ class MessageSender:
     def _voice_later(self, text: str, origin: str, turn_id: str | None, record_history: bool) -> None:
         """Her voice for `text`, minutes later; a sentence that cannot be said goes out as text then. The history
         has it at once (as said), so a reply in between already knows it."""
-        from ai import trace, voice
+        from ai import memory_scope, trace, voice
         if record_history:
             self.db.add_assistant_message("text", f"[语音] {text}", channel=self.channel, peer_id=self.peer_id)
+        scope = memory_scope.current()                   # the voice queue runs in its own thread
 
         def outbound(kind: str, piece: str) -> tuple[str, int]:
             client_id = f"pybot-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
-            return client_id, self.db.add_outbound_message(client_id, origin, kind, piece, turn_id, None,
-                                                           channel=self.channel, peer_id=self.peer_id)
+            with memory_scope.use(scope):
+                return client_id, self.db.add_outbound_message(client_id, origin, kind, piece, turn_id, None,
+                                                               channel=self.channel, peer_id=self.peer_id)
 
         def deliver(path, piece: str) -> None:
+            with memory_scope.use(scope):
+                _deliver(path, piece)
+
+        def _deliver(path, piece: str) -> None:
             _client_id, outbound_id = outbound("voice", piece)
             try:
                 self.db.update_outbound_message(outbound_id, status="sending", increment_attempts=True)
@@ -490,7 +496,8 @@ class MessageSender:
 
         def fallback(piece: str) -> None:
             client_id, outbound_id = outbound("text", piece)
-            error = self._send_one(outbound_id, client_id, piece, record_history=False)
+            with memory_scope.use(scope):
+                error = self._send_one(outbound_id, client_id, piece, record_history=False)
             if error:
                 raise RuntimeError(error)
 
@@ -758,21 +765,33 @@ class VioletRuntime:
     def proactive_conversation(self) -> tuple[str, str]:
         """Where a message Violet starts goes: the channel chosen in the Control Center, else the conversation the owner
         used last (a bound account on a running channel), else WeChat."""
+        # 2026-11-02 (ai/memory_scope): only a channel of the persona whose memory is in effect -- another persona's
+        # channel is another person. ("", "") = this persona has no channel to write on.
+        from ai import memory_scope
+        scope = memory_scope.current()
+        mine = set(memory_scope.channels_of(scope)) if self.channels is not None else {"wechat"}
         choice = self.channels.proactive_channel() if self.channels is not None else "auto"
         candidates: list[tuple[str, str]] = []
-        if choice not in ("auto", "", "wechat"):
+        if choice not in ("auto", "", "wechat") and choice in mine:
             candidates.append((choice, self.identities.primary_peer(choice) or ""))
-        if choice == "auto":
-            row = self.db.fetch_one("SELECT channel, peer_id FROM inbound_messages WHERE status = 'done' "
-                                    "ORDER BY id DESC LIMIT 1")
+        if choice == "auto" or choice not in mine:
+            row = None
+            for row in self.db.fetch_all("SELECT channel, peer_id FROM inbound_messages WHERE status = 'done' "
+                                         "ORDER BY id DESC LIMIT 200"):
+                if (row.get("channel") or "wechat") in mine:
+                    break
+            else:
+                row = None
             if row and row.get("channel") and row["channel"] != "wechat":
                 candidates.append((row["channel"], row.get("peer_id") or ""))
+            elif row is None and self.channels is not None:
+                candidates += [(c, self.identities.primary_peer(c) or "") for c in sorted(mine) if c != "wechat"]
         for channel, peer in candidates:
             adapter = self.adapter_for(channel)
             entry = self.channels.entry(channel) if self.channels is not None else None
             if adapter is not None and entry and entry.get("enabled", True) and peer:
                 return channel, peer
-        return "wechat", ""
+        return ("wechat", "") if "wechat" in mine else ("", "")
 
     # -- stats ------------------------------------------------------------
     def _bump(self, key: str, amount: int = 1) -> None:
@@ -805,6 +824,13 @@ class VioletRuntime:
         return self._stop.is_set() or self._poll_stop.is_set()
 
     def start(self, poll: bool = True) -> None:
+        try:                                             # 2026-11-02: a channel's chat goes with its own persona
+            from ai import memory_scope
+            moved = memory_scope.split_channels(self.db)
+            if moved:
+                logger.info("persona memory split: %s", moved)
+        except Exception:
+            logger.exception("persona memory split failed; the chat stays where it was")
         self.recover_pending()
         self.start_worker()
         if poll:
@@ -1017,11 +1043,13 @@ class VioletRuntime:
             logger.info("message from an unbound %s peer on %s not processed", verdict, channel)
         return 0
 
-    def _user_activity(self) -> None:
+    def _user_activity(self, channel: str = "wechat") -> None:
         if self.proactive_scheduler is None:
             return
+        from ai import memory_scope
         try:
-            self.proactive_scheduler.on_user_message()
+            with memory_scope.use(memory_scope.for_channel(channel)):     # that persona's proactive clock
+                self.proactive_scheduler.on_user_message()
         except Exception:
             logger.exception("proactive_scheduler.on_user_message failed")
 
@@ -1035,7 +1063,7 @@ class VioletRuntime:
         received_at = self.db.now()
         buffer = self.buffer_for(conversation)
         if part.kind == "image":
-            self._user_activity()
+            self._user_activity(conversation[0])
             future = self.media_executor.submit(self._describe_image_part, inbound_id, part, conversation)
             buffer.add_media(inbound_id, future, received_at)
             self._typing_on(conversation)
@@ -1046,7 +1074,7 @@ class VioletRuntime:
             return
         # phase 10: voice / file / video / stickers / unknown types arrive as safe text ("[对方发来一段语音…]")
         # instead of being dropped without an answer
-        self._user_activity()
+        self._user_activity(conversation[0])
         delay = buffer.add_text(inbound_id, content, received_at)
         self._typing_on(conversation)
         logger.info("[buffer] +%s inbound #%s (%s), flush in %.1fs", part.kind, inbound_id, conversation[0], delay)
@@ -1073,7 +1101,7 @@ class VioletRuntime:
         text = text.replace("[用户发来一张图片]", "[用户发来一个表情包]", 1)
         if not stickers.enabled() or not env_bool("VIOLET_STICKER_AUTO_COLLECT", True):
             trace.step("收藏表情包", 来源="你发的", 结果="没收藏", 原因="表情包或“收藏你发的表情包”关着")
-            return text
+            return self._sticker_line(inbound_id, text, None)
         match = re.search(r"图片内容[^：\n]*：(.+)", text)
         description = match.group(1).strip()[:60] if match else None
         try:
@@ -1082,16 +1110,29 @@ class VioletRuntime:
         except Exception as exc:                             # noqa: BLE001
             logger.info("owner sticker not collected (inbound #%s): %s", inbound_id, exc)
             trace.step("收藏表情包", 来源="你发的", 结果="没收藏", 原因=str(exc)[:120])
-            return text
+            return self._sticker_line(inbound_id, text, None)
         if not row.get("description"):
             described = stickers.describe(path)
             if described:
                 row = stickers.update(self.db, row["id"], description=described) or row
         trace.step("收藏表情包", 来源="你发的", 编号=row["id"], 结果="已收藏",
                    说明=row.get("description") or "没有说明（识图没成功：模型暂时看不到它，之后自动补）")
-        text += f"\n（这个表情包已经存进你的收藏，编号 {row['id']}）"
-        self.db.update_inbound_messages([inbound_id], content=text)
-        return text
+        return self._sticker_line(inbound_id, text, row["id"])
+
+    def _sticker_line(self, inbound_id: int, text: str, collected: int | None) -> str:
+        """2026-11-02 (user: 对话牛头不对马嘴): a sticker is ONE short line -- what it shows (its words matter most),
+        then the numbers the tools need -- not three lines of notes around the person's own words."""
+        number = re.search(r"图片编号 (\d+)", text)
+        match = re.search(r"图片内容[^：\n]*：(.+)", text, re.S)
+        if not match:
+            return text + (f"（已存进你的收藏，编号 {collected}）" if collected else "")
+        what = " ".join(match.group(1).split())
+        what = what[:160] + ("…" if len(what) > 160 else "")
+        tail = "，".join(x for x in [f"图片编号 {number.group(1)}" if number else "",
+                                    f"已收藏为表情包 {collected}" if collected else ""] if x)
+        line = f"[对方发来一个表情包：{what}]" + (f"（{tail}）" if tail else "")
+        self.db.update_inbound_messages([inbound_id], content=line)
+        return line
 
     def _describe_image_item(self, inbound_id: int, item: Any, download: Callable | None = None) -> str:
         try:
@@ -1157,9 +1198,10 @@ class VioletRuntime:
     def process_turn(self, turn: Turn) -> str:
         """Run one turn end to end. Returns the final inbound status. Phase 10.6: the turn id is the correlation id of
         every log line and diagnosis event written while it runs (also while sending)."""
-        from ai import test_mode
+        from ai import memory_scope, test_mode
         from ai.diagnostics import turn_scope
-        with turn_scope(turn.turn_id):
+        # 2026-11-02: the whole turn (history, memories, mood, the memory job) in the memory of the channel's persona
+        with turn_scope(turn.turn_id), memory_scope.use(memory_scope.for_channel(turn.channel or "wechat")):
             if not test_mode.active():
                 return self._process_turn(turn)
             # 2026-10-30: test mode -- the turn's steps are collected and sent after the reply as a diagnosis
@@ -1239,6 +1281,12 @@ class VioletRuntime:
             if sender is None:
                 status = "failed"
                 self._bump("turns_failed")
+            elif pipeline is not None and not pipeline.get("chat_failed") and self._superseded(turn, conversation,
+                                                                                               pipeline):
+                # 2026-11-02 (user: 牛头不对马嘴): new words came while she was writing -- this answer to the older
+                # ones is not sent; the next turn answers everything (these words are in its history already)
+                self._bump("replies_superseded")
+                trace.step("回复作废", 原因="她写回复的时候你又发了新消息，合在下一轮一起回")
             elif pipeline is None or pipeline.get("chat_failed"):
                 status = "failed"
                 self._bump("turns_failed")
@@ -1287,6 +1335,26 @@ class VioletRuntime:
             self.memory_worker.mark_ready(turn.turn_id, "\n".join(sent_texts) or None)
         self._bump("turns_processed")
         return status
+
+    def _superseded(self, turn: Turn, conversation: tuple[str, str], pipeline: dict[str, Any]) -> bool:
+        """New messages of the same conversation are waiting (in the debounce buffer or the queue) and this reply did
+        nothing but talk: drop it and let the next turn answer both. Never twice in a row (someone who keeps typing
+        still gets an answer), never after a tool did something (a reminder set, an image drawn)."""
+        dropped = self.__dict__.setdefault("_superseded_once", {})
+        if not env_bool("VIOLET_REPLY_RECHECK", True) or turn.origin != "live":
+            return False
+        if dropped.pop(conversation, False):
+            return False
+        chat = pipeline.get("chat") or {}
+        if pipeline.get("reminder") or any((m or {}).get("role") == "tool" for m in chat.get("messages") or []):
+            return False
+        buffer = self.buffers.get(conversation) if conversation != ("wechat", "") else self.buffer
+        with self.turn_queue.mutex:
+            queued = any((t.channel or "wechat", t.peer_id or "") == conversation for t in self.turn_queue.queue)
+        newer = queued or (buffer is not None and buffer.has_pending())
+        if newer:
+            dropped[conversation] = True
+        return newer
 
     def _before_pipeline(self, text: str, turn_id: str) -> None:
         """Engagement (topic fatigue), implicit preferences and onboarding refusals for this turn."""
@@ -1378,9 +1446,15 @@ class VioletRuntime:
 
     # -- proactive sending (called by ProactiveScheduler) ---------------------
     def _proactive_sender(self) -> "MessageSender":
+        conversation = self.proactive_conversation()
+        if not conversation[0]:
+            raise LookupError("这个人设没有可以发消息的渠道")
         try:
-            return self.sender_for(self.proactive_conversation())
+            return self.sender_for(conversation)
         except LookupError:
+            from ai import memory_scope
+            if "wechat" not in memory_scope.channels_of(memory_scope.current()):
+                raise
             return self.sender
 
     def send_proactive(self, messages: list[dict[str, Any]], proactive_event_id: int | None = None) -> dict[str, Any]:
@@ -1409,8 +1483,10 @@ class VioletRuntime:
         return report.ok
 
     def proactive_channel_context(self):
-        """The channel a proactive message being written now will go to (prompt wording, channel note)."""
-        return self.channel_context(self.proactive_conversation()[0])
+        """The channel a proactive message being written now will go to (prompt wording, channel note); None when the
+        persona in effect has no channel (the scheduler then skips it)."""
+        channel = self.proactive_conversation()[0]
+        return self.channel_context(channel) if channel else None
 
     # -- crash recovery ----------------------------------------------------------
     def recover_pending(self) -> int:
@@ -1422,11 +1498,14 @@ class VioletRuntime:
         already stored (the crash happened mid-reply), are not answered again;
         they are marked expired and their text is kept in the chat history.
         """
-        try:
-            from ai.reconcile import reconcile_interrupted
-            reconcile_interrupted(self.db, self.started_at)
-        except Exception:
-            logger.exception("startup reconciliation failed")
+        from ai import memory_scope
+        for scope in memory_scope.all_scopes():               # 2026-11-02: every persona's outbox
+            try:
+                from ai.reconcile import reconcile_interrupted
+                with memory_scope.run_as(scope):
+                    reconcile_interrupted(self.db, self.started_at)
+            except Exception:
+                logger.exception("startup reconciliation failed (%s)", scope)
         if self.memory_worker is not None:
             self.memory_worker.recover()
         try:
@@ -1461,8 +1540,10 @@ class VioletRuntime:
 
         for row in expire:
             if answerable(row) and row.get("stored_message_id") is None and row.get("content"):
-                message_id = self.db.add_user_message("text", text_of(row), created_at=row["received_at"],
-                                                      channel=row.get("channel") or "wechat", peer_id=row.get("peer_id"))
+                with memory_scope.use(memory_scope.for_channel(row.get("channel") or "wechat")):
+                    message_id = self.db.add_user_message("text", text_of(row), created_at=row["received_at"],
+                                                          channel=row.get("channel") or "wechat",
+                                                          peer_id=row.get("peer_id"))
                 self.db.update_inbound_messages([row["id"]], stored_message_id=message_id)
         if expire:
             self.db.update_inbound_messages([r["id"] for r in expire], status="expired",

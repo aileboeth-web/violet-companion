@@ -10,6 +10,8 @@ DEBUG_MODE=0
 
 DEBOUNCE_NORMAL=10.0
 DEBOUNCE_EXTRA=15.0
+# 2026-11-02: new messages arrived while she wrote a reply -> that reply is not sent, the next turn answers both (never twice in a row)
+VIOLET_REPLY_RECHECK=1
 
 # ── 管理面板（Dashboard）安全 ─────────────────────────────────────────────────
 # 默认只监听本机回环地址；远程访问请用 SSH 隧道或带 TLS 的反向代理。

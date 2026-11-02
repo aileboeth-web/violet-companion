@@ -70,14 +70,21 @@ class SocialEngine:
         import random
 
         def run():
+            from ai import memory_scope
             from ai.social import qzone
             self._post_timer = None
+            try:
+                qq = qzone._qq(self.runtime)
+                scope = memory_scope.for_channel(qq.channel_id if qq is not None else None)
+            except Exception:                               # noqa: BLE001
+                scope = memory_scope.MAIN
             try:                                            # 2026-10-31: each job on its own, one failing
-                for job in (lambda: qzone.tick(self.runtime), self._sync_stickers, self.initiative_tick):
-                    try:                                    # never stops the others (initiative ran last before)
-                        job()
-                    except Exception:                       # noqa: BLE001 -- the next round tries again
-                        logger.exception("social background round failed")
+                with memory_scope.use(scope):               # 2026-11-02: QQ's persona (her life for the posts)
+                    for job in (lambda: qzone.tick(self.runtime), self._sync_stickers, self.initiative_tick):
+                        try:                                # never stops the others (initiative ran last before)
+                            job()
+                        except Exception:                   # noqa: BLE001 -- the next round tries again
+                            logger.exception("social background round failed")
             finally:
                 self.start_posting(interval)
         if self._post_timer is not None:
@@ -128,10 +135,16 @@ class SocialEngine:
         return asked
 
     # -- receiving --------------------------------------------------------------------------------------------------
-    def receive(self, adapter, *, kind: str, peer_id: str, sender_id: str, sender_name: str | None, text: str,
-                mentioned: bool = False, reply_to: str | None = None, platform_msg_id: str | None = None,
-                images: list[dict[str, Any]] | None = None, group_name: str | None = None,
-                poke: bool = False) -> int | None:
+    def receive(self, adapter, **kwargs) -> int | None:
+        # 2026-11-02 (ai/memory_scope): her mood / life on QQ are those of the persona QQ uses
+        from ai import memory_scope
+        with memory_scope.use(memory_scope.for_channel(adapter.channel_id)):
+            return self._receive(adapter, **kwargs)
+
+    def _receive(self, adapter, *, kind: str, peer_id: str, sender_id: str, sender_name: str | None, text: str,
+                 mentioned: bool = False, reply_to: str | None = None, platform_msg_id: str | None = None,
+                 images: list[dict[str, Any]] | None = None, group_name: str | None = None,
+                 poke: bool = False) -> int | None:
         channel = adapter.channel_id
         if poke:                                         # 2026-10-30: 拍一拍 counts as calling her
             text, mentioned = "[拍了拍你]", True
@@ -252,8 +265,9 @@ class SocialEngine:
         return adapter if adapter is not None and hasattr(adapter, "send_to") else None
 
     def decide(self, conversation_id: int, trigger: str = "messages") -> dict[str, Any] | None:
-        from ai import test_mode
-        with self._conv_lock(conversation_id):
+        from ai import memory_scope, test_mode
+        row = self.db.fetch_one("SELECT channel FROM social_conversations WHERE id = ?", (conversation_id,)) or {}
+        with self._conv_lock(conversation_id), memory_scope.use(memory_scope.for_channel(row.get("channel"))):
             if not test_mode.active():
                 return self._decide(conversation_id, trigger)
             # 2026-10-30 test mode: the decision's steps go into a diagnosis sent to the same chat

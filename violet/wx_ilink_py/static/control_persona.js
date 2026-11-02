@@ -251,7 +251,7 @@
         } })), c.in_effect ? inEffect(c.in_effect) : null);
     });
     $("#pl-channels").replaceChildren(...(rows.length ? rows : [h("p", { class: "note", text: "还没有聊天渠道。" })]),
-      h("p", { class: "note", text: "比如：微信上是“Violet + 恋人”，QQ 上是“AI + 开发者”。记忆、提醒和课表是共用的；QQ 群里也按 QQ 这一行的设定。" }));
+      h("p", { class: "note", text: "比如：微信上是“Violet + 恋人”，QQ 上是“AI + 开发者”。人设不同就是不同的人：聊天记录、记忆、提醒、生活和心情各是各的（左边菜单上方可以选看谁的记忆）；课表共用。第一次给一个渠道选自己的人设时，这个渠道以前的聊天会跟着过去。QQ 群里也按 QQ 这一行的设定。" }));
   }
 
   async function renderTemplates() {

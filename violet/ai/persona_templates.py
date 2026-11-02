@@ -98,7 +98,14 @@ def _write(path: Path, value: Any) -> None:
 
 
 def clear_memory(db) -> tuple[str, dict[str, int]]:
-    """Archive, then empty MEMORY_TABLES and the social impressions. (archive file, rows removed per table)"""
+    """Archive, then empty MEMORY_TABLES and the social impressions. (archive file, rows removed per table)
+    2026-11-02: always the main persona's memory (switching the main persona), whatever page picker is set."""
+    from ai import memory_scope
+    with memory_scope.use(memory_scope.MAIN):
+        return _clear_memory(db)
+
+
+def _clear_memory(db) -> tuple[str, dict[str, int]]:
     existing = {r["name"] for r in db.fetch_all("SELECT name FROM sqlite_master WHERE type = 'table'")}
     archive: dict[str, Any] = {"archived_at": db.now(), "tables": {}}
     counts: dict[str, int] = {}
@@ -185,7 +192,7 @@ def _kept_relationship() -> dict[str, Any]:
 # ------------------------------------------------------------------------------------------------ 2026-10-30
 # Persona in two layers (user: "有的人也会把他当作女儿养，也会帮他当作 ai 养"): who she is (the template: a virtual
 # girl, an AI that knows it is one, blank, custom) and how she relates to the owner (below). And per channel
-# (user: "不同的聊天渠道也可以用不同的人设"): a channel may use another template and / or relationship; memory stays shared.
+# (user: "不同的聊天渠道也可以用不同的人设"): a channel may use another template and / or relationship. 2026-11-02: another template = another person with her own memory (ai/memory_scope.py).
 
 RELATIONSHIPS = {
     "close": ("亲近（默认）", "你们很熟、很亲近；亲密程度跟着聊天慢慢来，不挑明是什么关系。"),

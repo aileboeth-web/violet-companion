@@ -95,7 +95,9 @@ def register_persona_routes(app: Flask, violetdb) -> None:
                            data.get("call"))
         except ValueError as exc:
             return bad(str(exc))
-        return ok({"channels": _channel_rows(pt)})
+        from ai import memory_scope                      # 2026-11-02: its chat so far goes with its first own persona
+        moved = memory_scope.split_channels(violetdb)
+        return ok({"channels": _channel_rows(pt), "moved": moved})
 
     # -- 2026-10-30: test mode (ai/test_mode.py) -- on top of the persona, which stays as it is ------------------------
     @app.post("/api/persona/test-mode")

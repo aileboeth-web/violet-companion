@@ -108,6 +108,14 @@ class MemoryWorker:
         self._wake.set()
 
     def recover(self) -> int:
+        from ai import memory_scope                       # 2026-11-02: every persona's own jobs
+        total = 0
+        for scope in memory_scope.all_scopes():
+            with memory_scope.run_as(scope):
+                total += self._recover()
+        return total
+
+    def _recover(self) -> int:
         recovered = 0
         for job in self.db.list_memory_jobs(["running"]):
             self.db.update_memory_job(job["id"], status="pending", last_error="interrupted; recovered at startup")
@@ -124,6 +132,17 @@ class MemoryWorker:
 
     # -- processing ------------------------------------------------------------------
     def run_once(self) -> bool:
+        from ai import memory_scope                       # 2026-11-02: the jobs of every persona, each in its own
+        now = time.monotonic()
+        if now - getattr(self, "_scopes_at", -99.0) > 5.0:  # the loop polls 5x a second: the files are read rarely
+            self._scopes, self._scopes_at = memory_scope.all_scopes(), now
+        for scope in self._scopes:
+            with memory_scope.run_as(scope):
+                if self._run_once():
+                    return True
+        return False
+
+    def _run_once(self) -> bool:
         job = self.db.claim_next_memory_job()
         if job is None:
             return False

@@ -101,6 +101,32 @@ def _clock(text: str) -> str:
     return (text or "")[5:16].replace("T", " ")
 
 
+def channel_label(channel: str | None) -> str:
+    if not channel or channel == "wechat":
+        return "微信"
+    try:
+        from ai.channels.context import label_for
+        from ai.channels.manager import ChannelStore
+        entry = ChannelStore().channels().get(channel) or {}
+        return label_for(str(entry.get("type") or ""), entry.get("label"))
+    except Exception:                                     # noqa: BLE001
+        return channel
+
+
+def _with_channel_marks(kept: list[dict[str, Any]], chans: dict[int, str]) -> list[dict[str, Any]]:
+    """2026-11-02 (user: 两个渠道同时用): the same persona on two channels shares one history; where the talk moves
+    to another app, one line says so (marks, not prefixes on her lines -- she would copy a prefix into her reply)."""
+    out: list[dict[str, Any]] = []
+    previous = None
+    for turn in kept:
+        channel = chans.get(id(turn))
+        if channel != previous:
+            out.append({"role": "system", "content": f"【下面这段是在{channel_label(channel)}上聊的】"})
+            previous = channel
+        out.append(turn)
+    return out
+
+
 def _replies(session: list[dict[str, Any]]) -> list[str]:
     """Phase 8.9.11: Violet's replies of this conversation, her lines in a row being ONE reply. Counted per line, one
     two-line reply read as "2 of your last 2 replies ended on a question" (real ab-v2c round 2)."""
@@ -789,7 +815,7 @@ class ContextEngine:
         limit = limit or max(env_int("VIOLET_CONTEXT_HISTORY_MESSAGES", 20), turn_limit * 3 if turn_limit > 0 else 0)
         max_chars = env_int("VIOLET_CONTEXT_HISTORY_MAX_CHARS", 4000)
         stepped = env_bool("VIOLET_CONTEXT_STABLE_HISTORY", True) and mode in ("chat", "proactive")
-        turns, times, ids = [], {}, {}
+        turns, times, ids, chans = [], {}, {}, {}
         from ai import context_cut
         rows = self.db.get_recent_messages(limit=limit * 2 if stepped else limit)
         for row in context_cut.owner_rows(rows):                                       # 翻篇 / test mode
@@ -798,6 +824,7 @@ class ContextEngine:
                 content = f"[{row['message_type']}] {content}".strip()
             turn = {"role": "user" if row["role"] == "user" else "assistant", "content": self._mask(content, mask_terms)}
             times[id(turn)], ids[id(turn)] = row.get("created_at"), row.get("id")
+            chans[id(turn)] = row.get("channel") or "wechat"
             turns.append(turn)
 
         def window(scale: int) -> list[dict[str, Any]]:
@@ -817,7 +844,8 @@ class ContextEngine:
         if stepped and kept:
             # 2026-11-01 (token rework): the window starts at the same message for many turns -- the provider's prompt
             # cache serves the unchanged beginning -- and jumps ahead only when it has grown to twice the size
-            key = (str(getattr(self.db, "db_path", "")), mode)
+            from ai import memory_scope
+            key = (str(getattr(self.db, "db_path", "")), mode, memory_scope.current())
             anchor = _HISTORY_ANCHORS.get(key)
             wide = window(2)
             natural_start = ids.get(id(kept[0]))
@@ -826,6 +854,8 @@ class ContextEngine:
                 start = next(i for i, t in enumerate(wide) if ids.get(id(t)) == anchor)
                 kept = wide[start:]
             _HISTORY_ANCHORS[key] = ids.get(id(kept[0]))
+        if len({chans.get(id(t)) for t in kept}) > 1:
+            kept = _with_channel_marks(kept, chans)
         if context_style() != "natural" or not kept:
             return kept
         return self._with_time_marks(kept, times, mode)

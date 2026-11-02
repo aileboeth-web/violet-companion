@@ -26,6 +26,7 @@ import os
 import re
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -170,6 +171,9 @@ class SnowLumaChannel(ChannelAdapter):
         self._waiting_lock = threading.Lock()
         self.self_id = ""
         self.nickname = ""
+        # 2026-11-02 (user: 看我的话只看了一半): the owner's chat quoted a message and she saw only
+        # "[引用了一条消息]" -- what was said lately, by message id, so a quote shows its words
+        self._said: "OrderedDict[str, tuple[bool, str]]" = OrderedDict()
 
     # -- connection -------------------------------------------------------------------------------------------------
     def _target(self) -> tuple[str, str]:
@@ -316,6 +320,14 @@ class SnowLumaChannel(ChannelAdapter):
         message = event.get("message")
         segments = parse_cq_string(message) if isinstance(message, str) else (message or [])
         if event.get("message_type") == "private" and self._for_owner(event, segments):
+            unknown = [str((s.get("data") or {}).get("id")) for s in segments if isinstance(s, dict)
+                       and s.get("type") == "reply" and (s.get("data") or {}).get("id") is not None
+                       and str((s.get("data") or {}).get("id")) not in self._said]
+            if unknown and self._ws is not None:
+                # asking QQ for the quoted message needs this receive loop: done in a thread of its own
+                threading.Thread(target=self._deliver_quoting, args=(event, segments, unknown[0]), daemon=True,
+                                 name="qq-quote").start()
+                return 1
             return 1 if self.deliver(self._inbound(event, segments)) else 0
         social = self._social()
         if social is None:
@@ -377,11 +389,47 @@ class SnowLumaChannel(ChannelAdapter):
         except Exception:
             return False
 
+    def _remember(self, message_id: Any, text: str | None, mine: bool) -> None:
+        if message_id in (None, "") or not text:
+            return
+        self._said[str(message_id)] = (mine, clean_text(text, 200))
+        self._said.move_to_end(str(message_id))
+        while len(self._said) > 500:
+            self._said.popitem(last=False)
+
+    def _deliver_quoting(self, event: dict[str, Any], segments: list[dict[str, Any]], message_id: str) -> None:
+        try:
+            data = self.call("get_msg", {"message_id": int(message_id)}, timeout=6) or {}
+            quoted = data.get("message") or []
+            quoted = parse_cq_string(quoted) if isinstance(quoted, str) else quoted
+            text, _mentioned, _reply = message_text([s for s in quoted if isinstance(s, dict)
+                                                     and s.get("type") != "reply"], self.self_id)
+            sender = str((data.get("sender") or {}).get("user_id") or data.get("user_id") or "")
+            self._remember(message_id, text or "[图片]", sender == self.self_id)
+        except Exception as exc:                          # noqa: BLE001 -- too old / not found: shown as unknown
+            logger.info("quoted QQ message %s not found: %s", message_id, safe_error(exc))
+        try:
+            self.deliver(self._inbound(event, segments))
+        except Exception:                                 # noqa: BLE001
+            logger.exception("owner message with a quote not delivered")
+
+    def _parts(self, segments: list[dict[str, Any]]) -> list[Part]:
+        parts: list[Part] = []
+        for seg in segments or []:
+            if isinstance(seg, dict) and seg.get("type") == "reply":
+                mine, text = self._said.get(str((seg.get("data") or {}).get("id")), (False, ""))
+                parts.append(Part("quote", text, {"mine": mine}))
+            else:
+                parts.extend(segment_parts([seg]))
+        return parts
+
     def _inbound(self, event: dict[str, Any], segments: list[dict[str, Any]]) -> InboundMessage:
         sender = event.get("sender") or {}
+        own = [s for s in segments or [] if not (isinstance(s, dict) and s.get("type") == "reply")]
+        self._remember(event.get("message_id"), message_text(own, self.self_id)[0], False)
         return InboundMessage(channel=self.channel_id, channel_type=self.channel_type, peer_id=str(event.get("user_id")),
                               dedup_key=f"nc:{self.channel_id}:{event.get('self_id')}:{event.get('message_id')}",
-                              parts=coalesce(segment_parts(segments)) or [Part("unsupported", "")],
+                              parts=coalesce(self._parts(segments)) or [Part("unsupported", "")],
                               message_id=str(event.get("message_id") or ""),
                               peer_name=clean_text(str(sender.get("nickname") or ""), 60) or None)
 
@@ -437,6 +485,7 @@ class SnowLumaChannel(ChannelAdapter):
     def send_text(self, peer_id: str, text: str, client_id: str | None = None) -> dict[str, Any]:
         data = self.call("send_private_msg", {"user_id": int(peer_id), "message": [{"type": "text", "data": {"text": text}}]})
         self.status_info.sent += 1
+        self._remember((data or {}).get("message_id"), text, True)
         return {"ok": True, "message_id": (data or {}).get("message_id")}
 
     def send_image(self, peer_id: str, path: str) -> dict[str, Any]:
@@ -455,6 +504,7 @@ class SnowLumaChannel(ChannelAdapter):
     def send_sticker(self, peer_id: str, path: str) -> dict[str, Any]:
         data = self.call("send_private_msg", {"user_id": int(peer_id), "message": [self._sticker_segment(path)]},
                          timeout=60)
+        self._remember((data or {}).get("message_id"), "[一个表情包]", True)
         return {"ok": True, "message_id": (data or {}).get("message_id")}
 
     @staticmethod
@@ -466,6 +516,7 @@ class SnowLumaChannel(ChannelAdapter):
         """2026-10-31: a voice message (QQ's silk from ai/voice.py)."""
         data = self.call("send_private_msg", {"user_id": int(peer_id), "message": [self._voice_segment(path)]},
                          timeout=60)
+        self._remember((data or {}).get("message_id"), "[一条语音]", True)
         return {"ok": True, "message_id": (data or {}).get("message_id")}
 
     def send_to(self, kind: str, peer_id: str, text: str | None, reply_to: str | None = None,

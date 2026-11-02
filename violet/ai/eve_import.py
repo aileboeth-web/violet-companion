@@ -331,8 +331,12 @@ def commit(token: str, violetdb, *, channel: str | None, messages: bool, memorie
     conn = _open_eve(folder) if (messages or memories) else None
     if (messages or memories) and conn is None:
         raise ImportError_("上传的文件里没有 Memories.db")
+    # 2026-11-02 (ai/memory_scope): the chat and the memories belong to the persona of the chosen channel
+    from ai import memory_scope
+    scope = memory_scope.use(memory_scope.for_channel(channel) if channel else memory_scope.current())
+    result["persona"] = memory_scope.label(memory_scope.for_channel(channel) if channel else memory_scope.current())
     try:
-        with violetdb.transaction():
+        with scope, violetdb.transaction():
             id_map: dict[int, int] = {}
             if messages:
                 n, skipped, id_map = _import_messages(conn, violetdb, channel)

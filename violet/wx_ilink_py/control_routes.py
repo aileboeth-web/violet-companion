@@ -67,6 +67,37 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
                             reload_all: Callable[[], None] | None = None) -> None:
     from ai.control_config import GROUP_CHANNEL, GROUPS, StoreError, ValidationError, store
 
+    # 2026-11-02 (ai/memory_scope): which persona's memory a page reads -- the channel's when the request names one
+    # (history), else the persona picked at the top of the page (header X-Violet-Persona), else the main one
+    from flask import g
+
+    @app.before_request
+    def _persona_scope():
+        from ai import memory_scope
+        channel = (request.args.get("channel") or (request.view_args or {}).get("channel") or "").strip()[:64]
+        scope = memory_scope.for_channel(channel) if channel else (request.headers.get("X-Violet-Persona")
+                                                                   or request.args.get("persona"))
+        g._violet_scope = memory_scope._SCOPE.set(memory_scope.clean(scope))
+
+    @app.teardown_request
+    def _persona_scope_end(_exc=None):
+        from ai import memory_scope
+        token = g.pop("_violet_scope", None)
+        if token is not None:
+            try:
+                memory_scope._SCOPE.reset(token)
+            except ValueError:                           # another context: nothing to undo there
+                pass
+
+    @app.get("/api/control/personas")
+    def control_personas():
+        """The personas that have a memory of their own (the page's picker; hidden when there is only one)."""
+        from ai import memory_scope
+        scopes = memory_scope.all_scopes()
+        scopes += [s for s in violetdb.scope_files() if s not in scopes]
+        return ok({"personas": [{"scope": s, "label": memory_scope.label(s),
+                                 "channels": memory_scope.channels_of(s)} for s in scopes]})
+
     def ok(data: Any = None, status: int = 200) -> Response:
         return jsonify({"ok": True, "data": data}), status
 
@@ -450,7 +481,9 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
     def _eve_preview(token: str):
         from ai import eve_import
         data = eve_import.preview(token, violetdb)
-        data["channels"] = [{"id": k, **v} for k, v in _channel_labels().items()]
+        from ai import memory_scope
+        data["channels"] = [{"id": k, **v, "persona": memory_scope.label(memory_scope.for_channel(k))}
+                            for k, v in _channel_labels().items()]
         return data
 
     @app.post("/api/control/eve-import/upload")

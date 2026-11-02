@@ -49,20 +49,75 @@ class VioletDatabase:
         # Phase 9.4.1: the timetable tables declare foreign keys (no older table does, so nothing else changes).
         self.conn.execute("PRAGMA foreign_keys = ON")
 
+        # 2026-11-02 (ai/memory_scope.py): a persona of its own keeps its memory in its own file; statements on those
+        # tables go there while that persona's scope is in effect. A scope database never routes further.
+        self._scopes: dict[str, "VioletDatabase"] = {}
+        self._is_scope_db = False
+        self._tx_conns: list[sqlite3.Connection] = []
+
         if initialize:
             self.initialize_schema()
 
     def close(self) -> None:
         with self._lock:
+            for db in self._scopes.values():
+                db.close()
+            self._scopes.clear()
             self.conn.close()
+
+    # -- persona scopes (ai/memory_scope.py) --------------------------------------------------------
+    def scope_path(self, scope: str) -> Path:
+        if str(self.db_path) == ":memory:":
+            return Path(":memory:")
+        return self.db_path.parent / "personas" / f"{scope}.db"
+
+    def scope_db(self, scope: str) -> "VioletDatabase":
+        """The database of one persona scope ("main" = this one), opened (and created) on first use."""
+        from ai.memory_scope import MAIN, clean
+        scope = clean(scope)
+        if scope == MAIN or self._is_scope_db:
+            return self
+        with self._lock:
+            db = self._scopes.get(scope)
+            if db is None:
+                path = self.scope_path(scope)
+                if str(path) != ":memory:":
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                db = VioletDatabase(path)
+                db._is_scope_db = True
+                db._lock = self._lock                # one lock for every file: statements never interleave
+                self._scopes[scope] = db
+            return db
+
+    def scope_files(self) -> list[str]:
+        """Scopes that have a database file (also ones no channel uses any more)."""
+        folder = self.db_path.parent / "personas"
+        if self._is_scope_db or str(self.db_path) == ":memory:" or not folder.is_dir():
+            return []
+        return sorted(p.stem for p in folder.glob("*.db"))
+
+    def _conn_for(self, sql: str) -> sqlite3.Connection:
+        if self._is_scope_db:
+            return self.conn
+        from ai import memory_scope
+        scope = memory_scope.current()
+        if scope == memory_scope.MAIN or not memory_scope.is_scoped(sql):
+            return self.conn
+        return self.scope_db(scope).conn
 
     def execute(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
         with self._lock:
+            conn = self._conn_for(sql)
             if self._tx_depth:
                 # inside transaction(): no per-statement commit; the transaction decides
-                return self.conn.execute(sql, tuple(params))
-            with self.conn:
-                return self.conn.execute(sql, tuple(params))
+                if conn not in self._tx_conns:
+                    if conn.in_transaction:
+                        conn.commit()
+                    conn.execute("BEGIN IMMEDIATE")
+                    self._tx_conns.append(conn)
+                return conn.execute(sql, tuple(params))
+            with conn:
+                return conn.execute(sql, tuple(params))
 
     @contextmanager
     def transaction(self):
@@ -84,23 +139,28 @@ class VioletDatabase:
                 self.conn.commit()
             self.conn.execute("BEGIN IMMEDIATE")
             self._tx_depth = 1
+            self._tx_conns = [self.conn]
             try:
                 yield self
             except BaseException:
                 self._tx_depth = 0
-                self.conn.rollback()
+                conns, self._tx_conns = self._tx_conns, []
+                for conn in conns:
+                    conn.rollback()
                 raise
             self._tx_depth = 0
-            self.conn.commit()
+            conns, self._tx_conns = self._tx_conns, []
+            for conn in conns:
+                conn.commit()
 
     def fetch_one(self, sql: str, params: Iterable[Any] = ()) -> Optional[dict[str, Any]]:
         with self._lock:
-            row = self.conn.execute(sql, tuple(params)).fetchone()
+            row = self._conn_for(sql).execute(sql, tuple(params)).fetchone()
         return dict(row) if row else None
 
     def fetch_all(self, sql: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:
         with self._lock:
-            rows = self.conn.execute(sql, tuple(params)).fetchall()
+            rows = self._conn_for(sql).execute(sql, tuple(params)).fetchall()
         return [dict(row) for row in rows]
 
     def initialize_schema(self) -> None:
@@ -963,7 +1023,7 @@ class VioletDatabase:
     def get_recent_messages(self, limit: int = 30) -> list[dict[str, Any]]:
         rows = self.fetch_all(
             """
-            SELECT id, role, direction, message_type, content, media_id, created_at
+            SELECT id, role, direction, message_type, content, media_id, created_at, channel
             FROM messages
             ORDER BY created_at DESC, id DESC
             LIMIT ?

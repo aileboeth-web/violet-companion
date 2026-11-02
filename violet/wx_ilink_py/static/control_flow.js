@@ -13,7 +13,7 @@
   };
   const STATUS = { pending: ["等待", ""], running: ["进行中", "warn"], done: ["完成", "ok"], failed: ["失败", "bad"], skipped: ["跳过", ""] };
   const ROLE = { system: "规则 / 资料", user: "对方 / 提示", assistant: "她", tool: "工具结果" };
-  const state = { runs: [], selected: null, node: null, timer: null, detail: null };
+  const state = { runs: [], selected: null, node: null, timer: null, detail: null, listSig: "", runSig: "" };
 
   const secs = (a, b) => (a && b ? ((b - a) < 1 ? Math.round((b - a) * 1000) + " 毫秒" : (b - a).toFixed(1) + " 秒") : "");
   const clock = (t) => (t ? new Date(t * 1000).toLocaleTimeString() : "—");
@@ -33,8 +33,24 @@
     await renderRun();
   }
 
+  // 2026-11-02 (user: 生成回复会一跳一跳的): the page looked again every 2 seconds and drew everything anew -- open
+  // parts closed, the page jumped. Now nothing is redrawn unless it changed, and a redraw keeps what was open and
+  // where the page was scrolled.
+  function keepView(box, draw) {
+    const open = new Set([...box.querySelectorAll("details[open]")].map((d) => d.dataset.key));
+    const y = window.scrollY;
+    box.style.minHeight = box.offsetHeight + "px";
+    draw();
+    box.querySelectorAll("details").forEach((d) => { if (open.has(d.dataset.key)) d.open = true; });
+    box.style.minHeight = "";
+    window.scrollTo(0, y);
+  }
+
   function renderList() {
     const list = $("#flow-list");
+    const sig = JSON.stringify([state.selected, state.runs.map((r) => [r.id, r.running, r.error, r.title, r.trigger])]);
+    if (sig === state.listSig) return;
+    state.listSig = sig;
     if (!state.runs.length) {
       list.replaceChildren(h("p", { class: "note", text: "Violet 启动以来还没有处理过消息。给她发一句话，这里就会出现。" }));
       return;
@@ -58,6 +74,9 @@
     if (!state.node || !run.nodes[state.node]) {
       state.node = run.active_node || [...order].reverse().find((n) => ["done", "failed"].includes(run.nodes[n].status)) || order[0];
     }
+    const sig = JSON.stringify([state.selected, state.node, run]);
+    if (sig === state.runSig) return;
+    state.runSig = sig;
     const steps = h("div", { class: "flow-steps" }, ...order.flatMap((n, i) => {
       const node = run.nodes[n];
       const [label, kind] = STATUS[node.status] || [node.status, ""];
@@ -74,8 +93,8 @@
       run.running ? pill("进行中", "warn") : run.error ? pill("出错", "bad") : pill("完成", "ok"),
       h("span", { class: "note", text: `${clock(run.started_at)}${run.finished_at ? " · 用时 " + secs(run.started_at, run.finished_at) : ""}` +
         (run.turn_id ? ` · 对话编号 ${run.turn_id}` : "") }));
-    box.replaceChildren(...[head, h("p", { class: "flow-trigger", text: (run.title ? run.title + " · " : "") + (run.trigger || "") }),
-      run.error ? h("p", { class: "err", text: run.error }) : null, steps, nodeDetail(run, state.node)].filter(Boolean));  // replaceChildren prints "null"
+    keepView(box, () => box.replaceChildren(...[head, h("p", { class: "flow-trigger", text: (run.title ? run.title + " · " : "") + (run.trigger || "") }),
+      run.error ? h("p", { class: "err", text: run.error }) : null, steps, nodeDetail(run, state.node)].filter(Boolean)));  // replaceChildren prints "null"
   }
 
   // what one step got and gave: the model conversation as blocks, everything else as readable JSON
@@ -87,18 +106,18 @@
     if (node.status === "skipped") parts.push(h("p", { class: "note", text: "这一步跳过了" + (node.note ? "：" + node.note : "。") }));
     for (const [label, value] of [["输入", node.input], ["输出", node.output]]) {
       if (value === null || value === undefined) continue;
-      parts.push(h("h4", { text: label }), ...valueView(value));
+      parts.push(h("h4", { text: label }), ...valueView(value, name + ":" + label));
     }
     if (parts.length === 1) parts.push(h("p", { class: "note", text: node.status === "running" ? "正在进行，结果出来后会显示在这里。" : "这一步没有记录内容。" }));
     return h("div", { class: "card flow-detail" }, ...parts);
   }
 
-  function valueView(value) {
+  function valueView(value, key) {
     if (typeof value !== "object" || value === null) return [h("pre", { class: "prompt-part", text: String(value) })];
     const out = [];
     const rest = {};
     for (const [k, v] of Object.entries(value)) {
-      if (k === "messages" && Array.isArray(v)) out.push(messagesView(v));
+      if (k === "messages" && Array.isArray(v)) out.push(messagesView(v, key));
       else if (k === "content" && typeof v === "string") out.push(h("div", { class: "flow-content" }, h("div", { class: "note", text: "结果" }), h("pre", { class: "prompt-part", text: v || "（空）" })));
       else if (k === "usage" && v) out.push(h("p", { class: "note", text: `token：输入 ${v.prompt_tokens ?? "—"}，输出 ${v.completion_tokens ?? "—"}` +
         ((v.prompt_tokens_details || {}).cached_tokens ? `，命中缓存 ${v.prompt_tokens_details.cached_tokens}` : "") }));
@@ -108,25 +127,26 @@
     return out;
   }
 
-  function messagesView(messages) {
+  function messagesView(messages, key) {
     const chars = messages.reduce((n, m) => n + String(m.content || "").length, 0);
-    return h("details", { class: "flow-messages" }, h("summary", { text: `发给模型的对话：${messages.length} 条 · ${chars} 字` }),
-      ...messages.map((m) => {
+    const d = h("details", { class: "flow-messages" }, h("summary", { text: `发给模型的对话：${messages.length} 条 · ${chars} 字` }),
+      ...messages.map((m, i) => {
         const calls = (m.tool_calls || []).map((c) => `调用 ${(c.function || {}).name || "?"}(${(c.function || {}).arguments || ""})`).join("\n");
         const text = [m.content, calls].filter(Boolean).join("\n");
-        return h("details", {}, h("summary", { text: `${ROLE[m.role] || m.role} · ${String(text).length} 字 · ${String(text).slice(0, 40).replace(/\s+/g, " ")}` }),
+        const one = h("details", {}, h("summary", { text: `${ROLE[m.role] || m.role} · ${String(text).length} 字 · ${String(text).slice(0, 40).replace(/\s+/g, " ")}` }),
           h("pre", { class: "prompt-part", text: text || "（空）" }));
+        one.dataset.key = key + ":" + i;
+        return one;
       }));
+    d.dataset.key = key;
+    return d;
   }
 
   function watch() {
     clearTimeout(state.timer);
     state.timer = setTimeout(async () => {
       if ($("#tab-flow").classList.contains("active") && !document.hidden && $("#flow-live").checked) {
-        // a detail the user is reading is not redrawn under them unless the run is still going
-        const open = document.querySelector("#flow-run details[open]");
-        if (!open || (state.detail && state.detail.running)) await refresh();
-        else { try { const d = await api("GET", "/api/control/flow"); if ((d.runs || [])[0] && d.runs[0].id !== (state.runs[0] || {}).id) { state.runs = d.runs; renderList(); } } catch (_) { /* next time */ } }
+        await refresh();          // redraws only what changed, keeping open parts and the scroll position
       }
       if ($("#tab-flow").classList.contains("active")) watch();
     }, 2000);

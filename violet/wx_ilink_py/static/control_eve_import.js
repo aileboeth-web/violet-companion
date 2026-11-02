@@ -31,7 +31,7 @@
   function renderPreview(p) {
     const box = $("#eve-preview");
     const m = p.messages, core = p.core, ev = p.events;
-    const channel = h("select", { "aria-label": "导入到哪个渠道" }, ...p.channels.map((c) => h("option", { value: c.id, text: c.label })));
+    const channel = h("select", { "aria-label": "导入到哪个渠道" }, ...p.channels.map((c) => h("option", { value: c.id, text: c.label + (c.persona ? "（人设：" + c.persona + "）" : "") })));
     channel.value = p.channels.some((c) => c.id === "wechat") ? "wechat" : (p.channels[0] || {}).id || "";
     const msgBox = h("input", { type: "checkbox", checked: !!(m && m.count) , disabled: !(m && m.count) });
     const memBox = h("input", { type: "checkbox", checked: !!((core && core.count) || (ev && ev.count)), disabled: !((core && core.count) || (ev && ev.count)) });
@@ -55,7 +55,7 @@
       before,
       h("div", { class: "card" },
         h("label", { class: "check" }, msgBox, h("span", { text: " 导入聊天记录到 " }), channel),
-        h("p", { class: "note", text: "会排在现有聊天的前面（按时间），算作你在这个渠道上和她的私聊，她之后聊天、判断你们多熟时会看到。图片、语音只导入当时记下的文字。" }),
+        h("p", { class: "note", text: "会排在现有聊天的前面（按时间），算作你在这个渠道上和她的私聊，她之后聊天、判断你们多熟时会看到。聊天记录和记忆都归这个渠道用的人设：别的人设不会知道（每个人设是不同的人）。想让 Eve 的记忆归 Eve，先在“人设与生活”里给这个渠道选好 Eve 人设，再导入。图片、语音只导入当时记下的文字。" }),
         h("label", { class: "check" }, memBox, h("span", { text: " 导入记忆（核心记忆和事件记忆）" }))),
       usable.length ? h("div", { class: "card" }, h("h3", { text: "设置（发送频率等）" }),
         h("p", { class: "note", text: "勾上的会覆盖 Violet 现在的值，记在“修改记录”里，可以回滚。和 Violet 一样的默认不勾。" }),
@@ -70,7 +70,7 @@
           settings.length ? `${settings.length} 项设置` : null].filter(Boolean).join("、");
         if (!(await confirmBox(`导入 ${what}？聊天记录导入后不能在页面上删除。`, { danger: false, ok: "导入" }))) return;
         try {
-          const r = await api("POST", `/api/control/eve-import/${p.token}/commit`, { confirm: true, channel: msgBox.checked ? channel.value : null,
+          const r = await api("POST", `/api/control/eve-import/${p.token}/commit`, { confirm: true, channel: channel.value,
             messages: msgBox.checked, memories: memBox.checked, settings });
           box.replaceChildren(h("div", { class: "card" }, h("h3", { text: "导入完成" }),
             h("p", { text: `聊天记录 ${r.messages} 条` + (r.messages_skipped ? `（${r.messages_skipped} 条已经有了，跳过）` : "") +

@@ -18,8 +18,23 @@ function toast(text, ok = true) {
   const t = $("#toast"); t.textContent = text; t.className = "toast show " + (ok ? "ok" : "bad");
   clearTimeout(toast.timer); toast.timer = setTimeout(() => (t.className = "toast"), 3500);
 }
+// 2026-11-02 (ai/memory_scope): a channel with its own persona is another person with her own memory; the picker in
+// the menu says whose memory, chat history, life and mood the pages show (sent with every request)
+let PERSONA = "main";                             // per page load (the Control Center keeps nothing in the browser)
+function personaScope() { return PERSONA; }
+async function loadPersonaPicker() {
+  try {
+    const d = await api("GET", "/api/control/personas");
+    const list = d.personas || [];
+    const sel = $("#persona-scope");
+    if (!list.some((p) => p.scope === PERSONA)) PERSONA = "main";
+    sel.replaceChildren(...list.map((p) => h("option", { value: p.scope, text: p.label + (p.channels.length ? "（" + p.channels.length + " 个渠道）" : "（没有渠道在用）") })));
+    sel.value = personaScope();
+    $("#persona-pick").hidden = list.length < 2;
+  } catch (_) { /* older server or not logged in */ }
+}
 async function api(method, url, body) {
-  const opts = { method, headers: { Accept: "application/json" }, credentials: "same-origin" };
+  const opts = { method, headers: { Accept: "application/json", "X-Violet-Persona": personaScope() }, credentials: "same-origin" };
   if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
   const resp = await fetch(url, opts);
   if (resp.status === 401) { location.href = "/auth/login?next=/control"; throw new Error("unauthorized"); }
@@ -372,7 +387,7 @@ $("#chat-more").addEventListener("click", () => loadChat(true));
 $("#exp-go").addEventListener("click", () => {
   const f = $("#exp-from").value, t = $("#exp-to").value;
   if (!f || !t) return toast("请选择导出的起止日期", false);
-  location.href = "/api/control/messages/export?" + new URLSearchParams({ from: f, to: t });
+  location.href = "/api/control/messages/export?" + new URLSearchParams({ from: f, to: t, persona: personaScope() });
 });
 
 // ---------------------------------------------------------------- memories
@@ -1017,3 +1032,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   const btn = document.querySelector(`#tabs button[data-tab="${CSS.escape(first)}"]`) || document.querySelector("#tabs button");
   btn.click();
 });
+
+// 2026-11-02: the persona picker (see personaScope)
+$("#persona-scope").addEventListener("change", (e) => {
+  PERSONA = e.target.value;
+  const active = document.querySelector("#tabs button.active");
+  if (active) (loaders[active.dataset.tab] || (() => {}))();
+  toast("现在看的是：" + e.target.selectedOptions[0].textContent);
+});
+loadPersonaPicker();

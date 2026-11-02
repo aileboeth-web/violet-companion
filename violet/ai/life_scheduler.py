@@ -111,13 +111,22 @@ class LifeScheduler:
         if mode != "on":
             result = {"outcome": mode}
         else:
-            try:
-                result = self._engine().run_day(self.clock())
-            except Exception as exc:
-                logger.exception("[life] tick failed")
-                result = {"outcome": "error", "error": f"{exc.__class__.__name__}: {exc}"}
-            if result.get("outcome") not in ("already_ran", "too_early", "disabled"):
-                logger.info("[life] %s", result)
+            # 2026-11-02 (ai/memory_scope): every persona lives her own days; the main persona's result is returned
+            from ai import memory_scope
+            result = {"outcome": "disabled"}
+            for scope in memory_scope.all_scopes():
+                with memory_scope.run_as(scope):
+                    try:
+                        one = self._engine().run_day(self.clock())
+                    except Exception as exc:
+                        logger.exception("[life] tick failed (%s)", scope)
+                        one = {"outcome": "error", "error": f"{exc.__class__.__name__}: {exc}"}
+                if one.get("outcome") not in ("already_ran", "too_early", "disabled"):
+                    logger.info("[life] %s: %s", scope, one)
+                if scope == memory_scope.MAIN:
+                    result = one
+                else:
+                    result.setdefault("personas", {})[scope] = one.get("outcome")
         explored = self.explore()
         if explored is not None and explored.get("outcome") not in ("off",):
             result = {**result, "explore": explored}

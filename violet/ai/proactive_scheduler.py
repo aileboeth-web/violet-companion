@@ -185,7 +185,30 @@ class ProactiveScheduler:
         except Exception:
             logger.exception("[ProactiveScheduler] channel of the next proactive message unknown; using WeChat")
             context = None
+        if context is None and provider is not None:
+            from ai import memory_scope
+            if memory_scope.current() != memory_scope.MAIN:
+                return None                    # 2026-11-02: this persona has no channel to write on
+        if context is None:
+            # the main persona: WeChat as before, unless WeChat belongs to another persona
+            from ai import memory_scope
+            if memory_scope.for_channel("wechat") != memory_scope.current():
+                return None
         return channel_scope(context)
+
+    def _each_scope(self, work) -> None:
+        """2026-11-02 (ai/memory_scope): every persona has her own rhythm, reminders and channel."""
+        from ai import memory_scope
+        for scope in memory_scope.all_scopes():
+            with memory_scope.run_as(scope):
+                scoped = self._channel_scope()
+                if scoped is None:
+                    continue
+                try:
+                    with scoped:
+                        work()
+                except Exception:
+                    logger.exception("[ProactiveScheduler] tick failed for persona %s", scope)
 
     def load_config(self) -> dict[str, Any]:
         self.config = load_json(self.config_path, DEFAULT_CONFIG)
@@ -253,8 +276,7 @@ class ProactiveScheduler:
         if not self._pipeline_lock.acquire(blocking=False):
             return
         try:
-            with self._channel_scope():
-                self._tick_locked()
+            self._each_scope(self._tick_locked)
         finally:
             self._pipeline_lock.release()
 
@@ -362,7 +384,10 @@ class ProactiveScheduler:
         if not self._pipeline_lock.acquire(timeout=180):
             raise RuntimeError("pipeline busy: a user turn is still being processed")
         try:
-            with self._channel_scope():
+            scoped = self._channel_scope()
+            if scoped is None:
+                raise RuntimeError("这个人设没有可以发消息的渠道")
+            with scoped:
                 pipeline = run_proactive_pipeline(
                     event_context=event_context,
                     proactive_agent=self.proactive_agent,

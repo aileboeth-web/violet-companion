@@ -92,7 +92,9 @@ def render_part(part: Part) -> str:
         return f"[对方分享了一个链接{('：' + title) if title else ''}{(' ' + url) if url else ''}]"
     if kind == "quote":
         quoted = clean_text(text, 200).replace("\n", " ").strip()
-        return f"[引用：{quoted}]" if quoted else "[引用了一条消息]"
+        if quoted and part.data.get("mine"):            # 2026-11-02: the owner answers something she said
+            return f"[引用你之前说的：{quoted}]"
+        return f"[引用：{quoted}]" if quoted else "[引用了一条消息（看不到原文）]"
     if kind == "mention":
         name = _name(text)
         return f"@{name}" if name else ""

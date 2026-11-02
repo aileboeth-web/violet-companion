@@ -486,3 +486,8 @@ label.inline{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .model-row{grid-template-columns:1fr}
   .kv{grid-template-columns:1fr auto}.kv .k{grid-column:1/-1}.kv>.v:first-child{grid-column:1}.kv .note{grid-column:1/-1}
 }
+
+/* 2026-11-02: which persona's memory the pages show (only when there is more than one) */
+.persona-pick { display: block; margin: 6px 14px 10px; font-size: 13px; color: var(--muted, #888); }
+.persona-pick[hidden] { display: none; }
+.persona-pick select { display: block; width: 100%; margin-top: 4px; }

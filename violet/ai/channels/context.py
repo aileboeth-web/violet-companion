@@ -37,9 +37,13 @@ def current() -> ChannelContext:
 
 @contextlib.contextmanager
 def channel_scope(context: ChannelContext | None):
-    token = _CURRENT.set(context or DEFAULT)
+    """The channel of this turn -- and (2026-11-02) the memory of the persona that channel uses (ai/memory_scope)."""
+    from ai import memory_scope
+    context = context or DEFAULT
+    token = _CURRENT.set(context)
     try:
-        yield context or DEFAULT
+        with memory_scope.use(memory_scope.for_channel(context.channel)):
+            yield context
     finally:
         _CURRENT.reset(token)
 
