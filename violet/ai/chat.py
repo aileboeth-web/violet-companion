@@ -834,7 +834,10 @@ def _run_pipeline(
 
     # Step 3: 记忆判断（以本轮对话为输入）；测试模式不记
     if defer_memory or testing:
-        _ps.node_skip("Memory", "测试模式不记" if testing else "回复发出后在后台整理记忆")
+        if testing:
+            _ps.node_skip("Memory", "测试模式不记")
+        else:
+            _ps.node_queue("Memory", "回复发出后在后台整理，结果会显示在这里")
         memory_result = {"content": "", "messages": [], "raw": {}, "skipped": True, "deferred": True}
         visualize_pipeline_end()
         _ps.pipeline_end(error="; ".join(f"{k}: {v}" for k, v in errors.items())[:500] if errors else None)

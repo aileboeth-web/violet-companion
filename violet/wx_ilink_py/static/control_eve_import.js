@@ -82,9 +82,8 @@
       } }))].filter(Boolean));
   }
 
-  loaders.import = () => {
-    $("#eve-pack").textContent = PACK;
-  };
+  // 2026-11-02: a part of the chat history page ("导入聊天记录和记忆", source Project Eve), not a page of its own
+  $("#eve-pack").textContent = PACK;
   $("#eve-pack-copy").addEventListener("click", () => copyText(PACK));
   $("#eve-upload").addEventListener("click", async () => {
     const file = $("#eve-file").files[0];

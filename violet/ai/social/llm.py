@@ -18,7 +18,8 @@ class SocialLLMError(RuntimeError):
 
 
 def model_name() -> str:
-    return env_str("VIOLET_SOCIAL_MODEL", "") or env_str("CHAT_LLM_MODEL", "")
+    # 2026-11-02: the QQ channel's own Chat model (settings tab QQ) when there is no separate social model
+    return env_str("VIOLET_SOCIAL_MODEL", "") or env_str("VIOLET_MODEL_QQ", "") or env_str("CHAT_LLM_MODEL", "")
 
 
 def _client():

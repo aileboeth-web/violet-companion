@@ -157,6 +157,14 @@ class BaseAgent:
         raw = os.getenv(self.model_env_key, "") if self.model_env_key else ""
         return raw.strip() or self.default_model
 
+    uses_channel_model = False               # 2026-11-02: ChatAgent -- the platform's own Chat model when one is set
+
+    def _run_model(self, cfg) -> str:
+        if not self.uses_channel_model:
+            return cfg.reply_model
+        from ai.model_params import channel_chat_model
+        return channel_chat_model(cfg.reply_model)
+
     def _load_fallback_model(self) -> str:
         """可选备用模型：CHAT_LLM_MODEL -> CHAT_LLM_FALLBACK_MODEL。"""
         if not self.model_env_key.endswith("_LLM_MODEL"):
@@ -439,7 +447,7 @@ class BaseAgent:
             reminded = False
             for round_index in range(max_tool_rounds + 1):
                 choice = self._tool_choice_for_round(round_index, all_tools)
-                request = dict(model=cfg.reply_model, messages=chat_history, tools=all_tools or None,
+                request = dict(model=self._run_model(cfg), messages=chat_history, tools=all_tools or None,
                                tool_choice=choice, temperature=cfg.reply_temperature)
                 try:
                     completion = self._create_completion(client, cfg, **request)
@@ -540,7 +548,7 @@ class BaseAgent:
             # she has instead of the whole turn failing
             chat_history.append({"role": "system", "content": "工具已经用够了，这一轮不能再调用工具。按上面已经拿到的结果直接回复；"
                                                               "没拿到的照实说没拿到。"})
-            completion = self._create_completion(client, cfg, model=cfg.reply_model, messages=chat_history,
+            completion = self._create_completion(client, cfg, model=self._run_model(cfg), messages=chat_history,
                                                  temperature=cfg.reply_temperature)
             assistant_message = completion.choices[0].message
             chat_history.append(assistant_message.model_dump(exclude_none=True))

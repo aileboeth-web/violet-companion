@@ -168,11 +168,16 @@ class MemoryWorker:
             "write_log": written,
             "previous_writes": list(progress["writes"]),
         }
+        from ai import pipeline_state as _ps                 # 2026-11-02: the 流程 page shows this step too
+        memory_input = build_memory_input(job["user_message"], job.get("assistant_reply"))
+        _ps.turn_node(job.get("turn_id"), "Memory", "running", input_data={"memory_input": memory_input},
+                      note=f"后台整理记忆（第 {job['attempts']} 次）")
         try:
-            self.memory_agent.run(build_memory_input(job["user_message"], job.get("assistant_reply")),
-                                  call_context=call_context)
+            result = self.memory_agent.run(memory_input, call_context=call_context) or {}
         except Exception as exc:
             error = f"{exc.__class__.__name__}: {exc}"[:500]
+            _ps.turn_node(job.get("turn_id"), "Memory", "failed", output_data={"error": error, "writes": written},
+                          note="整理失败" + ("，稍后重试" if job["attempts"] < self.max_attempts else ""))
             stop = "budget" if exc.__class__.__name__ == "BudgetExceeded" else "error"
             saved = _progress_json(progress, job["attempts"], written, stop)
             if job["attempts"] >= self.max_attempts:
@@ -188,6 +193,10 @@ class MemoryWorker:
                 self.db.update_memory_job(job["id"], status="pending", last_error=error, next_attempt_at=next_at,
                                           progress=saved)
             return
+        _ps.turn_node(job.get("turn_id"), "Memory", "done",
+                      output_data={"messages": result.get("messages") if isinstance(result, dict) else None,
+                                   "writes": written or "这一轮没有要记的"},
+                      note=f"记下 {len(written)} 条" if written else "这一轮没有要记的")
         # last_error of an earlier failed attempt is kept on purpose (traceability).
         self.db.update_memory_job(job["id"], status="done", finished_at=self.db.now(),
                                   progress=_progress_json(progress, job["attempts"], written, "complete"))

@@ -8,7 +8,9 @@
   const NAMES = { CHAT: ["Chat", "写回复"], INTENT: ["Intent", "理解你说的每句话"], MEMORY: ["Memory", "整理记忆"],
     PROACTIVE: ["Proactive", "决定要不要主动找你"], PERFORMER: ["Performer", "执行任务（查资料、用工具）"] };
   const MANUAL = "__manual__";
-  const ADVANCED = ["LLM_REQUEST_TIMEOUT_SECONDS", "LLM_CONNECT_TIMEOUT_SECONDS", "LLM_TOTAL_TIMEOUT_SECONDS",
+  // 2026-11-02 (user: 说了不同厂商缓存不同，但没找到在哪切换): the two cache settings were in the "api" group, which
+  // the settings page leaves to this page -- and this page did not show them
+  const ADVANCED = ["VIOLET_LLM_PROVIDER", "VIOLET_LATE_SYSTEM_AS_USER", "LLM_REQUEST_TIMEOUT_SECONDS", "LLM_CONNECT_TIMEOUT_SECONDS", "LLM_TOTAL_TIMEOUT_SECONDS",
     "LLM_MAX_RETRY_ATTEMPTS", "LLM_RETRY_BASE_DELAY"];
   let settings = null;
   let models = [];                 // from the API (this page visit)
@@ -162,7 +164,7 @@
 
   $("#model-adv-save").addEventListener("click", async () => {
     try {
-      await api("PUT", "/api/control/settings", { changes: advanced, reason: "模型服务：超时与重试" });
+      await api("PUT", "/api/control/settings", { changes: advanced, reason: "模型服务：缓存、超时与重试" });
       toast("已保存"); loaders.model();
     } catch (e) { toast(problems(e), false); }
   });

@@ -86,6 +86,7 @@ class ChatAgent(BaseAgent):
 
     mcp_agent_name = "chat"
     model_env_key = "CHAT_LLM_MODEL"
+    uses_channel_model = True
     default_model = "gpt-4o"
     system_prompt_env_key = "CHAT_LLM_PROMPT"
     # 2026-10-30: v3 = v1 without a built-in identity ("你是 Violet，一个虚构的女孩…"): who she is and how close you are

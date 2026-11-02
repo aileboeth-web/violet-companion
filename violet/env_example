@@ -252,6 +252,10 @@ VIOLET_VOICE_MAX_CHARS=300
 VIOLET_INTENT_STEP=0
 # 2026-11-01: prompt caching -- auto | openai | deepseek | claude | other; the history window keeps its start
 VIOLET_LLM_PROVIDER=auto
+# 2026-11-02: the Chat model on one platform (settings tab of that channel); empty = CHAT_LLM_MODEL
+VIOLET_MODEL_WECHAT=
+VIOLET_MODEL_QQ=
+VIOLET_MODEL_TELEGRAM=
 VIOLET_LATE_SYSTEM_AS_USER=1
 VIOLET_CONTEXT_STABLE_HISTORY=1
 # 2026-11-01: a group where nobody calls her and she is not talking is looked at once in this many seconds

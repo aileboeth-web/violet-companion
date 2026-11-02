@@ -76,6 +76,20 @@ def apply(kwargs: dict[str, Any]) -> dict[str, Any]:
 # ------------------------------------------------------------------------------------------------ prompt caching
 # 2026-11-01 (token rework; user: GPT now, DeepSeek too, maybe Claude later -- "都做吧，可以选"). Every provider caches
 # the same beginning of a prompt; callers order their prompts for that and mark where the unchanging part ends with
+PLATFORM_KEYS = {"wechat_ilink": "VIOLET_MODEL_WECHAT", "napcat": "VIOLET_MODEL_QQ", "qqbot": "VIOLET_MODEL_QQ",
+                 "onebot11": "VIOLET_MODEL_QQ", "telegram": "VIOLET_MODEL_TELEGRAM"}
+
+
+def channel_chat_model(default: str, channel_type: str | None = None) -> str:
+    """2026-11-02 (user: 不同渠道用不同的模型): the Chat model of the platform being talked on (VIOLET_MODEL_WECHAT /
+    _QQ / _TELEGRAM, set on that channel's settings tab), else `default` (the Chat model)."""
+    if channel_type is None:
+        from ai.channels.context import current
+        channel_type = current().channel_type
+    key = PLATFORM_KEYS.get(channel_type or "")
+    return (env_str(key, "").strip() if key else "") or default
+
+
 # "_cache_break" on a message, plus "cache_key" on the request. What is sent depends on VIOLET_LLM_PROVIDER:
 #   openai    prompt_cache_key (routes calls with the same beginning to the same cache)
 #   claude    cache_control on the marked messages (at most 4) -- Claude caches only what is marked

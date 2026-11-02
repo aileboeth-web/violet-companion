@@ -392,8 +392,44 @@ $("#exp-go").addEventListener("click", () => {
 
 // ---------------------------------------------------------------- memories
 let memOffset = 0; const MEM_PAGE = 30;
+// 2026-11-02 (user: 说了喜欢喝杨枝甘露奶茶，记忆里找不到): stable things about the owner (likes, how to call them, school)
+// are kept in the profile, her current state and how she should talk in two more lists -- none of them had a place in
+// the Control Center since the old dashboard went away. They are shown here, from /api/profile.
+const PROFILE_STATUS = { active: "在用", candidate: "待确认（只说过一次或不太确定）", superseded: "已被新的取代", disabled: "已停用",
+  expired: "已过期", deleted: "已删除" };
+async function loadProfileKind(kind) {
+  const q = $("#mem-q").value.trim();
+  $("#mem-status").disabled = true;
+  $("#mem-prev").disabled = true; $("#mem-next").disabled = true;
+  try {
+    const d = await api("GET", "/api/profile");
+    let rows = kind === "profile" ? d.facts : kind === "situation" ? d.situations.recent : d.preferences.all;
+    rows = (rows || []).filter((r) => !q || JSON.stringify(r).includes(q));
+    $("#mem-total").textContent = `共 ${rows.length} 条`;
+    $("#mem-list").replaceChildren(...(rows.length ? rows.map((r) => profileCard(kind, r)) : [h("p", { class: "note", text: "没有记录" })]));
+  } catch (e) { toast("读取失败：" + e.message, false); }
+}
+function profileCard(kind, r) {
+  const text = kind === "pref" ? `${r.pref_key}：${r.value}` : kind === "situation" ? `${r.kind}：${r.value}` : r.value;
+  const badges = [kind === "profile" ? `类别 ${fmt(r.fact_key)}` : null, `状态 ${PROFILE_STATUS[r.status] || fmt(r.status)}`,
+    r.use_in_context === 0 ? "不给她看" : null, `来源 ${fmt(r.source || r.origin)}`,
+    kind === "situation" ? `到 ${when(r.expires_at)} 为止` : null, `更新 ${when(r.updated_at)}`];
+  const base = kind === "profile" ? `/api/profile/facts/${r.id}` : kind === "situation" ? `/api/profile/situations/${r.id}` : null;
+  const toggle = base && r.status !== "deleted" ? h("button", { class: "ghost", text: r.use_in_context === 0 ? "启用" : "停用",
+    onclick: async () => { try { await api("POST", `${base}/${r.use_in_context === 0 ? "enable" : "disable"}`); loadMemories(); }
+      catch (e) { toast(e.message, false); } } }) : null;
+  const del = h("button", { class: "danger", text: "删除", onclick: async () => {
+    if (!(await confirmBox(`删除这一条？会从她的档案里彻底删掉（聊天记录里这句话的原文也会被抹掉），不能恢复。\n\n${text}`))) return;
+    try { await api("DELETE", base || `/api/profile/preferences/id/${r.id}`); toast("已删除"); loadMemories(); }
+    catch (e) { toast(e.message, false); } } });
+  return h("div", { class: "card" }, h("div", { text: text }),
+    r.evidence ? h("div", { class: "note", text: "原话：" + r.evidence }) : null,
+    h("div", { class: "badges" }, ...badges.filter(Boolean).map((b) => pill(b))),
+    h("div", { class: "row", style: "justify-content:flex-end;margin-top:6px" }, toggle, del));
+}
 async function loadMemories() {
   const kind = $("#mem-kind").value;
+  if (["profile", "situation", "pref"].includes(kind)) return loadProfileKind(kind);
   const params = new URLSearchParams({ kind, limit: String(MEM_PAGE), offset: String(memOffset) });
   if ($("#mem-q").value.trim()) params.set("q", $("#mem-q").value.trim());
   if (kind === "event" && $("#mem-status").value) params.set("status", $("#mem-status").value);

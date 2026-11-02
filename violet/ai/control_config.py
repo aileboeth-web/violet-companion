@@ -94,6 +94,15 @@ SETTINGS: list[Setting] = [
             "自动识别 = 按模型名判断；中转站不认这些参数时会自动不再发送", "auto",
             choices=(("auto", "自动识别"), ("openai", "OpenAI（GPT）"), ("deepseek", "DeepSeek"), ("claude", "Claude"),
                      ("other", "其他"))),
+    # 2026-11-02 (user: 支持不同渠道用不同的模型): the Chat model on one platform (its settings tab); empty = the Chat model
+    Setting("VIOLET_MODEL_WECHAT", "微信上用的聊天模型", "wechat_model", "model", "now",
+            "留空 = 用“模型服务”页的 Chat 模型。在微信上回复你、主动找你时用这个模型（意图、记忆这些后台步骤不变）",
+            optional=True),
+    Setting("VIOLET_MODEL_QQ", "QQ 上用的聊天模型", "qq_model", "model", "now",
+            "留空 = 用 Chat 模型。在 QQ 上回复你、主动找你，以及群聊和别人的私聊（没有单独设群聊模型时）都用这个模型",
+            optional=True),
+    Setting("VIOLET_MODEL_TELEGRAM", "Telegram 上用的聊天模型", "telegram_model", "model", "now",
+            "留空 = 用 Chat 模型。在 Telegram 上回复你、主动找你时用这个模型", optional=True),
     Setting("VIOLET_LATE_SYSTEM_AS_USER", "对话中途的系统提示当成带标记的用户消息发", "api", "bool", "now",
             "开（推荐）：有些中转会把所有 system 消息挪到最前面，每一轮的时间、记忆一变，缓存就全部失效；"
             "开着时这些提示带“系统给你的提示”标记、以 user 身份放在原位。关：照原样发 system", True),
@@ -357,10 +366,12 @@ GROUPS = {"api": "接口", "models": "模型与 Agent", "prompts": "提示词版
           "life": "生活引擎", "behavior": "聊天行为", "memory": "记忆与提醒", "guard": "回复检查", "web": "联网搜索",
           "voice": "语音", "images": "图片", "stickers": "表情包", "social": "QQ 群聊和别人的私聊",
           "qq_stickers": "QQ 上的表情包", "qzone": "QQ 动态", "mcp": "工具与 MCP", "schedule": "课表",
-          "system": "系统", "logs": "日志与排查", "updates": "版本更新"}
+          "system": "系统", "logs": "日志与排查", "updates": "版本更新",
+          "wechat_model": "这个渠道的模型", "qq_model": "这个渠道的模型", "telegram_model": "这个渠道的模型"}
 # 2026-11-02 (user: 聊天渠道是分开的，设置里却全归为一类): the settings page has tabs 通用 / 微信 / QQ / Telegram; these
 # groups belong to one channel's tab, every other group to 通用. The QQ ones only work on the personal-QQ channel.
-GROUP_CHANNEL = {"social": "qq", "qq_stickers": "qq", "qzone": "qq"}
+GROUP_CHANNEL = {"social": "qq", "qq_stickers": "qq", "qzone": "qq",
+                 "wechat_model": "wechat", "qq_model": "qq", "telegram_model": "telegram"}
 TEXT_MAX = 200
 RESET_KEEPS = ("api", "models")          # "清除所有配置" keeps the model service
 

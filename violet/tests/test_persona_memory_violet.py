@@ -175,3 +175,35 @@ def test_history_marks_where_the_talk_moved():
     out = _with_channel_marks([a, b, c], {id(a): "wechat", id(b): "wechat", id(c): "napcat"})
     assert [m["content"] for m in out][0] == "【下面这段是在微信上聊的】"
     assert out[3]["role"] == "system" and out[3]["content"].startswith("【下面这段是在") and out[4] is c
+
+
+# ---------------------------------------------------------------- 2026-11-02 second round
+def test_each_platform_may_use_its_own_chat_model(monkeypatch):
+    from ai.channels.context import ChannelContext, channel_scope
+    from ai.model_params import channel_chat_model
+    monkeypatch.setenv("VIOLET_MODEL_QQ", "qq-model")
+    monkeypatch.delenv("VIOLET_MODEL_WECHAT", raising=False)
+    assert channel_chat_model("chat-model") == "chat-model"                       # WeChat: no own model
+    with channel_scope(ChannelContext(channel="napcat", channel_type="napcat", label="QQ")):
+        assert channel_chat_model("chat-model") == "qq-model"
+    from ai.agents.chat_agent import ChatAgent
+    from ai.agents.memory_agent import MemoryAgent
+    assert ChatAgent.uses_channel_model and not MemoryAgent.uses_channel_model
+    from ai.social.llm import model_name
+    monkeypatch.delenv("VIOLET_SOCIAL_MODEL", raising=False)
+    assert model_name() == "qq-model"
+
+
+def test_the_flow_page_shows_the_background_memory_step():
+    from ai import pipeline_state as ps
+    ps.clear()
+    ps.pipeline_start("chat", "我喜欢喝杨枝甘露", turn_id="t-1")
+    ps.node_queue("Memory", "回复发出后在后台整理")
+    ps.pipeline_end()
+    run = ps.get_run(ps.recent()[0]["id"])
+    assert run["nodes"]["Memory"]["status"] == "queued"                           # not "skipped" any more
+    ps.turn_node("t-1", "Memory", "running", input_data={"memory_input": "用户说：我喜欢喝杨枝甘露"})
+    ps.turn_node("t-1", "Memory", "done", output_data={"writes": [{"tool": "remember_profile_fact"}]}, note="记下 1 条")
+    node = ps.get_run(run["id"])["nodes"]["Memory"]
+    assert node["status"] == "done" and node["note"] == "记下 1 条" and node["input"]["memory_input"].endswith("杨枝甘露")
+    ps.clear()

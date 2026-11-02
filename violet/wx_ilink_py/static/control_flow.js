@@ -11,7 +11,7 @@
     Proactive: ["主动决策", "要不要主动找你、说什么"], Social: ["群聊决定", "说不说、说什么、发不发表情包"],
     Act: ["发出去", "发消息、语音、表情包，记下印象"],
   };
-  const STATUS = { pending: ["等待", ""], running: ["进行中", "warn"], done: ["完成", "ok"], failed: ["失败", "bad"], skipped: ["跳过", ""] };
+  const STATUS = { pending: ["等待", ""], queued: ["后台排队", "warn"], running: ["进行中", "warn"], done: ["完成", "ok"], failed: ["失败", "bad"], skipped: ["跳过", ""] };
   const ROLE = { system: "规则 / 资料", user: "对方 / 提示", assistant: "她", tool: "工具结果" };
   const state = { runs: [], selected: null, node: null, timer: null, detail: null, listSig: "", runSig: "" };
 

@@ -141,6 +141,43 @@ def pipeline_end(error: str | None = None) -> None:
     _local.run = None
 
 
+def node_queue(node: str, reason: str | None = None) -> None:
+    """2026-11-02 (user: 没有触发整理记忆这一环节): a step that runs later in the background (the memory job after
+    the reply is sent) -- shown as queued, filled in by turn_node() when it runs; pipeline_end leaves it alone."""
+    run = _current()
+    if run is None:
+        return
+    with _lock:
+        n = _node(run, node)
+        n.update(status="queued", note=reason)
+
+
+def turn_node(turn_id: str | None, node: str, status: str, input_data: Any = None, output_data: Any = None,
+              note: str | None = None) -> None:
+    """Update a step of the run of `turn_id` from another thread (the memory worker), also after the run ended."""
+    if not turn_id:
+        return
+    data_in, data_out = clip(input_data), clip(output_data)
+    with _lock:
+        run = next((r for r in reversed(_runs) if r.get("turn_id") == turn_id), None)
+        if run is None:
+            return
+        n = _node(run, node)
+        now = time.time()
+        if status == "running":
+            n.update(status="running", started_at=now, finished_at=None)
+        else:
+            n.update(status=status, finished_at=now)
+            if n["started_at"] is None:
+                n["started_at"] = now
+        if data_in is not None:
+            n["input"] = data_in
+        if data_out is not None:
+            n["output"] = data_out
+        if note is not None:
+            n["note"] = note
+
+
 # ------------------------------------------------------------------ reading
 def _summary(run: dict[str, Any]) -> dict[str, Any]:
     return {k: run[k] for k in ("id", "pipeline_type", "trigger", "channel", "turn_id", "title", "running",

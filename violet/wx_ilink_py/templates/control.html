@@ -26,7 +26,6 @@
     <div class="nav-label">数据</div>
     <button data-tab="chat">聊天记录</button>
     <button data-tab="memories">记忆</button>
-    <button data-tab="import">从 Eve 导入</button>
     <div class="nav-label">维护</div>
     <button data-tab="diagnostics">诊断</button>
     <button data-tab="logs">日志</button>
@@ -76,7 +75,7 @@
       <div class="row"><button id="model-save" type="button">保存模型并测试对话</button><span id="model-save-test"></span></div>
       <p class="note">测试对话用 Chat 的模型真实调用一次（很短的请求），只记录成功与否、耗时和错误类型。</p>
     </div>
-    <details class="card" id="model-advanced"><summary>超时与重试</summary>
+    <details class="card" id="model-advanced" open><summary>提示词缓存、超时与重试</summary>
       <div id="model-adv-rows"></div>
       <div class="row"><button id="model-adv-save" type="button" disabled>保存</button></div>
     </details>
@@ -136,29 +135,31 @@
         <button id="exp-go">导出</button></div>
       <p class="note">导出文件里有完整的聊天内容，请妥善保存。聊天记录在后台只能查看，不能修改或删除。</p>
     </details>
+    <!-- 2026-11-02 (user: 导入不要单开一个栏目，不是所有导入都来自 Eve): importing lives with the chat history -->
+    <details class="export" id="chat-import"><summary>导入聊天记录和记忆</summary>
+      <div class="filters"><label>从哪里导入 <select id="import-source"><option value="eve">Project Eve</option></select></label></div>
+      <p class="note">目前支持 Project Eve 的数据：聊天记录、记忆和发送频率设置。先预览（只显示条数和设置值，不显示聊天内容），确认后才导入。</p>
+      <div class="card">
+        <h3>1. 在 Eve 的服务器上打包</h3>
+        <p class="note">用 root 登录 Eve 所在的服务器，粘贴下面这一行。它会找到 Eve 的数据库并复制一份（Eve 开着也行），带上 proactive_config.json 和 .env 里的普通设置（不带任何 Key、密码、提示词和地址），打成 /root/eve-export.tar.gz。</p>
+        <pre class="prompt-part" id="eve-pack"></pre>
+        <div class="row"><button class="ghost" id="eve-pack-copy" type="button">复制命令</button></div>
+        <h3>2. 下载到电脑，在这里上传</h3>
+        <div class="filters">
+          <label class="grow">文件 <input type="file" id="eve-file" accept=".gz,.tgz,.tar,.zip,.db,.json"></label>
+          <button id="eve-upload" type="button">上传并预览</button>
+        </div>
+        <p class="note" id="eve-status"></p>
+      </div>
+      <div id="eve-preview" class="stack-wide"></div>
+    </details>
   </section>
 
-  <section id="tab-import" class="tab">
-    <h2>从 Eve 导入</h2>
-    <p class="note">把以前 Project Eve 的聊天记录、记忆和发送频率设置搬过来。先预览（只显示条数和设置值，不显示聊天内容），确认后才导入。</p>
-    <div class="card">
-      <h3>1. 在 Eve 的服务器上打包</h3>
-      <p class="note">用 root 登录 Eve 所在的服务器，粘贴下面这一行。它会找到 Eve 的数据库并复制一份（Eve 开着也行），带上 proactive_config.json 和 .env 里的普通设置（不带任何 Key、密码、提示词和地址），打成 /root/eve-export.tar.gz。</p>
-      <pre class="prompt-part" id="eve-pack"></pre>
-      <div class="row"><button class="ghost" id="eve-pack-copy" type="button">复制命令</button></div>
-      <h3>2. 下载到电脑，在这里上传</h3>
-      <div class="filters">
-        <label class="grow">文件 <input type="file" id="eve-file" accept=".gz,.tgz,.tar,.zip,.db,.json"></label>
-        <button id="eve-upload" type="button">上传并预览</button>
-      </div>
-      <p class="note" id="eve-status"></p>
-    </div>
-    <div id="eve-preview" class="stack-wide"></div>
-  </section>
+
 
   <section id="tab-memories" class="tab">
     <div class="filters">
-      <label>类型 <select id="mem-kind"><option value="event">事件记忆</option><option value="core">核心记忆</option></select></label>
+      <label>类型 <select id="mem-kind"><option value="event">事件记忆</option><option value="core">核心记忆</option><option value="profile">关于你的档案（喜好、称呼、学校……）</option><option value="situation">你此刻的状态</option><option value="pref">你希望她怎么聊</option></select></label>
       <label>状态 <select id="mem-status"><option value="">全部</option></select></label>
       <label class="grow">搜索 <input id="mem-q" type="search" maxlength="100" placeholder="记忆内容"></label>
       <button id="mem-search">查询</button>
