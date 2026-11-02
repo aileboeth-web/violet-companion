@@ -939,15 +939,16 @@ class MemoryAgent(BaseAgent):
         self._call_context.pop("_nothing_to_search", None)     # decided afresh for every run, then kept for its tools
         recent_messages = format_recent_messages(10)
         profile_sections = ContextEngine(violetdb).memory_agent_sections()
+        # 2026-11-02 (server usage: a memory call ~12k tokens, only the first ~2.9k ever served from the cache): the
+        # clock (to the second) was the 4th message, so everything after it differed in every call. Same content, new
+        # order: fixed instructions, then what changes only when something is remembered, then the recent chat, and
+        # last what belongs to this call (the time, to the minute; a retry's note; this turn).
+        turn = f"当前时间：{violetdb.now()[:16].replace('T', ' ')}\n\n{user_message}"
         return [
             {"role": "system", "content": self._config.reply_prompt},
             {"role": "system", "content": MEMORY_RULES},
             {"role": "system", "content": PROFILE_RULES},
-            {"role": "system", "content": f"当前时间：{violetdb.now()}"},
-            {"role": "system", "content": f'已有的核心记忆，切勿重复存储：{format_core_memories()}'},
-            *({"role": "system", "content": section} for section in profile_sections),
-            {"role": "system", "content": self._format_open_events()},
-            {"role": "system", "content": self._format_pending_commitments()},
+            *([{"role": "system", "content": FINISH_RULE}] if self._finish_signal_offered() else []),
             {
                 "role": "system",
                 "content": ("记忆库里还没有任何事件记忆，不会有重复，不需要查询：直接按这一轮的内容决定要保存什么。"
@@ -955,10 +956,13 @@ class MemoryAgent(BaseAgent):
                             "如需判断是否与已有记忆重复或应合并，请先用 query_memory 主动查询关键词、同义词、上位词和相关概念。"
                             "例如：小狗/狗/犬类/宠物。"),
             },
-            *([{"role": "system", "content": FINISH_RULE}] if self._finish_signal_offered() else []),
-            *([{"role": "system", "content": self._previous_writes_note()}] if self._call_context.get("previous_writes")
-              else []),
+            {"role": "system", "content": f'已有的核心记忆，切勿重复存储：{format_core_memories()}'},
+            *({"role": "system", "content": section} for section in profile_sections),
+            {"role": "system", "content": self._format_open_events()},
+            {"role": "system", "content": self._format_pending_commitments()},
             # Phase 3: history is reference data for this analysis, not a system instruction.
             {"role": "user", "content": f"【参考资料：最近的聊天记录，只用于理解本轮，不要重复处理旧内容】\n{recent_messages}"},
-            {"role": "user", "content": user_message},
+            *([{"role": "system", "content": self._previous_writes_note()}] if self._call_context.get("previous_writes")
+              else []),
+            {"role": "user", "content": turn},
         ]
