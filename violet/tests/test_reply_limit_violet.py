@@ -41,8 +41,9 @@ def test_a_whole_prompt_persona_gets_no_length_rules(monkeypatch):
         if hasattr(chat_agent, "PROJECT_ROOT") else None
     if v3:
         assert "一到三条" in v3                              # the other personas keep their rules
-    monkeypatch.setenv("CHAT_LLM_PROMPT", "管理员自己写的提示词")
-    assert chat_agent.own_persona_prompt() is None             # the admin's own prompt wins, as for the AI persona
+    # 0.7.44: the prompt version chosen on the settings page lives in CHAT_LLM_PROMPT -- it must not come back in front
+    monkeypatch.setenv("CHAT_LLM_PROMPT", "你是 Violet，一个虚构的女孩……一句话甚至几个字就够了")
+    assert chat_agent.own_persona_prompt() == frame
     monkeypatch.delenv("CHAT_LLM_PROMPT")
     monkeypatch.setenv("VIOLET_OWN_PERSONA_FRAME", "0")
     assert chat_agent.own_persona_prompt() is None

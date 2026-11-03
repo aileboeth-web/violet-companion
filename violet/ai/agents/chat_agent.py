@@ -40,11 +40,14 @@ OWN_PROMPT_FILE = "persona/chat_prompt_versions/chat.own.v1.txt"
 
 
 def own_persona_prompt() -> str | None:
-    """The frame for a whole-prompt persona of this channel, or None (another persona, or a CHAT_LLM_PROMPT set by the
-    admin, which is kept for every persona). VIOLET_OWN_PERSONA_FRAME=0: the ordinary chat rules again."""
-    import os
+    """The frame for a whole-prompt persona of this channel, or None (another persona). VIOLET_OWN_PERSONA_FRAME=0: the
+    ordinary chat rules again.
+
+    0.7.44 (user screenshot: "怎么输入了两种人设"): CHAT_LLM_PROMPT no longer wins here. The prompt version chosen on the
+    settings page IS written to CHAT_LLM_PROMPT, so 0.7.42's "keep an admin prompt" kept chat.v1 ("你是 Violet…一句话甚至
+    几个字就够了") in front of the Eve persona. A whole-prompt persona chosen for this channel is the more specific choice."""
     from ai.settings import PROJECT_ROOT, env_bool
-    if not env_bool("VIOLET_OWN_PERSONA_FRAME", True) or os.getenv(ChatAgent.system_prompt_env_key, "").strip():
+    if not env_bool("VIOLET_OWN_PERSONA_FRAME", True):
         return None
     try:
         from ai.persona import PersonaCore
