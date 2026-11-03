@@ -281,7 +281,7 @@ def _cut_short(payload: Any) -> bool:
         return False
 
 
-_VISION_PREFACE = re.compile(r"(?:以下|下面)是[^：:\n。]{0,20}[：:]\s*")
+_VISION_PREFACE = re.compile(r"(?:(?:以下|下面)是[^：:\n。]{0,20}|具体(?:内容|描述)?如下)[：:]\s*")
 _MD_MARK = re.compile(r"^\s*(?:[*\-•+]|#{1,6}|\d+[.、)])\s+", re.M)
 
 

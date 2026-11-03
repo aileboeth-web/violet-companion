@@ -112,10 +112,19 @@ def describe_image(file_path: str | os.PathLike[str], prompt: str | None = None)
     from ai import trace
     from ai.model_params import apply as apply_model_params
     client = _client(api_url, api_key)
-    full = apply_model_params({"model": model, "messages": messages, "reasoning_effort": "low", "max_tokens": 500})
+    # 0.7.47 (user: telegram 表情包的描述只剩半句): 500 tokens cut answers ("左侧角色：露出了"), most of all on
+    # thinking models whose reasoning shares the budget. 1500, and once more with 4000 when it still stops for length.
+    full = apply_model_params({"model": model, "messages": messages, "reasoning_effort": "low", "max_tokens": 1500})
     try:
         try:
             response = client.chat.completions.create(**full)
+            if _stopped_for_length(response):
+                trace.step("识图", 模型=model, 结果="重试", 原因="回答被截断，给更多字数再看一次")
+                try:
+                    response = client.chat.completions.create(
+                        **apply_model_params({**full, "max_tokens": 4000}))
+                except Exception:                            # noqa: BLE001 -- keep the cut answer
+                    pass
         except BadRequestError as exc:
             # a service that does not take max_tokens / reasoning_effort: once more with the bare request
             trace.step("识图", 模型=model, 结果="重试", 原因=_reason(exc))
@@ -136,3 +145,10 @@ def describe_image(file_path: str | os.PathLike[str], prompt: str | None = None)
         raise VisionError(f"识图模型 {model} 没有返回描述（这个模型可能不支持看图）")
     trace.step("识图", 模型=model, 结果="ok", 描述=trace.text(description))
     return description
+
+
+def _stopped_for_length(response) -> bool:
+    try:
+        return str(response.choices[0].finish_reason or "").lower() in ("length", "max_tokens")
+    except (AttributeError, IndexError, TypeError):
+        return False

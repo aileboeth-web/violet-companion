@@ -320,8 +320,17 @@ def _legacy_vision(db, inbound_id: int, asset: dict[str, Any], store, legacy_vis
     return description or None
 
 
-def intake_inbound_image(db, inbound_id: int, path, legacy_vision=None) -> str:
-    """Store, validate, analyse. Never raises: the chat loop must keep going."""
+def intake_inbound_image(db, inbound_id: int, path, legacy_vision=None, question: str = "") -> str:
+    """Store, validate, analyse. Never raises: the chat loop must keep going. question: another prompt for the
+    vision model (a sticker asks what it means, not what it looks like)."""
+    if question and legacy_vision is not None:
+        plain_vision = legacy_vision
+
+        def legacy_vision(p):                              # noqa: F811 -- same call, the sticker question
+            try:
+                return plain_vision(p, prompt=question)
+            except TypeError:                              # a vision callable without a prompt
+                return plain_vision(p)
     from ai.images.media import MediaAssetStore, MediaError
     from ai.web.content import neutralize
     from ai.settings import env_bool
@@ -337,7 +346,8 @@ def intake_inbound_image(db, inbound_id: int, path, legacy_vision=None) -> str:
     description = None
     result = None
     try:
-        result = _service(db).analyze([asset["id"]], origin="chat", idempotency_key=f"vision:inbound:{inbound_id}")
+        result = _service(db).analyze([asset["id"]], question, origin="chat",
+                                      idempotency_key=f"vision:inbound:{inbound_id}")
         if result.ok:
             description = result.text
     except Exception:

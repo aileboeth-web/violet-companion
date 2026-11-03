@@ -17,13 +17,18 @@ from tests.web_fixtures import ARTICLE, LocalWeb
 
 TOKEN = os.environ["VIOLET_ADMIN_TOKEN"]
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
+def _ago(days: int) -> str:
+    """A date days before today -- fixed dates aged out of the 30-day freshness window (2026-11-03)."""
+    return (datetime.now() - timedelta(days=days)).date().isoformat()
+
+
 DATA = [
     {"title": "秋季新书书评：一部关于小镇夏天的小说", "url": "http://books.example.org/review/summer-town",
-     "snippet": "书评人认为这部小说节奏缓慢。", "published_at": "2026-10-05", "keywords": ["小说", "书评", "新书", "文学"]},
+     "snippet": "书评人认为这部小说节奏缓慢。", "published_at": _ago(5), "keywords": ["小说", "书评", "新书", "文学"]},
     {"title": "独立乐队发布新专辑《雾里的灯》", "url": "http://music.example.org/news/fog-lamp",
-     "snippet": "乐评称其安静克制。", "published_at": "2026-10-08", "keywords": ["音乐", "专辑", "乐评", "钢琴", "爵士"]},
+     "snippet": "乐评称其安静克制。", "published_at": _ago(2), "keywords": ["音乐", "专辑", "乐评", "钢琴", "爵士"]},
     {"title": "城市图书馆举办旧书交换活动", "url": "http://culture.example.org/events/book-swap",
-     "snippet": "面向所有读者。", "published_at": "2026-10-02", "keywords": ["图书馆", "活动", "书店", "文化", "读书"]},
+     "snippet": "面向所有读者。", "published_at": _ago(8), "keywords": ["图书馆", "活动", "书店", "文化", "读书"]},
 ]
 
 

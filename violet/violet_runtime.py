@@ -1091,7 +1091,8 @@ class VioletRuntime:
             path = adapter.download(item)
             paths.append(path)
             return path
-        text = self._describe_image_item(inbound_id, part, download=download)
+        from ai.stickers import STICKER_CHAT_PROMPT
+        text = self._describe_image_item(inbound_id, part, download=download, question=STICKER_CHAT_PROMPT)
         line = self._collect_owner_sticker(inbound_id, part, paths[0], text) if paths else text
         emoji = str((part.data or {}).get("emoji") or "").strip()
         if emoji and line.startswith("[对方发来一个表情包"):     # 0.7.46: Telegram says what it means, too
@@ -1139,7 +1140,8 @@ class VioletRuntime:
         self.db.update_inbound_messages([inbound_id], content=line)
         return line
 
-    def _describe_image_item(self, inbound_id: int, item: Any, download: Callable | None = None) -> str:
+    def _describe_image_item(self, inbound_id: int, item: Any, download: Callable | None = None,
+                             question: str = "") -> str:
         try:
             if download is None and not isinstance(item, dict):
                 raise RuntimeError("channel is not available")
@@ -1153,11 +1155,14 @@ class VioletRuntime:
         from ai.images.service import images_enabled
         if images_enabled():
             # phase 6: validated, stored media asset + routed vision; the legacy vision is only a fallback
-            text = intake_inbound_image(self.db, inbound_id, path, legacy_vision=self.vision)
+            text = intake_inbound_image(self.db, inbound_id, path, legacy_vision=self.vision, question=question)
             self.db.update_inbound_messages([inbound_id], content=text)
             return text
         try:
-            description = self.vision(path)
+            try:
+                description = self.vision(path, prompt=question) if question else self.vision(path)
+            except TypeError:                                # a vision callable without a prompt
+                description = self.vision(path)
         except Exception as exc:
             self._bump("vision_failures")
             logger.warning("vision failed for inbound #%s: %s", inbound_id, exc)
