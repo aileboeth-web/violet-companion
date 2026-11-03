@@ -151,6 +151,13 @@ VIOLET_TOPIC_MAX_UNENGAGED_RAISES=3
 # 主动消息生成后若明显谈到受限话题（未结束/已结束事件、冷却话题）则不发送。
 VIOLET_PROACTIVE_TOPIC_GUARD=1
 VIOLET_TOPIC_GUARD_MIN_RATIO=0.25
+# 2026-11-03 节日祝福（ai/holidays.py）：按渠道的关系挑节日，当天免打扰结束后发一次，不占每天的主动次数。
+VIOLET_HOLIDAY_GREETING=0
+# 2026-11-03 手机近况（ai/phone_state.py）：主动联系前读手机 MCP（亮屏、在用的 App、电量、今天各 App 用时……），
+# 两分钟内只读一次；_CHAT=1 时平常回复也带上；_TIMEOUT 是整次读取最多等几秒。
+VIOLET_PHONE_CONTEXT=1
+VIOLET_PHONE_CONTEXT_CHAT=0
+VIOLET_PHONE_CONTEXT_TIMEOUT=12
 
 # ── 用户理解与情境（第三阶段）──────────────────────────────────────────────────
 # IANA 时区；在 Windows 上需要 tzdata 包，无法加载时退回固定 UTC+08:00。

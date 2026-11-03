@@ -8,8 +8,14 @@
   "version": 1,
   "servers": {
     "android-phone": {
-      "_source": "docs/TOOLS.md of the MCP repository (Violet MCP 1.3.0, formerly 1.2.x-eve): server-side read-only whitelist of 14 tools",
+      "_source": "docs/TOOLS.md of the MCP repository (Violet MCP 1.3.0, formerly 1.2.x-eve): server-side read-only whitelist of 14 tools; 1.4.1 adds 6 read-only life-state tools",
       "tools": {
+        "next_alarm": "read",
+        "now_playing": "read",
+        "audio_output": "read",
+        "network_state": "read",
+        "step_count": "read",
+        "calendar_events": "read",
         "get_foreground_app": "read",
         "get_screen_state": "read",
         "battery": "read",

@@ -174,6 +174,8 @@ PHONE_TOOLS = [
     "get_foreground_app", "get_screen_state", "battery", "screen_info", "health",
     "get_app_usage_stats", "installed_apps", "app_info", "device_info", "system_properties",
     "permission_state", "storage_info", "locale_info", "time_now",
+    # Violet MCP 1.4.1 (2026-11-03): life state
+    "next_alarm", "now_playing", "audio_output", "network_state", "step_count", "calendar_events",
 ]
 
 

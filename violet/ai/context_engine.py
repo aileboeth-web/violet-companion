@@ -464,7 +464,27 @@ class ContextEngine:
 
     def _base_section(self) -> _Section:
         from ai.chat import format_base_info
-        return _Section("base", 0, "", [format_base_info().strip()])
+        lines = [format_base_info().strip()]
+        holiday = self._holiday_line()
+        if holiday:
+            lines.append(holiday)
+        return _Section("base", 0, "", lines)
+
+    def _holiday_line(self) -> str:
+        """2026-11-03 (ai/holidays.py): today's holiday for this channel's relationship, when 节日祝福 is on."""
+        from ai import holidays
+        if not holidays.enabled():
+            return ""
+        try:
+            from ai.channels.context import current
+            from ai.proactive_scheduler import now_china
+            today = now_china().date()
+            found, rel = holidays.today_for_channel(self.db, today, current().channel)
+            greeted = (self.db.get_proactive_setting("holiday_greeted:" + today.isoformat()) or "") == "sent"
+            return holidays.context_line(found, rel, greeted)
+        except Exception:                                   # noqa: BLE001 -- never break a reply over this
+            logger.exception("holiday line unavailable")
+            return ""
 
     # ------------------------------------------------------------------
     # Phase 4: persona core / dynamics / Violet's life state

@@ -309,6 +309,17 @@ SETTINGS: list[Setting] = [
             "她用底层模型自己的方式说话（只保留诚实和格式）；关：和其他人设一样", True),
     Setting("VIOLET_PROACTIVE_TOPIC_GUARD", "主动消息避开不该提的话题", "proactive", "bool", "now",
             "主动消息谈到已结束的事、冷却中的话题时不发送", True),
+    # 2026-11-03 (ai/phone_state.py)
+    Setting("VIOLET_PHONE_CONTEXT", "主动联系前看一眼手机", "proactive", "bool", "now",
+            "接了手机 MCP（Violet MCP）时，判断要不要找你、怎么开口前，先读屏幕亮没亮、在用什么 App、电量、今天各 App "
+            "用了多久（两分钟内只读一次）。读不到就照常；不读勿扰模式", True),
+    Setting("VIOLET_PHONE_CONTEXT_CHAT", "平常回复也看手机", "behavior", "bool", "now",
+            "平常回你消息时也带上手机此刻的状态（比如你说好累，她知道你已经亮屏刷了很久）。有人会觉得被盯着，默认关", False),
+    # 2026-11-03 (ai/holidays.py)
+    Setting("VIOLET_HOLIDAY_GREETING", "节日祝福", "proactive", "bool", "now",
+            "按这个渠道的关系挑节日：都有的（元旦、除夕、春节、元宵、中秋、国庆、你的生日），恋人再加情人节、520、七夕、"
+            "平安夜、圣诞、纪念日，女儿加父亲节或母亲节、儿童节，开发者加程序员节；端午、重阳、万圣节、感恩节只在记忆里"
+            "提到你在意时才算。当天免打扰结束后发一次，不占每天的主动次数；你当天先找她，就在聊天里顺口说，不另外发", False),
     Setting("VIOLET_PERSONA_REPLY_GUARD", "回复一致性检查", "guard", "choice", "now",
             "检查回复有没有和人设、生活记录矛盾", "enforce",
             choices=(("enforce", "发现矛盾就改写"), ("flag", "只记录"), ("off", "关闭"))),
@@ -364,6 +375,7 @@ COMMON_KEYS = frozenset({
     "VIOLET_WEB_ENABLED", "VIOLET_SCHEDULE_ENABLED", "VIOLET_SOCIAL_PRIVATE", "VIOLET_SOCIAL_OBEY_OWNER",
     "VIOLET_STICKERS", "VIOLET_QZONE_ENABLED", "VIOLET_TIMEZONE", "VIOLET_UPDATE_MODE", "VIOLET_TRACE",
     "VIOLET_SOCIAL_INITIATIVE", "VIOLET_AI_NATURAL",                  # 2026-10-30
+    "VIOLET_HOLIDAY_GREETING", "VIOLET_PHONE_CONTEXT",                # 2026-11-03
 })
 GROUPS = {"api": "接口", "models": "模型与 Agent", "prompts": "提示词版本", "messages": "消息发送", "proactive": "主动联系",
           "life": "生活引擎", "behavior": "聊天行为", "memory": "记忆与提醒", "guard": "回复检查", "web": "联网搜索",

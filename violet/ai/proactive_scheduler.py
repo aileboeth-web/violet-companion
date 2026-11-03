@@ -292,6 +292,8 @@ class ProactiveScheduler:
         # 明确约定的提醒：独立于普通闲聊的频率限制
         if self._deliver_due_commitments(current):
             return
+        if self._holiday_greeting(current):                # 2026-11-03: once per holiday, outside the daily cap
+            return
 
         with self._lock:
             # 固定时间任务检查（独立于随机调度，但仍有安全/重复检查）
@@ -318,6 +320,7 @@ class ProactiveScheduler:
             event_context = self._build_event_context(current)
             self._set_next_proactive_at(self._random_next_time(current))
 
+        self._add_phone(event_context)
         logger.info("[ProactiveScheduler] triggering proactive pipeline: %s", reason)
         pipeline = run_proactive_pipeline(
             event_context=event_context,
@@ -474,7 +477,7 @@ class ProactiveScheduler:
     def _today_sent_count(self, current: datetime) -> int:
         # Explicit reminders do not use up the chat budget.
         return violetdb.count_proactive_events_since(self._day_start(current), status="sent",
-                                                  exclude_event_types=("commitment_reminder",))
+                                                  exclude_event_types=("commitment_reminder", "holiday_greeting"))
 
     def _task_week_count(self, task_name: str, current: datetime) -> int:
         return violetdb.count_proactive_events_since(
@@ -1093,6 +1096,94 @@ class ProactiveScheduler:
         if end <= current:
             end += timedelta(days=1)
         return end
+
+    @staticmethod
+    def _add_phone(event_context: dict[str, Any]) -> None:
+        """2026-11-03 (ai/phone_state.py): what the owner's phone says now, for the decision and the message.
+        Read outside the scheduler lock (the phone may take seconds); never stops the run."""
+        try:
+            from ai import phone_state
+            text = phone_state.line("proactive")
+        except Exception:                                   # noqa: BLE001
+            logger.exception("[ProactiveScheduler] phone state unavailable")
+            text = ""
+        if text:
+            event_context["phone_now"] = text
+
+    HOLIDAY_ATTEMPTS = 2
+
+    def _holiday_greeting(self, current: datetime) -> bool:
+        """2026-11-03 (ai/holidays.py, VIOLET_HOLIDAY_GREETING): on a holiday of this persona's relationship, one
+        greeting at the first chance after quiet hours. Not when the owner already talked today (the chat context
+        names the holiday instead), asked her not to write, is busy or in class. True = something was sent."""
+        from ai import holidays, test_mode
+        if not holidays.enabled() or test_mode.active() or self._in_quiet_hours(current):
+            return False
+        try:
+            from ai.channels.context import current as current_channel
+            channel = current_channel().channel
+        except Exception:                                   # noqa: BLE001
+            channel = "wechat"
+        found, rel = holidays.today_for_channel(violetdb, current.date(), channel)
+        if not found:
+            return False
+        key = "holiday_greeted:" + current.date().isoformat()
+        state = violetdb.get_proactive_setting(key) or ""
+        if state in ("sent", "chat") or state.startswith("gave_up"):
+            return False
+        last_user = parse_iso(violetdb.get_latest_message_at(role="user"))
+        if last_user is not None and last_user.date() == current.date():
+            violetdb.set_proactive_setting(key, "chat")      # they talked first: mentioned in the chat instead
+            return False
+        pref = (self.profile.preferences.effective().get("proactive_chat") or {})
+        if pref.get("origin") == "explicit" and pref.get("value") == "no":
+            return False
+        if self._busy_situation() is not None:
+            return False
+        gate = self._schedule_gate(current)
+        if gate is not None and gate.blocked:
+            return False
+        names = "、".join(h.name for h in found)
+        hints = "；".join(f"{h.name}：{h.hint}" for h in found if h.hint)
+        note = (f"【节日】今天是{names}。你们的关系：{rel.get('label') or '亲近'}。" + (hints + "。" if hints else "")
+                + "现在主动给主人发节日祝福：用你平常的语气，真心、具体、短一点（一两条消息），像你自己想到的，"
+                  "不要群发祝福语那种套话，也不要提“系统”“提醒”。")
+        decision = {"action_type": "holiday_greeting", "reason": f"今天是{names}",
+                    "chat_brief": {"topic": f"{names}的祝福", "must_say": []}}
+        from ai.channels.outbound import chat_payload
+        try:
+            result = self.chat_agent.run("[holiday]", call_context={"is_proactive": True, "proactive_result": decision,
+                                                                     "commitment": None, "proactive_note": note})
+            payload = chat_payload(str(result.get("content") or ""), images=False)
+        except Exception:                                   # noqa: BLE001
+            logger.exception("[holiday] greeting could not be written")
+            payload = {}
+        attempts = int(state.split(":", 1)[1]) if state.startswith("tried:") else 0
+        if not payload.get("should_send") or not payload.get("messages"):
+            attempts += 1
+            violetdb.set_proactive_setting(key, "gave_up" if attempts >= self.HOLIDAY_ATTEMPTS else f"tried:{attempts}")
+            return False
+        event_id = violetdb.add_proactive_event(event_type="holiday_greeting", status="planned", action_type="chat",
+                                                reason=f"今天是{names}", decision=decision,
+                                                metadata={"holidays": [h.key for h in found], "channel": channel})
+        try:
+            report = self.send_messages(payload["messages"], event_id)
+        except Exception as exc:                            # noqa: BLE001
+            logger.exception("[holiday] send crashed")
+            report = {"sent_messages": [], "error": f"{exc.__class__.__name__}: {exc}"}
+        if report is None:
+            report = {"sent_messages": payload["messages"]}
+        sent = [{k: v for k, v in m.items() if not str(k).startswith("_")} if isinstance(m, dict) else m
+                for m in report.get("sent_messages") or []]          # without the outbound seal (not JSON)
+        if sent:
+            violetdb.update_proactive_event(event_id, status="sent", sent_messages=sent)
+            violetdb.set_proactive_setting(key, "sent")
+            logger.info("[holiday] greeting sent for %s", names)
+            return True
+        attempts += 1
+        violetdb.update_proactive_event(event_id, status="failed", reason=str(report.get("error") or "not sent")[:500])
+        violetdb.set_proactive_setting(key, "gave_up" if attempts >= self.HOLIDAY_ATTEMPTS else f"tried:{attempts}")
+        return False
 
     def _deliver_due_commitments(self, current: datetime) -> int:
         """Send reminders the user explicitly asked for. Not limited by chat caps."""

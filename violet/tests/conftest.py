@@ -39,6 +39,8 @@ os.environ.update({
     "VIOLET_ADMIN_TOKEN": "test-admin-token-0123456789",
     # the scheduler would advance Violet's life on wall-clock time; phase-4 tests enable it explicitly
     "VIOLET_LIFE_ENGINE": "0",
+    # 2026-11-03: the phone line reads MCP servers; its own tests enable it
+    "VIOLET_PHONE_CONTEXT": "0",
     # phase 8.9: Violet's ordinary day depends on the date; tests that need it enable it with a fixed clock
     "VIOLET_DAILY_LIFE": "0",
     # web access is off unless a test turns it on; no real search backend is ever configured

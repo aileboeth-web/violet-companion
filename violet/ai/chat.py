@@ -570,6 +570,15 @@ def _record_tool_plan(result: dict[str, Any]) -> None:
         logger.exception("could not record the tool plan of this turn")
 
 
+def _phone_line_for_chat() -> str:
+    try:
+        from ai import phone_state
+        return phone_state.line("chat")
+    except Exception:                                       # noqa: BLE001 -- the phone is optional
+        logger.exception("phone state unavailable for this reply")
+        return ""
+
+
 def _run_pipeline(
     user_message: str,
     intent_agent,
@@ -790,6 +799,8 @@ def _run_pipeline(
         "tool_results": tool_results_from((performer_result or {}).get("messages") or []),
         # 2026-10-30: one list, written by the code, of what she can do now and how (and what not, and why)
         "abilities_note": abilities_note(catalog, direct),
+        # 2026-11-03: what the owner's phone says now -- only with VIOLET_PHONE_CONTEXT_CHAT (default off)
+        "phone_note": _phone_line_for_chat(),
     }
     try:
         chat_result = chat_agent.run(user_message, call_context=chat_context)
@@ -1118,6 +1129,7 @@ def _run_proactive_pipeline(
             "performer_result": performer_result,
             "restricted_topics": restricted,
             "proactive_note": event_context.get("proactive_habit_note"),     # phase 8.9.5
+            "phone_note": event_context.get("phone_now"),                    # 2026-11-03 (ai/phone_state.py)
         },
     )
     _ps.node_done("Chat", output_data={"messages": chat_result.get("messages", []), "content": chat_result.get("content")})

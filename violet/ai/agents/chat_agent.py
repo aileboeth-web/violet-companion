@@ -314,6 +314,9 @@ class ChatAgent(BaseAgent):
         proactive_note = self._call_context.get("proactive_note")       # phase 8.9.5: her own recent outreach
         if proactive_note:
             messages.append({"role": "system", "content": proactive_note})
+        phone_note = self._call_context.get("phone_note")               # 2026-11-03: ai/phone_state.py
+        if phone_note:
+            messages.append({"role": "system", "content": phone_note})
 
         performer_result = self._call_context.get("performer_result")
         if performer_result:
