@@ -291,7 +291,9 @@ def test_compact_memory_tools_keep_names_params_and_enums(monkeypatch):
             assert q["properties"][key].get("enum") == spec.get("enum") and q["properties"][key]["type"] == spec["type"]
     import json as _json
     assert len(_json.dumps([memory_tools_compact.compact(t) for t in full.values()], ensure_ascii=False)) < \
-        0.9 * len(_json.dumps(list(full.values()), ensure_ascii=False))
+        0.95 * len(_json.dumps(list(full.values()), ensure_ascii=False))     # 0.7.37: save_memory full again
+    # 0.7.37: the real-model comparison lost an event with the short save_memory -> it stays word for word
+    assert memory_tools_compact.compact(full["save_memory"]) == full["save_memory"]
 
 
 def test_decision_without_tasks_drops_the_task_rules_and_keeps_the_rest(monkeypatch):

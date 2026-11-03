@@ -925,7 +925,7 @@ async function renderChannelSettings(d, key, groups) {
     ? "下面这些只对“QQ”（用 QQ 号登录的那个）有效；每个群开不开、她认识的人，在“聊天渠道 → QQ”下面。官方 QQ 机器人只能私聊，用通用设置。" : "" }) : null;
   panel.replaceChildren(...[
     h("p", { class: "note", text: `${p.name}上的账号和它们自己的东西。打字间隔、主动联系、记忆这些对所有渠道都一样，在“通用”里。` }),
-    ...(cards.length ? [h("div", { class: "cards" }, ...cards)] : [h("div", { class: "card" }, h("p", { class: "note", text: `还没有用${p.name}。` }),
+    ...(cards.length ? [h("div", { class: "cards set-ch-cards" }, ...cards)] : [h("div", { class: "card" }, h("p", { class: "note", text: `还没有用${p.name}。` }),
       h("button", { type: "button", class: "ghost", text: `去“聊天渠道”开启${p.name}`, onclick: () => goTo("channels") }))]),
     qqNote, ...own].filter(Boolean));                // replaceChildren would print "null"
 }

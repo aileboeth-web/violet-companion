@@ -25,15 +25,8 @@ COMPACT: dict[str, tuple[str | None, dict[str, Any]]] = {
     # of absence saved as a memory instead of a situation -> the boundary sits in BOTH tools and the rules), B6
     # (new_event=true passed early), 9.1 (the shared evidence text), 9.1.1 (correct_profile_fact: unsure -> write
     # nothing), 9.2.1 (intent: a conditional idea is not a plan).
-    "save_memory": (
-        "保存一条以后还值得记得的记忆。用户此刻 / 今天的状态（在哪、在做什么、方不方便、请假或不去某节课、心情）"
-        "不是记忆，用 set_situation，不要用这个工具。返回 needs_decision 时，用 related_to=<候选id> 或 new_event=true 再调用一次。",
-        {"summary": "简洁的记忆内容", "category": "类别，如 event、preference", "importance": "1-5，默认 1",
-         "emotional_weight": "1-5，默认 1", "happened_at": "ISO 时间，可空", "valid_until": "ISO 时间，可空",
-         "progress": _DROP, "event_time": "ISO", "event_date": "today/tomorrow/day_after_tomorrow/yesterday 或 YYYY-MM-DD",
-         "event_clock": "HH:MM 或 早上/中午/下午/晚上", "condition": "intent=conditional 时的条件",
-         "event_key": "同一件持续事件的稳定英文标识", "related_to": "所属的已有记忆 id"},
-    ),
+    # save_memory: NOT shortened (0.7.37). The real-model comparison on the user's server (decision_eval, 2026-11-03)
+    # had the short form skip "下周面试" (event) while the full form saved it -- the main memory tool stays full.
     "update_memory": ("把新信息合并进一条已有记忆。",
                       {"memory_id": _DROP, "summary": "更新后的完整内容", "category": _DROP, "importance": "1-5",
                        "emotional_weight": "1-5", "reason": _DROP}),
