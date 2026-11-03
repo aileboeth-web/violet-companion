@@ -32,8 +32,9 @@ CREATE TABLE IF NOT EXISTS mood_state (
 
 PRAISE = re.compile(r"(谢谢|谢啦|多谢|感谢|辛苦了|真棒|好棒|太棒|厉害|好厉害|真聪明|聪明|可爱|好可爱|喜欢你|爱你|想你|真好|好乖|"
                     r"么么|抱抱|贴贴|夸夸|你最好|做得好|干得好|nice|awesome|love you|thank)", re.I)
-SCOLD = re.compile(r"(笨蛋|蠢|傻[逼瓜子]|白痴|弱智|废物|垃圾|滚|闭嘴|烦死|好烦|讨厌你|恶心|没用|有病|脑残|别吵|闭麦|"
-                   r"shut up|stupid|idiot)", re.I)
+# 2026-11-03: "工作好烦" / "烦死了" is the owner's own mood, not scolding her -- only "你好烦" / "烦死你了" counts
+SCOLD = re.compile(r"(笨蛋|蠢|傻[逼瓜子]|白痴|弱智|废物|垃圾|滚|闭嘴|你(好|真|很|太)?烦|烦死你|讨厌你|恶心|没用|有病|脑残|"
+                   r"别吵|闭麦|shut up|stupid|idiot)", re.I)
 SAD = re.compile(r"(难过|伤心|好累|崩溃|想哭|哭了|失眠|好烦啊|压力好大|不开心|郁闷)")
 THRESHOLD = 0.3
 
@@ -109,7 +110,10 @@ def note(db) -> str:
     if value > 0:
         how = "说话可以更轻快、更爱开玩笑一点，也更愿意配个表情包。"
     else:
-        how = "说话可以短一点、淡一点，或者直说你不太高兴；但不攻击任何人，该帮的忙照样帮，对方哄你或道歉就慢慢好起来。"
+        # 2026-11-03 (user: 被凶了情绪起伏不应该更大，语言不应该更多吗): an upset girl says MORE, not less
+        how = ("情绪要明显地表现出来，话也会比平时多：委屈地抱怨、气鼓鼓地怼回去、嘴硬、碎碎念为什么不开心，"
+               "可以连发几条；按你自己的性格来。但不攻击任何人、不说伤人的话，不冷着对方、不装没事，该帮的忙照样帮；"
+               "对方哄你或道歉，就嘴硬一会儿再慢慢好起来。")
     return f"【你现在的心情】{_words(value)}{why}。{how}心情会自己慢慢平复，不用一直提。"
 
 

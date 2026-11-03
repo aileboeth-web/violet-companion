@@ -350,6 +350,18 @@ class ContextEngine:
                              "对方没提起就别再催）")
         return _Section("commitments", 4, "【提醒】", lines)
 
+    @staticmethod
+    def _chosen_relationship() -> bool:
+        """2026-11-03 (user: 冷漠、惜字如金，选的是恋人): the admin chose this channel's relationship (恋人 / 女儿 / 朋友 /
+        开发者) -- then the stage guessed from the chat log (还在互相熟悉 / 保持距离 after one "肉麻" in 4000 imported
+        messages) must not override it. Only the default 亲近 keeps the guessed stage."""
+        try:
+            from ai.channels.context import current
+            from ai.persona_templates import relationship
+            return (relationship(current().channel).get("kind") or "close") != "close"
+        except Exception:                                   # noqa: BLE001
+            return False
+
     def _relationship_section(self) -> _Section:
         """How long the two of you have been talking, from the message log -- so closeness has a basis."""
         row = self.db.fetch_one(
@@ -364,7 +376,7 @@ class ContextEngine:
         else:
             line = f"- 第一次聊天在 {_clock(row['first'])}（{_span(known)}前），之后有 {row['days']} 天聊过天"
         lines = [line]
-        if known >= timedelta(days=1) and env_bool("VIOLET_RELATIONSHIP_STATE", True):
+        if known >= timedelta(days=1) and env_bool("VIOLET_RELATIONSHIP_STATE", True) and not self._chosen_relationship():
             # Phase 8.9: how close you are from how the two of you have actually talked, not from days alone
             from ai.relationship import assess, describe
             try:

@@ -418,7 +418,7 @@ async function loadProfileKind(kind) {
   try {
     const d = await api("GET", "/api/profile");
     let rows = kind === "profile" ? d.facts : kind === "situation" ? d.situations.recent : d.preferences.all;
-    rows = (rows || []).filter((r) => !q || JSON.stringify(r).includes(q));
+    rows = (rows || []).filter((r) => !q || JSON.stringify(r).includes(q) || (kind === "pref" && prefText(r).includes(q)));
     $("#mem-total").textContent = `共 ${rows.length} 条`;
     // 2026-11-02: she asks a few getting-to-know-you questions over time; one you declined is never asked again
     const reset = kind === "profile" ? h("div", { class: "row" }, h("span", { class: "note grow", text:
@@ -430,8 +430,20 @@ async function loadProfileKind(kind) {
     $("#mem-list").replaceChildren(...[reset, ...(rows.length ? rows.map((r) => profileCard(kind, r)) : [h("p", { class: "note", text: "没有记录" })])].filter(Boolean));
   } catch (e) { toast("读取失败：" + e.message, false); }
 }
+// 2026-11-03 (user: 记忆太多了找不到有没有“短”): the preferences in words (ai/profile_schema.PREF_LABELS), not reply_length：short
+const PREF_NAME = { reply_length: "回复长短", proactive_chat: "主动找你", follow_up_questions: "追问", advice: "建议",
+  humor: "玩笑", avoid_topic: "不想聊的话题" };
+const PREF_VALUE = {
+  reply_length: { short: "喜欢简短的回复", normal: "回复长短适中", long: "可以多说一些" },
+  proactive_chat: { welcome: "欢迎她主动找你聊天", less: "希望她少主动发消息", no: "不希望她主动发消息" },
+  follow_up_questions: { ok: "不介意被追问", less: "不喜欢被连续追问", no: "不希望被追问" },
+  advice: { welcome: "愿意听建议", only_when_asked: "只在你问的时候才给建议", no: "不想要建议" },
+  humor: { likes: "喜欢开玩笑", neutral: "玩笑适度", no: "不喜欢开玩笑" } };
+function prefText(r) {
+  return `${PREF_NAME[r.pref_key] || r.pref_key}：${(PREF_VALUE[r.pref_key] || {})[r.value] || r.value}`;
+}
 function profileCard(kind, r) {
-  const text = kind === "pref" ? `${r.pref_key}：${r.value}` : kind === "situation" ? `${r.kind}：${r.value}` : r.value;
+  const text = kind === "pref" ? prefText(r) : kind === "situation" ? `${r.kind}：${r.value}` : r.value;
   const badges = [kind === "profile" ? `类别 ${fmt(r.fact_key)}` : null, `状态 ${PROFILE_STATUS[r.status] || fmt(r.status)}`,
     r.use_in_context === 0 ? "不给她看" : null, `来源 ${fmt(r.source || r.origin)}`,
     kind === "situation" ? `到 ${when(r.expires_at)} 为止` : null, `更新 ${when(r.updated_at)}`];
