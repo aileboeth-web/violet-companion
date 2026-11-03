@@ -242,6 +242,11 @@ SETTINGS: list[Setting] = [
             "QQ 登录后和之后每 6 小时，把这个 QQ 号自己收藏的表情放进她的收藏，并用识图模型分批写好说明（她只会用有说明的表情包）", True),
     Setting("VIOLET_STICKER_LOOK", "看别人发的表情包", "qq_stickers", "bool", "now",
             "群里或别人私聊发来没见过的表情包时，用识图模型看一眼（同一个表情包只看一次；会用识图模型）", True),
+    # 2026-11-03 (user: 群里她看得清表情包，看不清图片)
+    Setting("VIOLET_SOCIAL_PICTURE_LOOK", "看别人发的图片", "qq_stickers", "bool", "now",
+            "群里或别人私聊发来的普通图片也用识图模型看（以前只看表情包）：每次决定最多看最新的几张，同一张图只看一次", True),
+    Setting("VIOLET_SOCIAL_PICTURES_PER_DECISION", "每次最多看几张图片", "qq_stickers", "int", "now",
+            "一次决定里最多看几张没看过的图片（每张一次识图调用）", 2, 0, 10),
     Setting("VIOLET_QZONE_ENABLED", "发 QQ 动态", "qzone", "bool", "now",
             "她偶尔在 QQ 空间发一条说说（9:00–23:00，两条至少隔 4 小时，只写她自己的生活，不写你的事）；"
             "发过的动态在“聊天渠道 → QQ”下面能看到", False),

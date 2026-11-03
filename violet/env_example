@@ -165,6 +165,9 @@ VIOLET_PHONE_EVENTS=1
 VIOLET_REPLY_MAX_MESSAGES=0
 # 人设是一整段原样提示词（Eve、大肥鱼）时，只加诚实和格式两条规则（persona/chat_prompt_versions/chat.own.v1.txt）。
 VIOLET_OWN_PERSONA_FRAME=1
+# QQ 群 / 私聊里别人发的普通图片也用识图模型看（以前只看表情包）；每次决定最多看几张，同一张图只看一次。
+VIOLET_SOCIAL_PICTURE_LOOK=1
+VIOLET_SOCIAL_PICTURES_PER_DECISION=2
 
 # ── 用户理解与情境（第三阶段）──────────────────────────────────────────────────
 # IANA 时区；在 Windows 上需要 tzdata 包，无法加载时退回固定 UTC+08:00。

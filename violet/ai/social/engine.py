@@ -328,6 +328,7 @@ class SocialEngine:
         owner_ids = adapter.owner_ids() if adapter is not None and hasattr(adapter, "owner_ids") else set()
         admin_ids = (adapter.admin_ids() if adapter is not None and hasattr(adapter, "admin_ids") else set()) - owner_ids
         self._look_at_stickers(unread, adapter)
+        self._look_at_pictures(conversation_id, unread, adapter)
         from ai import test_mode
         testing = test_mode.active()       # 2026-10-30: no persona, no impressions, only the messages since the test began
         size = max(10, env_int("VIOLET_SOCIAL_CONTEXT_MESSAGES", 30))
@@ -636,6 +637,36 @@ class SocialEngine:
             if description:
                 self.store.describe_media(row["id"], description)
                 trace.step("看表情包", 消息=row["message_id"], 内容=description)
+
+    PICTURE_PROMPT = ("这是群聊 / 私聊里有人发的一张图片。用一两句中文说清楚图里有什么（人、东西、场景、在做什么）；"
+                      "图里有文字就照抄关键的字。只说看到的，不猜。")
+
+    def _look_at_pictures(self, conversation_id: int, unread: list[dict[str, Any]], adapter) -> None:
+        """2026-11-03 (user: 群里她看得清表情包，看不清图片): ordinary pictures were never looked at in groups -- only
+        stickers. Now the newest ones she has not seen (the unread ones and the last few of the chat, so "你看得清这张图
+        吗" after a picture works), at most VIOLET_SOCIAL_PICTURES_PER_DECISION per decision; the same picture (same
+        QQ file name) is looked at once. VIOLET_SOCIAL_PICTURE_LOOK=0: as before."""
+        if not env_bool("VIOLET_SOCIAL_PICTURE_LOOK", True):
+            return
+        limit = max(0, env_int("VIOLET_SOCIAL_PICTURES_PER_DECISION", 2))
+        ids = {m["id"] for m in unread} | {m["id"] for m in self.store.messages(conversation_id, limit=10)}
+        rows = sorted(self.store.media(sorted(ids), kind="image", undescribed=True), key=lambda r: r["id"], reverse=True)
+        for row in rows[:limit]:
+            description = self.store.known_description(row["file_key"])
+            if not description:
+                path = self._download(adapter, row["url"])
+                if path is None:
+                    continue
+                try:
+                    from ai.vision import describe_image
+                    from ai.web.content import neutralize
+                    description, _ = neutralize(describe_image(path, prompt=self.PICTURE_PROMPT) or "")
+                except Exception as exc:                  # noqa: BLE001 -- recognition is optional
+                    logger.info("social picture description failed: %s", exc)
+                    description = None
+            if description:
+                self.store.describe_media(row["id"], description.strip()[:200])
+                trace.step("看图片", 消息=row["message_id"], 内容=description.strip()[:200])
 
     def _collect(self, conv: dict[str, Any], collect: Any, adapter) -> int | None:
         """She keeps a sticker (or a funny picture) someone sent: the decision's "collect" names the message."""
