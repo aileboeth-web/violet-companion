@@ -16,6 +16,7 @@
         "network_state": "read",
         "step_count": "read",
         "calendar_events": "read",
+        "phone_events": "read",
         "get_foreground_app": "read",
         "get_screen_state": "read",
         "battery": "read",

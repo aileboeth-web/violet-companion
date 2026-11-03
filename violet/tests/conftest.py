@@ -41,6 +41,7 @@ os.environ.update({
     "VIOLET_LIFE_ENGINE": "0",
     # 2026-11-03: the phone line reads MCP servers; its own tests enable it
     "VIOLET_PHONE_CONTEXT": "0",
+    "VIOLET_PHONE_EVENTS": "0",
     # phase 8.9: Violet's ordinary day depends on the date; tests that need it enable it with a fixed clock
     "VIOLET_DAILY_LIFE": "0",
     # web access is off unless a test turns it on; no real search backend is ever configured

@@ -166,7 +166,10 @@ def _unwrap(text: str) -> str:
     return text
 
 
-def _read() -> dict[str, dict[str, Any]]:
+def _read(calls: dict[str, dict[str, Any]] | None = None) -> dict[str, dict[str, Any]]:
+    """{tool: JSON result} for the phone tools found (default: TOOLS with ARGS). Tools missing on the phone, switched
+    off there or answering an error are left out."""
+    calls = calls if calls is not None else {t: dict(ARGS.get(t) or {}) for t in TOOLS}
     from ai.chat import get_mcp_servers
     from ai.mcp import MCPToolBridge
     from ai.tool_manager import _run_sync
@@ -179,12 +182,12 @@ def _read() -> dict[str, dict[str, Any]]:
         out: dict[str, dict[str, Any]] = {}
         try:
             await bridge.connect()
-            for tool in TOOLS:
+            for tool, args in calls.items():
                 name = next((n for n, b in bridge.tool_to_session.items()
                              if n.endswith("__" + tool) and getattr(b, "permission", "read") == "read"), None)
                 if name is None:
                     continue
-                text = await bridge.call_tool(name, dict(ARGS.get(tool) or {}))
+                text = await bridge.call_tool(name, dict(args))
                 try:
                     value = json.loads(_unwrap(text))
                 except (TypeError, ValueError):
@@ -216,6 +219,15 @@ def line(kind: str = "proactive") -> str:
     from ai.proactive_scheduler import now_china
     current = now_china()
     text = compose(data, current.strftime("%H:%M"), current)
+    try:                                                    # the phone's recent events (ai/phone_events.py)
+        from ai import phone_events
+        recent = phone_events.recent_text(current)
+    except Exception:                                       # noqa: BLE001
+        recent = ""
+    if recent:
+        head, _, guide = text.partition("\n")
+        text = (head + "；" + recent if head else f"【主人手机此刻（{current.strftime('%H:%M')} 读取）】{recent}") \
+            + "\n" + (guide or GUIDE)
     with _lock:
         _cache.update(at=time.monotonic(), line=text)
     from ai import trace

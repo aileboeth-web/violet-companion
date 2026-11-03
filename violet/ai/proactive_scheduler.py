@@ -276,6 +276,7 @@ class ProactiveScheduler:
         if not self._pipeline_lock.acquire(blocking=False):
             return
         try:
+            self._poll_phone_events()
             self._each_scope(self._tick_locked)
         finally:
             self._pipeline_lock.release()
@@ -315,9 +316,19 @@ class ProactiveScheduler:
 
         with self._lock:
             due, reason = self._is_due(current)
+            moment = self._phone_moment(current) if not due and reason == "not due yet" else None
+            if moment:
+                # 2026-11-03 (ai/phone_events.py): e.g. the first unlock of the morning -- decide now, not at the
+                # random time; every other rule of _is_due still applies
+                due, reason = self._is_due(current, ignore_next_at=True)
+                reason = "phone moment" if due else reason
             if not due:
                 return
             event_context = self._build_event_context(current)
+            if moment:
+                event_context["phone_moment"] = moment
+                from ai import phone_events
+                phone_events.consume_moment()
             self._set_next_proactive_at(self._random_next_time(current))
 
         self._add_phone(event_context)
@@ -403,15 +414,15 @@ class ProactiveScheduler:
             self._pipeline_lock.release()
         return pipeline
 
-    def _is_due(self, current: datetime) -> tuple[bool, str]:
+    def _is_due(self, current: datetime, ignore_next_at: bool = False) -> tuple[bool, str]:
         from ai import test_mode
         if test_mode.active():
             return False, "test mode"                    # 2026-10-30: nothing by herself while testing
         next_at = self._get_next_proactive_at()
-        if not next_at:
+        if not next_at and not ignore_next_at:
             self._set_next_proactive_at(self._random_next_time(current))
             return False, "next proactive time initialized"
-        if current < next_at:
+        if not ignore_next_at and current < next_at:
             return False, "not due yet"
         if self._in_quiet_hours(current):
             self._set_next_proactive_at(self._random_next_time(current))
@@ -1096,6 +1107,23 @@ class ProactiveScheduler:
         if end <= current:
             end += timedelta(days=1)
         return end
+
+    @staticmethod
+    def _poll_phone_events() -> None:
+        """2026-11-03 (ai/phone_events.py): the phone's new events, at most once a minute. Never stops the tick."""
+        try:
+            from ai import phone_events
+            phone_events.poll(now_china())
+        except Exception:                                   # noqa: BLE001
+            logger.exception("[ProactiveScheduler] phone events unavailable")
+
+    @staticmethod
+    def _phone_moment(current: datetime) -> str | None:
+        try:
+            from ai import phone_events
+            return phone_events.pending_moment(current) if phone_events.enabled() else None
+        except Exception:                                   # noqa: BLE001
+            return None
 
     @staticmethod
     def _add_phone(event_context: dict[str, Any]) -> None:

@@ -301,9 +301,11 @@ def test_settings_list_only_whitelisted_keys_and_never_the_api_key(admin):
 
 
 def test_no_setting_caps_the_number_of_messages_in_a_reply():
-    from ai.control_config import SETTINGS
-    for s in SETTINGS:
-        assert not re.search(r"MAX_(MESSAGES|SEGMENTS|LINES)|SEGMENT_LIMIT", s.key)
+    # 2026-11-03 (user: 加个可自由配置的数值，可以修改每次回答发送的消息条数的上限): exactly one such setting, and by
+    # default it caps nothing (phase 9.0's rule -- she decides how many messages -- stays the default)
+    from ai.control_config import BY_KEY, SETTINGS
+    caps = [s.key for s in SETTINGS if re.search(r"MAX_(MESSAGES|SEGMENTS|LINES)|SEGMENT_LIMIT", s.key)]
+    assert caps == ["VIOLET_REPLY_MAX_MESSAGES"] and BY_KEY["VIOLET_REPLY_MAX_MESSAGES"].default == 0
 
 
 def test_an_invalid_value_saves_nothing(admin, made, env_guard):

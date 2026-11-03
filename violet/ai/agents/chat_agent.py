@@ -286,6 +286,11 @@ class ChatAgent(BaseAgent):
                 "网页的发布时间不一定是事情发生的时间。"
                 "一次搜一个；结果不够再换个明显不同的说法搜，不要同时发几个差不多的搜索。")})          # 2026-11-01
 
+        from ai.chat_output import reply_limit
+        most = reply_limit()
+        if most:                                                     # 2026-11-03: VIOLET_REPLY_MAX_MESSAGES
+            messages.append({"role": "system", "content": (
+                f"【条数】每次回复最多 {most} 条消息（也就是最多 {most} 行）；想说的多就合在一条里说，不要超过。")})
         abilities = self._call_context.get("abilities_note")         # 2026-10-30: what she can do now, and how
         if abilities and not is_proactive:
             messages.append({"role": "system", "content": abilities})

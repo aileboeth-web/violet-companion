@@ -138,6 +138,89 @@ def test_switches_and_an_offline_phone(phone, monkeypatch):
     assert phone_state.line("proactive") == ""                                      # unreachable: no line, no error
 
 
+def _event(seq, kind, at, **detail):
+    return {"seq": seq, "type": kind, "at": {"epochMs": 0, "iso": at.isoformat()}, "detail": detail}
+
+
+def test_phone_events_moments_and_recent_lines(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from ai import phone_events
+    phone_events.reset()
+    tz = timezone(timedelta(hours=8))
+    now = datetime(2026, 11, 4, 7, 15, tzinfo=tz)
+    phone_events.take([
+        _event(1, "screen_off", now - timedelta(hours=8)),                                      # too old, too dull
+        _event(2, "unlock", now - timedelta(minutes=3), screenOffMinutes=430),
+        _event(3, "charger_disconnected", now - timedelta(minutes=1)),
+    ], now)
+    assert phone_events.recent_text(now) == "最近的动静：07:12 解锁手机（之前熄屏约 7 小时）、07:14 拔了充电器"
+    moment = phone_events.pending_moment(now)
+    assert moment.startswith("主人刚起床：熄屏约 7 小时后，07:12 第一次解锁手机") and "不要说你看到了手机" in moment
+    assert phone_events.pending_moment(now + timedelta(minutes=30)) is None                     # 20 minutes only
+    phone_events.reset()
+    # an afternoon unlock or a short screen-off is no moment; arriving home is
+    phone_events.take([_event(4, "unlock", now.replace(hour=15), screenOffMinutes=500)], now.replace(hour=15, minute=1))
+    assert phone_events.pending_moment(now.replace(hour=15, minute=1)) is None
+    phone_events.take([_event(5, "place_arrived", now.replace(hour=19), place="家")], now.replace(hour=19, minute=1))
+    assert "刚到「家」" in phone_events.pending_moment(now.replace(hour=19, minute=1))
+    phone_events.reset()
+
+
+def test_phone_events_poll_uses_the_cursor_and_survives_a_phone_restart(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from ai import phone_events, phone_state
+    phone_events.reset()
+    monkeypatch.setenv("VIOLET_PHONE_EVENTS", "1")
+    now = datetime(2026, 11, 4, 7, 15, tzinfo=timezone(timedelta(hours=8)))
+    asked = []
+    answers = {"A": [_event(1, "charger_connected", now), _event(2, "unlock", now, screenOffMinutes=5)],
+               "B": [_event(1, "headphones_connected", now)]}
+    phone = {"epoch": "A"}
+
+    def fake_read(calls):
+        after = calls["phone_events"]["after"]
+        asked.append((phone["epoch"], after))
+        events = [e for e in answers[phone["epoch"]] if e["seq"] > after]
+        return {"phone_events": {"epoch": phone["epoch"], "latestSeq": len(answers[phone["epoch"]]), "events": events}}
+    monkeypatch.setattr(phone_state, "_read", fake_read)
+    assert phone_events.poll(now, force=True) == 2
+    assert phone_events.poll(now, force=True) == 0 and asked[-1] == ("A", 2)              # only what is new
+    phone["epoch"] = "B"                                                                    # the phone restarted
+    assert phone_events.poll(now, force=True) == 1 and asked[-1] == ("B", 0)
+    assert "戴上耳机" in phone_events.recent_text(now)
+    monkeypatch.setattr(phone_state, "_read", lambda calls: {})                             # no such tool
+    assert phone_events.poll(now, force=True) == 0 and phone_events.poll(now) == 0          # paused, not retried
+    phone_events.reset()
+
+
+def test_a_moment_makes_the_decision_run_now(monkeypatch, violetdb, tmp_path):
+    import json as _json
+    from datetime import timedelta
+    from tests.fakes import far_quiet_hours
+    from ai import phone_events
+    from ai.proactive_scheduler import ProactiveScheduler, now_china
+    cfg = tmp_path / "p.json"
+    cfg.write_text(_json.dumps({"enabled": True, "quiet_hours": far_quiet_hours(), "daily_message_limit": 3,
+                                "min_minutes_after_user_message": 0, "min_minutes_between_proactive_messages": 0}),
+                   encoding="utf-8")
+    monkeypatch.setenv("VIOLET_PHONE_EVENTS", "1")
+    s = ProactiveScheduler(None, None, None, send_messages=lambda m, e=None: None, config_path=cfg)
+    current = now_china()
+    violetdb.add_user_message("text", "晚安")
+    s._set_next_proactive_at(current + timedelta(hours=3))
+    assert s._is_due(current) == (False, "not due yet")
+    assert s._is_due(current, ignore_next_at=True)[0] is True
+    phone_events.reset()
+    phone_events._state["moment"] = (current, "主人刚起床")
+    ran = []
+    import ai.proactive_scheduler as ps
+    monkeypatch.setattr(ps, "run_proactive_pipeline", lambda event_context, **kw: ran.append(event_context) or {})
+    monkeypatch.setattr(s, "_handle_pipeline_result", lambda *a, **k: None)
+    s._tick_locked()
+    assert ran and ran[0]["phone_moment"] == "主人刚起床" and phone_events.pending_moment(current) is None
+    phone_events.reset()
+
+
 def test_the_proactive_run_and_a_reply_carry_the_line(monkeypatch):
     from ai import phone_state
     from ai.proactive_scheduler import ProactiveScheduler

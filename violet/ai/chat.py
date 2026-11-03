@@ -1129,7 +1129,8 @@ def _run_proactive_pipeline(
             "performer_result": performer_result,
             "restricted_topics": restricted,
             "proactive_note": event_context.get("proactive_habit_note"),     # phase 8.9.5
-            "phone_note": event_context.get("phone_now"),                    # 2026-11-03 (ai/phone_state.py)
+            # 2026-11-03 (ai/phone_state.py, ai/phone_events.py): the phone now, and the moment that woke her up
+            "phone_note": "\n".join(x for x in (event_context.get("phone_moment"), event_context.get("phone_now")) if x),
         },
     )
     _ps.node_done("Chat", output_data={"messages": chat_result.get("messages", []), "content": chat_result.get("content")})

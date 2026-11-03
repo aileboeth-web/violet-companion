@@ -158,6 +158,11 @@ VIOLET_HOLIDAY_GREETING=0
 VIOLET_PHONE_CONTEXT=1
 VIOLET_PHONE_CONTEXT_CHAT=0
 VIOLET_PHONE_CONTEXT_TIMEOUT=12
+# 手机上的动静（ai/phone_events.py，Violet MCP 1.4.1 的 phone_events）：每分钟取一次新动静；早上第一次解锁、
+# 到了起过名字的地方时马上做一次主动联系判断。
+VIOLET_PHONE_EVENTS=1
+# 每次回复最多几条消息（0 = 不限）。超出的几行并进最后一条，不丢内容；图片和表情包不算。
+VIOLET_REPLY_MAX_MESSAGES=0
 
 # ── 用户理解与情境（第三阶段）──────────────────────────────────────────────────
 # IANA 时区；在 Windows 上需要 tzdata 包，无法加载时退回固定 UTC+08:00。

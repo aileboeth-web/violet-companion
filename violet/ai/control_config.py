@@ -121,6 +121,10 @@ SETTINGS: list[Setting] = [
             "对方连发几条时，最后一条之后等多久再一起处理", 5.0, 0, 120),
     Setting("DEBOUNCE_EXTRA", "对方像是没说完时多等（秒）", "messages", "float", "now", "", 10.0, 0, 300),
     Setting("VIOLET_SIMULATE_TYPING", "模拟打字间隔", "messages", "bool", "now", "多条消息之间按长度停顿一下", True),
+    # 2026-11-03 (user: 可自由配置每次回答发送的消息条数上限)
+    Setting("VIOLET_REPLY_MAX_MESSAGES", "每次回复最多几条消息", "messages", "int", "now",
+            "0 = 不限（她自己决定分几条）。设成 N：提示她最多分 N 条；她还是写多了，多出来的几行并进第 N 条一起发，"
+            "内容不会丢。图片和表情包不算在内", 0, 0, 20),
     # 2026-11-02 (0.7.31's crossed-replies fix had no switch)
     Setting("VIOLET_REPLY_RECHECK", "她写回复时你又发了消息，就合在一起回", "messages", "bool", "now",
             "开：那条回复不发，下一轮把你前后说的一起回（不会连续两次这样；用过工具的回复照常发）。关：每条都单独回", True),
@@ -313,6 +317,9 @@ SETTINGS: list[Setting] = [
     Setting("VIOLET_PHONE_CONTEXT", "主动联系前看一眼手机", "proactive", "bool", "now",
             "接了手机 MCP（Violet MCP）时，判断要不要找你、怎么开口前，先读屏幕亮没亮、在用什么 App、电量、今天各 App "
             "用了多久（两分钟内只读一次）。读不到就照常；不读勿扰模式", True),
+    Setting("VIOLET_PHONE_EVENTS", "跟着手机上的动静找你", "proactive", "bool", "now",
+            "手机 MCP 打开“手机上的动静”时，每分钟看一次有没有新动静：早上第一次解锁、到了起过名字的地方（如“家”）时，"
+            "马上判断要不要找你（其他规则照旧，也可能决定先不找）；最近的动静也会写进手机状态", True),
     Setting("VIOLET_PHONE_CONTEXT_CHAT", "平常回复也看手机", "behavior", "bool", "now",
             "平常回你消息时也带上手机此刻的状态（比如你说好累，她知道你已经亮屏刷了很久）。有人会觉得被盯着，默认关", False),
     # 2026-11-03 (ai/holidays.py)

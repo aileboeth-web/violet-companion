@@ -116,7 +116,35 @@ def normalize_chat_output(raw_content: str, sticker_for_label=_owner_sticker_for
             messages.append({"type": "text", "content": rest, "media_id": None})
     if not messages:
         return {"should_send": False, "messages": []}
-    return {"should_send": True, "messages": messages}
+    return {"should_send": True, "messages": cap_messages(messages, reply_limit())}
+
+
+def reply_limit() -> int:
+    """2026-11-03 (user: 可自由配置每次回答发送的消息条数上限): VIOLET_REPLY_MAX_MESSAGES, 0 = no limit."""
+    from ai.settings import env_int
+    return max(0, env_int("VIOLET_REPLY_MAX_MESSAGES", 0))
+
+
+def cap_messages(messages: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """At most `limit` text / voice messages (images and the sticker do not count). The lines over the limit are not
+    dropped: they are joined into the last allowed text message, so nothing she said is lost."""
+    if limit <= 0:
+        return messages
+    out: list[dict[str, Any]] = []
+    spoken = 0
+    last: int | None = None                                 # the last allowed text / voice message
+    for msg in messages:
+        if msg.get("type") not in ("text", "voice"):
+            out.append(msg)
+            continue
+        if spoken < limit:
+            out.append(msg)
+            spoken += 1
+            last = len(out) - 1
+            continue
+        joined = out[last]                                  # over the limit: goes into the last allowed one
+        out[last] = {**joined, "content": f"{joined['content']}\n{msg['content']}"}
+    return out
 
 
 def attach_images(payload: dict[str, Any], allowed_asset_ids: list[int], turn_key: str | None = None) -> dict[str, Any]:
