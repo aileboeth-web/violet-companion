@@ -24,6 +24,46 @@ def test_over_the_limit_lines_join_the_last_one_and_media_do_not_count(monkeypat
     assert cap_messages(mixed, 0) == mixed
 
 
+def test_a_whole_prompt_persona_gets_no_length_rules(monkeypatch):
+    """2026-11-03 (user: 用 Eve 人设时惜字如金): Eve / 大肥鱼 get chat.own.v1 instead of chat.v3."""
+    from ai import persona
+    from ai.agents import chat_agent
+
+    class Whole:
+        data = {"prompt_text": "你是 Eve，可以一句一行发好几条"}
+    monkeypatch.setattr(persona.PersonaCore, "load", classmethod(lambda cls, *a, **k: Whole()))
+    monkeypatch.delenv("CHAT_LLM_PROMPT", raising=False)
+    frame = chat_agent.own_persona_prompt()
+    assert frame and "分几条发，都完全按后面“你自己”" in frame
+    for brake in ("几个字就够了", "一到三条", "一两个实在的点"):
+        assert brake not in frame
+    v3 = open(chat_agent.PROJECT_ROOT / chat_agent.ChatAgent.default_prompt_file, encoding="utf-8").read() \
+        if hasattr(chat_agent, "PROJECT_ROOT") else None
+    if v3:
+        assert "一到三条" in v3                              # the other personas keep their rules
+    monkeypatch.setenv("CHAT_LLM_PROMPT", "管理员自己写的提示词")
+    assert chat_agent.own_persona_prompt() is None             # the admin's own prompt wins, as for the AI persona
+    monkeypatch.delenv("CHAT_LLM_PROMPT")
+    monkeypatch.setenv("VIOLET_OWN_PERSONA_FRAME", "0")
+    assert chat_agent.own_persona_prompt() is None
+
+    class Built:
+        data = {"identity": {"name": "Violet"}}
+    monkeypatch.setenv("VIOLET_OWN_PERSONA_FRAME", "1")
+    monkeypatch.setattr(persona.PersonaCore, "load", classmethod(lambda cls, *a, **k: Built()))
+    assert chat_agent.own_persona_prompt() is None
+
+
+def test_the_reply_starts_with_the_own_frame(monkeypatch):
+    from tests.fakes import FakeLLM, default_responders, install_fake_llm
+    llm = install_fake_llm(monkeypatch, FakeLLM(default_responders("嗯")))
+    from ai.agents import chat_agent
+    monkeypatch.setattr(chat_agent, "own_persona_prompt", lambda: "【整段人设的框架】")
+    chat_agent.ChatAgent().run("早")
+    first = [c["messages"][0]["content"] for c in llm.calls]
+    assert first and first[0] == "【整段人设的框架】"
+
+
 def test_the_prompt_tells_her_the_limit(monkeypatch):
     from tests.fakes import FakeLLM, default_responders, install_fake_llm
     llm = install_fake_llm(monkeypatch, FakeLLM(default_responders("嗯")))

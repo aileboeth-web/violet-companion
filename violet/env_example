@@ -163,6 +163,8 @@ VIOLET_PHONE_CONTEXT_TIMEOUT=12
 VIOLET_PHONE_EVENTS=1
 # 每次回复最多几条消息（0 = 不限）。超出的几行并进最后一条，不丢内容；图片和表情包不算。
 VIOLET_REPLY_MAX_MESSAGES=0
+# 人设是一整段原样提示词（Eve、大肥鱼）时，只加诚实和格式两条规则（persona/chat_prompt_versions/chat.own.v1.txt）。
+VIOLET_OWN_PERSONA_FRAME=1
 
 # ── 用户理解与情境（第三阶段）──────────────────────────────────────────────────
 # IANA 时区；在 Windows 上需要 tzdata 包，无法加载时退回固定 UTC+08:00。

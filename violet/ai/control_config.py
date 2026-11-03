@@ -121,6 +121,9 @@ SETTINGS: list[Setting] = [
             "对方连发几条时，最后一条之后等多久再一起处理", 5.0, 0, 120),
     Setting("DEBOUNCE_EXTRA", "对方像是没说完时多等（秒）", "messages", "float", "now", "", 10.0, 0, 300),
     Setting("VIOLET_SIMULATE_TYPING", "模拟打字间隔", "messages", "bool", "now", "多条消息之间按长度停顿一下", True),
+    Setting("VIOLET_OWN_PERSONA_FRAME", "整段人设按它自己的说话方式", "behavior", "bool", "now",
+            "人设是原样搬过来的一整段提示词（如 Eve、大肥鱼）时，只加“诚实”和“格式”两条规则，不再加 Violet 自己的聊天规则"
+            "（“一句话甚至几个字就够了”“通常一到三条”这些），说多长、分几条都按人设来。关：和其他人设一样", True),
     # 2026-11-03 (user: 可自由配置每次回答发送的消息条数上限)
     Setting("VIOLET_REPLY_MAX_MESSAGES", "每次回复最多几条消息", "messages", "int", "now",
             "0 = 不限（她自己决定分几条）。设成 N：提示她最多分 N 条；她还是写多了，多出来的几行并进第 N 条一起发，"

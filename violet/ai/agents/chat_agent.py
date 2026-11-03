@@ -33,6 +33,30 @@ def adapt_messages_for_channel(messages: list[dict[str, Any]], is_proactive: boo
 
 
 AI_PROMPT_FILE = "persona/chat_prompt_versions/chat.ai.v1.txt"
+# 2026-11-03 (user: 用 Eve 人设时 Violet 像在省着说一样惜字如金，原版 Eve 回复条数更多、描述更细): a persona that is one
+# whole prompt of the owner's own (persona templates with prompt_text: Eve, 大肥鱼) gets only the honesty and format
+# rules -- chat.v3's "一句话甚至几个字就够了 / 通常一到三条 / 给一两个点就好" overrode the persona's own voice
+OWN_PROMPT_FILE = "persona/chat_prompt_versions/chat.own.v1.txt"
+
+
+def own_persona_prompt() -> str | None:
+    """The frame for a whole-prompt persona of this channel, or None (another persona, or a CHAT_LLM_PROMPT set by the
+    admin, which is kept for every persona). VIOLET_OWN_PERSONA_FRAME=0: the ordinary chat rules again."""
+    import os
+    from ai.settings import PROJECT_ROOT, env_bool
+    if not env_bool("VIOLET_OWN_PERSONA_FRAME", True) or os.getenv(ChatAgent.system_prompt_env_key, "").strip():
+        return None
+    try:
+        from ai.persona import PersonaCore
+        if not PersonaCore.load().data.get("prompt_text"):
+            return None
+        text = (PROJECT_ROOT / OWN_PROMPT_FILE).read_text(encoding="utf-8").strip()
+    except Exception:                                        # noqa: BLE001 -- the ordinary rules then
+        return None
+    if text:
+        from ai.channels.outbound import register_instructions
+        register_instructions("chat_own", text)
+    return text or None
 
 CHAT_MEMORY_SCHEMA = {"type": "function", "function": {
     "name": "query_memory",
@@ -253,6 +277,8 @@ class ChatAgent(BaseAgent):
         prompt = self._config.reply_prompt
         if packet.report.get("ai_natural") and not testing:
             prompt = ai_prompt() or prompt                        # 2026-10-30: the AI persona in the model's own voice
+        elif not testing:
+            prompt = own_persona_prompt() or prompt               # 2026-11-03: Eve / 大肥鱼 speak as their own prompt says
         # 2026-11-01 (token rework, cache hits 26-34%): what stays the same from message to message comes first -- the
         # prompt, persona, relationship, rules, abilities -- then the history, then everything of this turn (memories
         # found, the situation, the time, mood, notes); the provider's prompt cache serves the same beginning
