@@ -160,7 +160,8 @@ def channel_types() -> dict[str, dict[str, Any]]:
             "config": {"api_base": _url_field(False), "poll_timeout": _int_field(1, 50), "proxy": _proxy_field},
             "defaults": {"api_base": "https://api.telegram.org", "poll_timeout": 25, "proxy": ""},
             "secrets": {"bot_token": (True, _token_field(TOKEN_RE, "Bot Token 的格式是 数字:字母串（从 @BotFather 获得）"))},
-            "help": "在 Telegram 里找 @BotFather 创建机器人，把 Token 填在这里。添加后在后台生成绑定码，用你自己的账号给机器人发“/bind 绑定码”。",
+            "help": "在 Telegram 里找 @BotFather 创建机器人，把 Token 填在这里。添加后在后台生成绑定码，打开 BotFather 给的 t.me/机器人名 链接进入你自己的机器人"
+                    "（不是发给 BotFather），点 Start，再发“/bind 绑定码”。",
         },
         "onebot11": {
             "class": OneBotChannel, "label": "QQ（OneBot v11，可选，需要 SnowLuma 等）",

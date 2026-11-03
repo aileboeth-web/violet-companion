@@ -161,6 +161,52 @@ def test_commit_puts_old_chat_before_violets_and_skips_repeats(admin, tmp_path, 
     assert violetdb.fetch_one("SELECT COUNT(*) AS n FROM messages")["n"] == 5
 
 
+def test_a_newer_eve_copy_fills_in_after_the_first_import(admin, tmp_path, violetdb):
+    """0.7.38 (user: 第二次导入后聊天页最新一条对不上): the rows only the newer copy has come AFTER the first import's,
+    and every link to a moved row (event sources, the inbox) follows it."""
+    violetdb.add_user_message("text", "Violet 时代的第一句", channel="wechat")
+
+    def commit(body):
+        p = upload(admin, body).get_json()["data"]
+        r = admin.post(f"/api/control/eve-import/{p['token']}/commit", headers=SAME,
+                       json={"confirm": True, "channel": "wechat", "messages": True, "memories": True})
+        assert r.status_code == 200, r.get_json()
+        return r.get_json()["data"]
+
+    commit(package(tmp_path))
+    first_ids = {r["content"]: r["id"] for r in violetdb.fetch_all("SELECT id, content FROM messages")}
+    violetdb.execute("INSERT INTO inbound_messages (dedup_key, item_index, item_type, content, status, received_at, "
+                     "updated_at, stored_message_id) VALUES ('k', 0, 'text', '早呀', 'done', 'x', 'x', ?)", (first_ids["早呀"],))
+    (tmp_path / "newer").mkdir()
+    body = package(tmp_path / "newer")
+    db = tmp_path / "newer" / "eve" / "Memories.db"            # the newer copy: two more days of chat
+    conn = sqlite3.connect(db)
+    conn.executemany("INSERT INTO messages (role, direction, message_type, content, created_at) VALUES (?, ?, ?, ?, ?)",
+                     [("user", "incoming", "text", "十一月的第一句", "2026-11-01T09:00:00+08:00"),
+                      ("assistant", "outgoing", "text", "十一月的回复", "2026-11-03T09:17:00+08:00")])
+    conn.execute("INSERT INTO event_memories (content, source_message_ids, created_at, updated_at) VALUES "
+                 "('用户十一月要考试', '[5]', '2026-11-01', '2026-11-01')")
+    conn.commit()
+    conn.close()
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        tar.add(db, arcname="eve-export/Memories.db")
+    assert body and commit(buf.getvalue())["messages"] == 2
+    rows = violetdb.fetch_all("SELECT id, content, created_at FROM messages ORDER BY id")
+    assert [r["content"] for r in rows] == ["早呀", "早，昨晚睡得好吗", "[图片] 一只猫", "（表情）", "十一月的第一句",
+                                            "十一月的回复", "Violet 时代的第一句"]
+    assert rows[5]["id"] == 0 and rows[6]["id"] > 0
+    by_content = {r["content"]: r["id"] for r in rows}
+    sources = {r["content"]: json.loads(r["source_message_ids"]) for r in
+               violetdb.fetch_all("SELECT content, source_message_ids FROM event_memories")}
+    assert sources["用户周末要去看展"] == [by_content["早呀"], by_content["[图片] 一只猫"]]
+    assert sources["用户十一月要考试"] == [by_content["十一月的第一句"]]
+    assert violetdb.fetch_one("SELECT stored_message_id AS v FROM inbound_messages WHERE dedup_key = 'k'")["v"] == \
+        by_content["早呀"]
+    page = admin.get("/api/control/messages?channel=wechat&limit=3").get_json()["data"]
+    assert [m["content"] for m in page["messages"]] == ["十一月的第一句", "十一月的回复", "Violet 时代的第一句"]
+
+
 def test_refusals(admin, tmp_path):
     assert upload(admin, b"not an eve file at all", "x.txt").status_code == 400
     p = upload(admin, package(tmp_path, with_env=False)).get_json()["data"]

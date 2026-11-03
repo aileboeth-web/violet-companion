@@ -15,6 +15,8 @@ Messages: Eve's chat is OLDER than anything Violet has, and much of Violet order
 imported rows therefore get ids BELOW every existing one (0, -1, -2, ...; SQLite allows that), in time order, so
 "newest = highest id" stays true everywhere. They are put on the chosen channel, as the account bound first there.
 A row already present (same channel, time, side and text) is skipped, so importing the same file twice adds nothing.
+After every message import all imported rows are numbered again in time order (_renumber_imported): a second, newer
+Eve copy fills in rows AFTER the first import's, not before.
 Core memories whose key Violet already has are kept as Violet has them. Event memories keep their links to the
 imported messages (source_message_ids are renumbered).
 """
@@ -341,6 +343,8 @@ def commit(token: str, violetdb, *, channel: str | None, messages: bool, memorie
             if messages:
                 n, skipped, id_map = _import_messages(conn, violetdb, channel)
                 result.update(messages=n, messages_skipped=skipped)
+                moved = _renumber_imported(violetdb)
+                id_map = {old: moved.get(new, new) for old, new in id_map.items()}
             if memories:
                 result.update(_import_memories(conn, violetdb, id_map))
             violetdb.execute(LEDGER)
@@ -386,6 +390,52 @@ def _import_messages(conn: sqlite3.Connection, violetdb, channel: str) -> tuple[
                          (new_id, role, "incoming" if role == "user" else "outgoing", kind, r["content"], r["created_at"],
                           channel, peer))
     return len(new), len(rows) - len(new), id_map
+
+
+# columns holding one id of the messages table (database.py); event_memories.source_message_ids is a JSON list
+MESSAGE_ID_COLUMNS = (("inbound_messages", "stored_message_id"), ("outbound_messages", "message_id"),
+                      ("memory_jobs", "user_message_id"), ("user_profile_facts", "source_message_id"),
+                      ("media_assets", "source_message_id"))
+_PARK = 1_000_000_000_000
+
+
+def _renumber_imported(violetdb) -> dict[int, int]:
+    """0.7.38 (user: 第二次导入后聊天页最新一条对不上): a later import of a NEWER Eve copy got ids below the first
+    import, so its 11-01..11-03 rows sorted before 10-31. Every imported row (id <= 0, all channels) is numbered again
+    in time order -- still all below Violet's own rows -- and the references to them follow. Returns old -> new for
+    the rows that moved; nothing when the order is already right (importing the same file again repairs an old mix)."""
+    rows = violetdb.fetch_all("SELECT id FROM messages WHERE id <= 0 ORDER BY created_at, id")
+    top = min(int((violetdb.fetch_one("SELECT MIN(id) AS low FROM messages WHERE id > 0") or {}).get("low") or 1), 1)
+    start = top - len(rows)
+    moved = {int(r["id"]): start + i for i, r in enumerate(rows) if int(r["id"]) != start + i}
+    if not moved:
+        return {}
+    # park the moving rows far below, then give each its place (no primary-key clash on the way)
+    for old in moved:
+        violetdb.execute("UPDATE messages SET id = ? WHERE id = ?", (old - _PARK, old))
+    for old, new in moved.items():
+        violetdb.execute("UPDATE messages SET id = ? WHERE id = ?", (new, old - _PARK))
+    for table, column in MESSAGE_ID_COLUMNS:
+        try:
+            refs = violetdb.fetch_all(f"SELECT DISTINCT {column} AS v FROM {table} WHERE {column} <= 0")
+        except sqlite3.Error:                       # an older database without that table / column
+            continue
+        for r in refs:
+            if r["v"] is not None and int(r["v"]) in moved:
+                violetdb.execute(f"UPDATE {table} SET {column} = ? WHERE {column} = ?",
+                                 (moved[int(r["v"])] - _PARK, int(r["v"])))
+        violetdb.execute(f"UPDATE {table} SET {column} = {column} + ? WHERE {column} < ?", (_PARK, -_PARK // 2))
+    for r in violetdb.fetch_all("SELECT id, source_message_ids FROM event_memories WHERE source_message_ids IS NOT NULL"):
+        try:
+            ids = json.loads(r["source_message_ids"])
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(ids, list):
+            continue
+        fixed = [moved.get(i, i) if isinstance(i, int) else i for i in ids]
+        if fixed != ids:
+            violetdb.execute("UPDATE event_memories SET source_message_ids = ? WHERE id = ?", (json.dumps(fixed), r["id"]))
+    return moved
 
 
 def _import_memories(conn: sqlite3.Connection, violetdb, id_map: dict[int, int]) -> dict[str, int]:
