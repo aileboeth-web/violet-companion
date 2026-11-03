@@ -159,9 +159,18 @@ def test_telegram_updates_are_parsed_for_private_chats_only():
     photo.pop("text")
     parsed = parse_update({"update_id": 7, "message": photo}, "tg")
     assert [p.kind for p in parsed.parts] == ["image", "text"] and parsed.parts[0].data["file_id"] == "b"
-    sticker = FakeTelegram.private_text("", sticker={"emoji": "😂", "file_id": "x"})
+    # 0.7.39: a sticker is a picture for the image model (static: itself; animated / video: its thumbnail)
+    sticker = FakeTelegram.private_text("", sticker={"emoji": "😂", "file_id": "x", "file_unique_id": "u1"})
     sticker.pop("text")
-    assert parse_update({"update_id": 8, "message": sticker}, "tg").parts[0].text == "[表情包：😂]"
+    part = parse_update({"update_id": 8, "message": sticker}, "tg").parts[0]
+    assert part.kind == "image" and part.data == {"file_id": "x", "sticker": True, "file": "u1"}
+    animated = FakeTelegram.private_text("", sticker={"emoji": "😂", "file_id": "a.tgs", "is_animated": True,
+                                                      "thumbnail": {"file_id": "t"}})
+    animated.pop("text")
+    assert parse_update({"update_id": 10, "message": animated}, "tg").parts[0].data["file_id"] == "t"
+    bare = FakeTelegram.private_text("", sticker={"emoji": "😂", "is_video": True})
+    bare.pop("text")
+    assert parse_update({"update_id": 11, "message": bare}, "tg").parts[0].text == "[表情包：😂]"
     quoted = FakeTelegram.private_text("对", reply_to_message={"text": "明天去吗"})
     assert parse_update({"update_id": 9, "message": quoted}, "tg").parts[0].text == "[引用：明天去吗]\n对"
 

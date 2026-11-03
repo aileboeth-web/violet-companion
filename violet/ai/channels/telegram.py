@@ -193,7 +193,17 @@ def parse_update(update: dict[str, Any], channel_id: str) -> InboundMessage | No
             parts.append(Part("image", "", {"file_id": biggest["file_id"]}))
     if message.get("sticker"):
         sticker = message["sticker"]
-        parts.append(Part("sticker", str(sticker.get("emoji") or "")))
+        # 0.7.39 (user: telegram 的表情包她识别不到): the picture goes to the image model like a QQ sticker (and into
+        # her collection). A static sticker is a .webp; an animated (.tgs) or video (.webm) one only via its static
+        # thumbnail. Without any picture: the emoji it stands for, as before.
+        static = not sticker.get("is_animated") and not sticker.get("is_video")
+        thumb = sticker.get("thumbnail") or sticker.get("thumb") or {}
+        file_id = sticker.get("file_id") if static else thumb.get("file_id")
+        if file_id:
+            parts.append(Part("image", "", {"file_id": file_id, "sticker": True,
+                                            "file": str(sticker.get("file_unique_id") or "")}))
+        else:
+            parts.append(Part("sticker", str(sticker.get("emoji") or "")))
     if message.get("voice") or message.get("audio"):
         parts.append(Part("voice", ""))
     if message.get("video") or message.get("video_note") or message.get("animation"):
