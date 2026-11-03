@@ -240,11 +240,19 @@ class ChatCompletionsAdapter(HttpAdapterBase):
         body: dict[str, Any] = {"model": self.entry.model_id, "messages": [{"role": "user", "content": parts}],
                                 "stream": False}
         if request.kind == "vision_analyze":
-            body["max_tokens"] = int(self.entry.options.get("max_tokens", 500))
+            # 0.7.46 (user: telegram 表情包她看不到 -- the description stopped at "以下是实际看到的内容： *"): 500 tokens
+            # was too few for thinking models, whose reasoning eats the budget. Bigger default + one retry when cut.
+            body["max_tokens"] = int(self.entry.options.get("max_tokens", 1500))
         for key, value in (self.entry.options.get("extra_body") or {}).items():
             body.setdefault(key, value)                    # e.g. {"modalities": ["image", "text"]} once confirmed
         from ai.model_params import apply as apply_model_params
         payload = self._post("/chat/completions", request, json_body=apply_model_params(body))
+        if request.kind == "vision_analyze" and _cut_short(payload) and body.get("max_tokens"):
+            body["max_tokens"] = min(int(body["max_tokens"]) * 3, 6000)
+            try:
+                payload = self._post("/chat/completions", request, json_body=apply_model_params(body))
+            except AdapterError:
+                pass                                       # keep the first (cut) answer rather than nothing
         usage, cost = _usage(payload)
         try:
             message = payload["choices"][0]["message"]
@@ -254,14 +262,38 @@ class ChatCompletionsAdapter(HttpAdapterBase):
             text = message.get("content")
             if isinstance(text, list):
                 text = "".join(p.get("text", "") for p in text if isinstance(p, dict))
-            if not isinstance(text, str) or not text.strip():
+            text = tidy_vision_text(text) if isinstance(text, str) else ""
+            if not text:
                 raise AdapterError("empty_response", "vision model returned no text", "yes")
-            return AdapterOutput(text=text.strip(), usage=usage, provider_cost=cost)
+            return AdapterOutput(text=text, usage=usage, provider_cost=cost)
         images = extract_chat_images(message)
         if not images:
             raise AdapterError("unknown_response", "no recognised image in the chat response", "yes")
         return AdapterOutput(images=images, text=message.get("content") if isinstance(message.get("content"), str) else None,
                              usage=usage, provider_cost=cost)
+
+
+def _cut_short(payload: Any) -> bool:
+    """The model stopped because it ran out of tokens (its answer is cut)."""
+    try:
+        return str(payload["choices"][0].get("finish_reason") or "").lower() in ("length", "max_tokens")
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return False
+
+
+_VISION_PREFACE = re.compile(r"(?:以下|下面)是[^：:\n。]{0,20}[：:]\s*")
+_MD_MARK = re.compile(r"^\s*(?:[*\-•+]|#{1,6}|\d+[.、)])\s+", re.M)
+
+
+def tidy_vision_text(text: str) -> str:
+    """Plain words for the chat: no markdown list marks / bold, no "以下是实际看到的内容：" lead-in, no dangling
+    bullet or colon left by a cut answer."""
+    text = text.replace("**", "").replace("__", "")
+    text = _MD_MARK.sub("", text)
+    lines = [line.strip() for line in text.splitlines() if line.strip() and line.strip() not in ("*", "-", "•")]
+    text = "\n".join(lines).strip()
+    rest = re.sub(r"[\s*\-•：:]+$", "", _VISION_PREFACE.sub("", text, count=1)).strip()
+    return rest or re.sub(r"[\s*\-•：:]+$", "", text).strip()
 
 
 def extract_chat_images(message: dict[str, Any]) -> list[RawImage]:

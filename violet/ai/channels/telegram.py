@@ -201,7 +201,8 @@ def parse_update(update: dict[str, Any], channel_id: str) -> InboundMessage | No
         file_id = sticker.get("file_id") if static else thumb.get("file_id")
         if file_id:
             parts.append(Part("image", "", {"file_id": file_id, "sticker": True,
-                                            "file": str(sticker.get("file_unique_id") or "")}))
+                                            "file": str(sticker.get("file_unique_id") or ""),
+                                            "emoji": str(sticker.get("emoji") or "")}))
         else:
             parts.append(Part("sticker", str(sticker.get("emoji") or "")))
     if message.get("voice") or message.get("audio"):

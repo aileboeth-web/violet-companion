@@ -1092,7 +1092,12 @@ class VioletRuntime:
             paths.append(path)
             return path
         text = self._describe_image_item(inbound_id, part, download=download)
-        return self._collect_owner_sticker(inbound_id, part, paths[0], text) if paths else text
+        line = self._collect_owner_sticker(inbound_id, part, paths[0], text) if paths else text
+        emoji = str((part.data or {}).get("emoji") or "").strip()
+        if emoji and line.startswith("[对方发来一个表情包"):     # 0.7.46: Telegram says what it means, too
+            line = f"{line}（这个表情包代表 {emoji}）"
+            self.db.update_inbound_messages([inbound_id], content=line)
+        return line
 
     def _collect_owner_sticker(self, inbound_id: int, part, path, text: str) -> str:
         """0.7.9: a sticker the owner sends goes into her collection (VIOLET_STICKER_AUTO_COLLECT); the chat sees
