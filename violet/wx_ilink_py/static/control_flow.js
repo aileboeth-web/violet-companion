@@ -19,8 +19,16 @@
   const clock = (t) => (t ? new Date(t * 1000).toLocaleTimeString() : "—");
 
   async function refresh() {
+    // 0.7.48 (user: 流程空空如也 -- it was a slow network): until the first answer the list says it is loading,
+    // and after 10 seconds that the network is slow, instead of staying blank
+    let slow = null;
+    if (!state.listSig) {
+      $("#flow-list").replaceChildren(h("p", { class: "note", text: "正在加载…" }));
+      slow = setTimeout(() => { if (!state.listSig) $("#flow-list").replaceChildren(h("p", { class: "note", text: "网络较慢，还在等服务器回复。稍等一下，或者点右上角的「刷新」。" })); }, 10000);
+    }
     let d;
     try { d = await api("GET", "/api/control/flow"); } catch (e) { $("#flow-list").replaceChildren(h("p", { class: "err", text: e.message })); return; }
+    finally { clearTimeout(slow); }
     // looking at the newest run: follow the next one when it starts (live); an older one stays selected
     const following = !state.runs.length || state.selected === state.runs[0].id;
     state.runs = d.runs || [];
