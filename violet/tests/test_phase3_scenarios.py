@@ -304,7 +304,9 @@ def test_p3_s11_legacy_core_memories_and_new_profile(make_world):
     quiet_memory(w)
     say(w, "早")
     system = last_chat_system(w)
-    assert "【旧系统保存的相处偏好与长期记忆（未逐条确认" in system and "用户喜欢短句回复" in system
+    # 0.7.49: shown as Eve showed them -- labelled by key, "优先遵守"
+    assert "【你和对方以前（旧系统里）就定下的相处习惯和长期记忆——优先遵守" in system
+    assert "- 对方喜欢你怎么回消息：用户喜欢短句回复" in system and "- 你怎么称呼对方：用户喜欢被叫阿澈" in system
     assert "希望被称呼为：" not in system                         # an unconfirmed candidate is not a fact
 
     from ai.profile_store import Profile

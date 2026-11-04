@@ -409,6 +409,24 @@ let memOffset = 0; const MEM_PAGE = 30;
 // 2026-11-02 (user: 说了喜欢喝杨枝甘露奶茶，记忆里找不到): stable things about the owner (likes, how to call them, school)
 // are kept in the profile, her current state and how she should talk in two more lists -- none of them had a place in
 // the Control Center since the old dashboard went away. They are shown here, from /api/profile.
+// 0.7.49 (user: 搜索要把搜索的字词高亮才知道在哪儿找): the searched words marked in the text, case-insensitive
+function marked(text, q) {
+  const s = String(text ?? "");
+  q = (q || "").trim();
+  if (!q) return s;
+  const out = []; const low = s.toLowerCase(); const ql = q.toLowerCase();
+  let pos = 0, at;
+  while ((at = low.indexOf(ql, pos)) !== -1) {
+    if (at > pos) out.push(s.slice(pos, at));
+    out.push(h("mark", { class: "hit", text: s.slice(at, at + q.length) }));
+    pos = at + q.length;
+  }
+  if (pos < s.length) out.push(s.slice(pos));
+  return out;
+}
+const memQuery = () => $("#mem-q").value.trim();
+// importance 2.5999999999999996 -> 2.6
+const num = (v) => (typeof v === "number" && !Number.isInteger(v) ? String(Math.round(v * 100) / 100) : fmt(v));
 const PROFILE_STATUS = { active: "在用", candidate: "待确认（只说过一次或不太确定）", superseded: "已被新的取代", disabled: "已停用",
   expired: "已过期", deleted: "已删除" };
 async function loadProfileKind(kind) {
@@ -455,8 +473,8 @@ function profileCard(kind, r) {
     if (!(await confirmBox(`删除这一条？会从她的档案里彻底删掉（聊天记录里这句话的原文也会被抹掉），不能恢复。\n\n${text}`))) return;
     try { await api("DELETE", base || `/api/profile/preferences/id/${r.id}`); toast("已删除"); loadMemories(); }
     catch (e) { toast(e.message, false); } } });
-  return h("div", { class: "card" }, h("div", { text: text }),
-    r.evidence ? h("div", { class: "note", text: "原话：" + r.evidence }) : null,
+  return h("div", { class: "card" }, h("div", {}, marked(text, memQuery())),
+    r.evidence ? h("div", { class: "note" }, "原话：", marked(r.evidence, memQuery())) : null,
     h("div", { class: "badges" }, ...badges.filter(Boolean).map((b) => pill(b))),
     h("div", { class: "row", style: "justify-content:flex-end;margin-top:6px" }, toggle, del));
 }
@@ -471,8 +489,8 @@ async function loadReminders() {
     const rows = [...d.pending, ...d.recent].filter((r) => !q || (r.content || "").includes(q));
     $("#mem-total").textContent = `还没到时间的 ${d.pending.length} 条，下面也列出最近已经结束的`;
     $("#mem-list").replaceChildren(...(rows.length ? rows.map((r) => h("div", { class: "card" },
-      h("div", { text: r.content }),
-      r.evidence ? h("div", { class: "note", text: "你的原话：" + r.evidence }) : null,
+      h("div", {}, marked(r.content, q)),
+      r.evidence ? h("div", { class: "note" }, "你的原话：", marked(r.evidence, q)) : null,
       h("div", { class: "badges" }, pill(REMINDER_STATUS[r.status] || r.status, r.status === "pending" ? "warn" : ""),
         pill("时间 " + when(r.due_at)), r.delivered_at ? pill("发出 " + when(r.delivered_at)) : null),
       r.status === "pending" ? h("div", { class: "row", style: "justify-content:flex-end;margin-top:6px" },
@@ -506,12 +524,12 @@ async function loadMemories() {
 function memoryCard(kind, m) {
   const facts = kind === "core"
     ? [`分类 ${fmt(m.category)}`, `键 ${fmt(m.memory_key)}`, `来源 ${fmt(m.source)}`, `优先级 ${fmt(m.priority)}`]
-    : [`状态 ${fmt(m.status)}`, `分类 ${fmt(m.category)}`, m.progress ? `进展 ${m.progress}` : null, `重要度 ${fmt(m.importance)}`,
+    : [`状态 ${fmt(m.status)}`, `分类 ${fmt(m.category)}`, m.progress ? `进展 ${m.progress}` : null, `重要度 ${num(m.importance)}`,
        m.source ? `来源 ${m.source.label}` : null];
   if (m.confirmed_by_user) facts.push("用户已确认");
   for (const c of m.pending_conflicts || []) facts.push(`待确认：“${c.old}”已被纠正为“${c.new}”`);
   return h("div", { class: "card" },
-    h("div", { text: m.content }),
+    h("div", {}, marked(m.content, memQuery())),
     h("div", { class: "badges" }, ...facts.filter(Boolean).map((f) => pill(f)), pill(`更新 ${when(m.updated_at)}`), pill(`修改记录 ${m.revisions}`)),
     h("div", { class: "row", style: "justify-content:flex-end;margin-top:6px" },
       h("button", { class: "ghost", onclick: () => editMemory(kind, m), text: "查看 / 纠正" }),

@@ -133,6 +133,7 @@ button.danger{background:linear-gradient(135deg,#ef4444,#f97316);box-shadow:0 6p
 button.wide{width:100%;margin-top:8px}
 button.mini{padding:3px 10px;font-size:12px;border-radius:8px}
 .note{color:var(--muted);font-size:12.5px}
+mark.hit{background:#ffe066;color:#1f1300;border-radius:3px;padding:0 1px;font-weight:600}
 code{background:var(--panel-hover);border:1px solid var(--line);border-radius:7px;padding:2px 7px;font-size:12.5px;word-break:break-all}
 .pill{display:inline-flex;align-items:center;gap:6px;padding:3px 11px;border-radius:999px;background:var(--panel-hover);
   border:1px solid var(--line);font-size:12px;font-weight:600;white-space:nowrap}

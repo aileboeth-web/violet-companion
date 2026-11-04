@@ -88,6 +88,25 @@ def ai_prompt() -> str | None:
     return text or None
 
 
+def merge_runs(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """0.7.49 (user: 条数最多只有四条，原本 Eve 在同等聊天记录下最多可以发十多条): every stored line was its own
+    assistant message, so the model saw "one reply = one line" in the whole history -- Eve's own ten-line answers
+    included -- and wrote a few lines at most. Lines one side sent in a row (no time / channel mark between) are ONE
+    message again, one line each, exactly as the reply format asks for. VIOLET_CONTEXT_MERGE_RUNS=0: as before."""
+    from ai.settings import env_bool
+    if not env_bool("VIOLET_CONTEXT_MERGE_RUNS", True):
+        return list(history)
+    out: list[dict[str, Any]] = []
+    for turn in history:
+        prev = out[-1] if out else None
+        if (prev is not None and turn.get("role") in ("user", "assistant") and prev.get("role") == turn.get("role")
+                and isinstance(prev.get("content"), str) and isinstance(turn.get("content"), str)):
+            out[-1] = {**prev, "content": f"{prev['content']}\n{turn['content']}"}
+            continue
+        out.append(dict(turn))
+    return out
+
+
 # 2026-10-30 (rework step 2: "加一个页面看这次给了她什么规则"): what the last reply was built from, for the admin page
 LAST_PROMPT: dict[str, Any] = {}
 
@@ -380,7 +399,7 @@ class ChatAgent(BaseAgent):
                             "。请重写这一条回复：没有记录的事不要说自己做过，计划不要说成已经完成，"
                             "不要编造家人、工作、学校等背景。"),
             })
-        history = list(packet.history)
+        history = merge_runs(packet.history)
         if history:
             history[-1] = {**history[-1], "_cache_break": True}
         messages = stable + history + messages

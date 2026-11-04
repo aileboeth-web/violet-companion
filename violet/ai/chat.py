@@ -191,10 +191,14 @@ def format_recalled_memories(memories: list[dict[str, Any]]) -> str:
             if conflicts:
                 tags.append(conflict_tag(conflicts))
         lines.append(f"- id={memory.get('id')}; [{' / '.join(tags)}] {memory.get('content')}")
-    lines.append(
-        "使用规则：进展未知或很久以前的事，不要假定它已经结束或仍在进行，也不要为了它追问；"
-        "已结束的事不要当作正在发生。"
-    )
+    rule = ("使用规则：进展未知或很久以前的事，不要假定它已经结束或仍在进行，也不要为了它追问；"
+            "已结束的事不要当作正在发生。")
+    if any((m.get("kind") or "legacy") == "legacy" for m in memories):
+        # 0.7.49 (user: Eve 的记忆没迁移到位): Eve's own records ("夜间互动适度收敛，可称呼'宝宝'或'老公'") are notes for HER,
+        # the one replying -- read without that, she asked the owner to call her 老公
+        rule += (f"“{KIND_LABELS['legacy']}”是旧系统里记下的：里面的“用户”就是对方；没写主语的称呼、语气、做法，"
+                 "说的都是你怎么对对方（例如“可称呼宝宝”= 你叫对方宝宝）。")
+    lines.append(rule)
     return "\n".join(lines)
 
 

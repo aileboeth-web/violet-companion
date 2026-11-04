@@ -51,6 +51,31 @@ USER_STATED_SOURCES = ("user_stated", "dashboard")
 PLAN_ANSWERED_KINDS = ("location", "activity", "availability")
 PROACTIVE_KEYS = ("address_name", "interest", "routine.schedule", "identity.status", "boundary")
 LIFE_TOPIC_WORDS = ("书", "小说", "读", "看完", "音乐", "歌", "专辑", "听", "笔记", "记录", "写")
+# 0.7.49: what Eve's core memory keys mean (Eve's MEMORY_LLM_PROMPT: reply_style = 用户喜欢 Eve 如何回复, nickname_preference
+# = 用户喜欢的称呼, ...). Eve's memories are rules for HER (the one replying); "用户" in them is the owner.
+LEGACY_CORE_LABELS = {
+    "reply_style": "对方喜欢你怎么回消息", "comfort_style": "对方难过、压力大时希望你怎么安慰",
+    "nickname_preference": "你怎么称呼对方", "nickname": "你怎么称呼对方", "user_pet_preference": "你怎么称呼对方",
+    "relationship_tone": "对方喜欢的相处语气", "relationship": "你们的相处", "boundary": "对方的雷区（不要这样说）",
+    "user_preferences": "对方的长期喜好", "preference": "对方的长期喜好", "user_profile": "对方的基本情况",
+    "proactive_style": "你主动找对方时，对方喜欢的方式",
+}
+LEGACY_CORE_HEADER = ("【你和对方以前（旧系统里）就定下的相处习惯和长期记忆——优先遵守。“用户”就是对方；没写主语的称呼、语气、"
+                      "做法，说的都是你怎么对对方。对方最近明确说了不一样的，以对方最近说的为准】")
+
+
+def legacy_core_label(key: str | None, category: str | None) -> str:
+    key = (key or "").strip().lower()
+    if key in LEGACY_CORE_LABELS:
+        return LEGACY_CORE_LABELS[key]
+    for part, label in (("reply", "对方喜欢你怎么回消息"), ("comfort", "对方难过、压力大时希望你怎么安慰"),
+                        ("nickname", "你怎么称呼对方"), ("call", "你怎么称呼对方"), ("boundary", "对方的雷区（不要这样说）"),
+                        ("proactive", "你主动找对方时，对方喜欢的方式")):
+        if part in key:
+            return label
+    return LEGACY_CORE_LABELS.get((category or "").strip().lower(), "")
+
+
 RESTRICTED_HEADER = (
     "以下话题现在不适合由你主动提起（事件进展未知或已结束，或你最近已主动提过而对方反应平淡）。"
     "除非用户本轮主动说起，否则不要提起，也不要换个说法追问："
@@ -182,7 +207,7 @@ VOLATILE_SECTIONS = {"profile", "situation", "commitments", "recall", "restricte
 
 class ContextEngine:
     # Phase 9.1 (A9): what the user told Violet is trimmed after Violet's own life (4), web findings (5) and the old core
-    # memories (6); it used to be 5 and, listed first, went before the web findings when over budget.
+    # memories (6 -- 3 since 0.7.49); it used to be 5 and, listed first, went before the web findings when over budget.
     RECALL_PRIORITY = 2
 
     def __init__(self, db):
@@ -416,7 +441,8 @@ class ContextEngine:
 
     def _legacy_section(self) -> _Section:
         excluded = self.profile.facts.excluded_core_memory_ids()
-        rows = [m for m in self.db.list_core_memories(limit=env_int("VIOLET_CONTEXT_MAX_LEGACY", 12)) if m["id"] not in excluded]
+        # 0.7.49: 20 like Eve itself (was 12 -- an Eve import lost the rest of what she had been taught)
+        rows = [m for m in self.db.list_core_memories(limit=env_int("VIOLET_CONTEXT_MAX_LEGACY", 20)) if m["id"] not in excluded]
         if env_bool("VIOLET_CONTEXT_HIDE_LEGACY_NICKNAME", True) and self._has_usable_fact("address_name"):
             # Phase 7 B.2: a confirmed profile name is the only source of how to address the user; old
             # nickname core memories would repeat it, or contradict it after the user changed it. Display
@@ -427,9 +453,14 @@ class ContextEngine:
         lines = []
         for m in rows:
             conflicts = pending_conflicts(self.db, "core_memories", m["id"], m["content"])   # phase 9.1.2
-            lines.append(f"- {m['content']}" + (f"（{conflict_tag(conflicts)}）" if conflicts else ""))
-        return _Section("legacy_core", 6,
-                        "【旧系统保存的相处偏好与长期记忆（未逐条确认；与上面的档案或用户最新说法冲突时，以后者为准）】", lines)
+            label = legacy_core_label(m.get("memory_key"), m.get("category"))
+            lines.append(f"- {label + '：' if label else ''}{m['content']}"
+                         + (f"（{conflict_tag(conflicts)}）" if conflicts else ""))
+        # 0.7.49 (user: Eve 的记忆没迁移到位导致她出现问题): Eve showed these with their key ("nickname_preference" =
+        # how the USER wants to be called) under "优先遵守"; Violet showed the bare text as "unconfirmed" -- "可称呼宝宝或
+        # 老公" lost who calls whom (she asked the owner to call HER 老公), and the reply style he taught Eve was weak
+        # priority 3 (was 6, trimmed first): kept before her own life (4) and web findings (5) when over budget
+        return _Section("legacy_core", 3, LEGACY_CORE_HEADER, lines)
 
     def _has_usable_fact(self, key: str) -> bool:
         return any(f.get("use_in_context", 1) for f in self.profile.facts.list_facts(["active"], key))
