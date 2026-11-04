@@ -494,24 +494,49 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
     def _eve_preview(token: str):
         from ai import eve_import
         data = eve_import.preview(token, violetdb)
-        from ai import memory_scope
         from ai import persona_templates as pt
         main_template = pt.current().get("template")
-        data["channels"] = [{"id": k, **v, "persona": memory_scope.label(memory_scope.for_channel(k)),
-                             # 0.7.51: the template in effect, so the page can offer "Eve first" when it is not Eve
-                             "template": (pt.channel_map().get(k) or {}).get("template") or main_template}
-                            for k, v in _channel_labels().items()]
+        out = []
+        for k, v in _import_channels().items():
+            own = pt.channel_map().get(k) or {}
+            out.append({"id": k, **v, "persona": pt.in_effect(k)["persona"],
+                        # 0.7.51: what the channel uses now, so the page preselects it / offers another
+                        "template": own.get("template") or main_template,
+                        "kind": pt.relationship(k)["kind"]})
+        data["channels"] = out
+        # 0.7.52 (user: 导入记忆的时候全部人设都可以选，只给个 Eve 的选项是何意味): every persona and relationship
+        personas = [{"key": t["key"], "title": t["title"]} for t in pt.templates()]
+        if (pt.control_dir() / pt.CUSTOM_COPY).is_file():        # what set_channel accepts as "custom"
+            personas.append({"key": "custom", "title": "自定义人设"})
+        data["personas"] = personas
+        data["relationships"] = [{"key": k, "label": v[0]} for k, v in pt.RELATIONSHIPS.items()]
         return data
 
-    def _eve_persona_first(channel: str) -> None:
-        """0.7.51 (user screenshot: 导入到 微信（人设：Violet（默认））): an import into a channel still on another persona put
-        Eve's chat and memories into THAT persona's memory; choosing Eve afterwards moved the chat along but not the
-        memories without a source message (all core memories, many events) -- "记忆没迁移到位". The channel gets the
-        Eve persona (relationship 恋人 unless it has its own) BEFORE the import."""
+    # 0.7.52 (user: 只可以导入到微信，不能导入到其他渠道): the channel kinds of the 渠道 page, under the id that page gives
+    # the first one of each (control_channels.js PLATFORMS key) -- a chat imported before the channel is added is that
+    # channel's chat once it is
+    IMPORT_KINDS = (("wechat", "wechat_ilink", "微信"), ("napcat", "napcat", "QQ"), ("qq", "qqbot", "QQ（机器人）"),
+                    ("telegram", "telegram", "Telegram"))
+
+    def _import_channels() -> dict[str, dict[str, Any]]:
+        out = {k: {**v, "added": True} for k, v in _channel_labels().items()}
+        types = {v.get("type") for v in out.values()}
+        for cid, ctype, label in IMPORT_KINDS:
+            if cid not in out and ctype not in types:
+                out[cid] = {"label": label, "type": ctype, "added": False}
+        return out
+
+    def _persona_first(channel: str, template: str | None, kind: str | None) -> None:
+        """0.7.51 (user screenshot: 导入到 微信（人设：Violet（默认））): an import into a channel on another persona put the
+        chat and memories into THAT persona's memory; choosing a persona afterwards moved the chat along but not the
+        memories without a source message (all core memories, many events) -- "记忆没迁移到位". The persona (and
+        relationship) chosen on the import page is set on the channel BEFORE the import. 0.7.52: any persona, any
+        relationship; "" keeps what the channel has."""
         from ai import memory_scope
         from ai import persona_templates as pt
-        own = (pt.channel_map().get(channel) or {}).get("relationship") or {}
-        pt.set_channel(channel, "eve", own.get("kind") or "partner", own.get("call"))
+        entry = pt.channel_map().get(channel) or {}
+        own = entry.get("relationship") or {}
+        pt.set_channel(channel, template or entry.get("template") or None, kind or own.get("kind"), own.get("call"))
         memory_scope.split_channels(violetdb)
 
     @app.post("/api/control/eve-import/upload")
@@ -540,22 +565,28 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
         if body.get("confirm") is not True:
             return bad("需要确认（confirm: true）")
         channel = str(body.get("channel") or "").strip()[:64] or None
-        if channel is not None and channel not in _channel_labels():
+        if channel is not None and channel not in _import_channels():
             return bad("没有这个聊天渠道")
         settings = [str(k) for k in (body.get("settings") or []) if isinstance(k, str)][:100]
+        template = str(body.get("persona") or "").strip()[:64]
+        kind = str(body.get("kind") or "").strip()[:32]
         try:
-            if body.get("as_eve") is True and channel:
+            if channel and (template or kind):
                 eve_import.check_token(token)                   # nothing changes for an upload that is gone
-                _eve_persona_first(channel)
-            return ok(eve_import.commit(token, violetdb, channel=channel, messages=bool(body.get("messages")),
-                                        memories=bool(body.get("memories")), settings=settings, actor=actor(),
-                                        apply=apply_now))
+                _persona_first(channel, template or None, kind or None)
+            result = eve_import.commit(token, violetdb, channel=channel, messages=bool(body.get("messages")),
+                                       memories=bool(body.get("memories")), settings=settings, actor=actor(),
+                                       apply=apply_now)
+            if channel:                                         # also right for a channel not added yet
+                from ai import persona_templates as pt
+                result["persona"] = pt.in_effect(channel)["persona"]
+            return ok(result)
         except eve_import.ImportError_ as exc:
             return bad(str(exc))
         except ValidationError as exc:
             return bad("设置没有导入：" + str(exc), problems=exc.problems)
         except ValueError as exc:                               # the persona step (persona_templates.set_channel)
-            return bad("人设没有改成 Eve：" + str(exc))
+            return bad("人设没有改好：" + str(exc))
 
     # ------------------------------------------------------------------ 2026-11-02: reminders (commitments)
     # "明天 8 点提醒我…" became a row here and was sent on time, but nothing listed them and only the chat could cancel one

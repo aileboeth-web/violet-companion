@@ -217,7 +217,7 @@ def test_eve_persona_first_keeps_every_memory_with_eve(admin, tmp_path, violetdb
     wechat = next(c for c in p["channels"] if c["id"] == "wechat")
     assert wechat["template"] != "eve"                              # the page offers "Eve first"
     r = admin.post(f"/api/control/eve-import/{p['token']}/commit", headers=SAME, json={
-        "confirm": True, "channel": "wechat", "messages": True, "memories": True, "as_eve": True})
+        "confirm": True, "channel": "wechat", "messages": True, "memories": True, "persona": "eve", "kind": "partner"})
     assert r.status_code == 200, r.get_json()
     assert r.get_json()["data"]["persona"].startswith("Eve")
     assert pt.channel_map()["wechat"] == {"template": "eve", "relationship": {"kind": "partner"}}
@@ -233,10 +233,40 @@ def test_eve_persona_first_keeps_every_memory_with_eve(admin, tmp_path, violetdb
     assert next(c for c in p2["channels"] if c["id"] == "wechat")["template"] == "eve"   # no offer any more
 
 
+def test_any_channel_any_persona(admin, tmp_path, violetdb, env_guard):
+    """0.7.52 (user: 只可以导入到微信，不能导入到其他渠道；导入记忆的时候全部人设都可以选): every channel kind is offered,
+    also one not added yet (under the id the 渠道 page will give it), with every persona and relationship."""
+    from ai import memory_scope
+    from ai import persona_templates as pt
+    p = upload(admin, package(tmp_path)).get_json()["data"]
+    chans = {c["id"]: c for c in p["channels"]}
+    assert {"wechat", "napcat", "qq", "telegram"} <= set(chans)
+    assert chans["wechat"]["added"] is True and chans["telegram"]["added"] is False
+    keys = {t["key"] for t in p["personas"]}
+    assert {t["key"] for t in pt.templates()} == keys and {"eve", "violet"} <= keys
+    assert {r["key"] for r in p["relationships"]} == set(pt.RELATIONSHIPS)
+    r = admin.post(f"/api/control/eve-import/{p['token']}/commit", headers=SAME, json={
+        "confirm": True, "channel": "telegram", "messages": True, "memories": True, "persona": "genki", "kind": "friend"})
+    assert r.status_code == 200, r.get_json()
+    assert pt.channel_map()["telegram"] == {"template": "genki", "relationship": {"kind": "friend"}}
+    assert memory_scope.for_channel("telegram") == "genki"
+    assert r.get_json()["data"]["persona"] == pt.in_effect("telegram")["persona"]
+    with memory_scope.use("genki"):
+        assert {m["channel"] for m in violetdb.fetch_all("SELECT channel FROM messages")} == {"telegram"}
+        assert violetdb.fetch_one("SELECT COUNT(*) AS n FROM core_memories")["n"] == 2
+    assert "wechat" not in pt.channel_map()                                   # the other channels are untouched
+    (tmp_path / "bad").mkdir()
+    p2 = upload(admin, package(tmp_path / "bad")).get_json()["data"]
+    assert admin.post(f"/api/control/eve-import/{p2['token']}/commit", headers=SAME, json={
+        "confirm": True, "channel": "wechat", "messages": True, "persona": "no-such"}).status_code == 400
+    assert admin.post(f"/api/control/eve-import/{p2['token']}/commit", headers=SAME, json={
+        "confirm": True, "channel": "line", "messages": True}).status_code == 400   # not a channel kind
+
+
 def test_eve_persona_first_needs_a_live_upload(admin, env_guard):
     from ai import persona_templates as pt
     r = admin.post("/api/control/eve-import/" + "a" * 24 + "/commit", headers=SAME,
-                   json={"confirm": True, "channel": "wechat", "messages": True, "as_eve": True})
+                   json={"confirm": True, "channel": "wechat", "messages": True, "persona": "eve"})
     assert r.status_code == 400 and "wechat" not in pt.channel_map()          # nothing changed for a gone upload
 
 
