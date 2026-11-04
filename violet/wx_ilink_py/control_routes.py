@@ -94,10 +94,27 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
     def control_personas():
         """The personas that have a memory of their own (the page's picker; hidden when there is only one)."""
         from ai import memory_scope
+        from ai import persona_templates as pt
         scopes = memory_scope.all_scopes()
         scopes += [s for s in violetdb.scope_files() if s not in scopes]
-        return ok({"personas": [{"scope": s, "label": memory_scope.label(s),
-                                 "channels": memory_scope.channels_of(s)} for s in scopes]})
+        kinds = {cid: label for cid, _t, label in IMPORT_KINDS}
+        labels = {k: v.get("label") or k for k, v in _channel_labels().items()}
+        out = []
+        for s in scopes:
+            channels = memory_scope.channels_of(s)
+            names = [labels.get(c, c) for c in channels]
+            # 0.7.53 (user screenshot of "Violet（默认）（1 个渠…" and an empty chat page after an Eve import into a channel
+            # not added yet): such a persona was shown as its raw key "eve（没有渠道在用）"; now its name and the channel
+            # waiting for it, and how many messages each has (the page opens on one that has some)
+            waiting = [c for c, e in pt.channel_map().items() if memory_scope.clean(e.get("template")) == s
+                       and c not in channels and c not in labels]
+            names += [f"{kinds.get(c, c)}（还没添加）" for c in waiting]
+            label = memory_scope.label(s) if channels or s == memory_scope.MAIN else \
+                pt.in_effect(waiting[0])["persona"] if waiting else memory_scope.label(s)
+            with memory_scope.use(s):
+                count = violetdb.fetch_one("SELECT COUNT(*) AS n FROM messages")["n"]
+            out.append({"scope": s, "label": label, "channels": channels, "channel_names": names, "messages": count})
+        return ok({"personas": out})
 
     def ok(data: Any = None, status: int = 200) -> Response:
         return jsonify({"ok": True, "data": data}), status
@@ -423,7 +440,10 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
                 continue
             last = max([x for x in [own and own["last_at"], *[c.get("last_message_at") for c in others]] if x], default=None)
             windows = len(_owner_windows(ch)) if own else 0
-            out.append({"id": ch, "label": labels.get(ch, {}).get("label", ch), "type": labels.get(ch, {}).get("type", ""),
+            # 0.7.53: a chat imported for a channel not added yet is named, not shown as its id ("telegram")
+            kind = next((k for k in IMPORT_KINDS if k[0] == ch), None)
+            name = labels.get(ch, {}).get("label") or (f"{kind[2]}（还没添加）" if kind else ch)
+            out.append({"id": ch, "label": name, "type": labels.get(ch, {}).get("type", "") or (kind[1] if kind else ""),
                         "owner_messages": own["n"] if own else 0, "owner_windows": windows,
                         "conversations": len(others), "last_at": last})
         return ok({"channels": out})
@@ -578,8 +598,10 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
                                        memories=bool(body.get("memories")), settings=settings, actor=actor(),
                                        apply=apply_now)
             if channel:                                         # also right for a channel not added yet
+                from ai import memory_scope
                 from ai import persona_templates as pt
                 result["persona"] = pt.in_effect(channel)["persona"]
+                result["scope"] = memory_scope.for_channel(channel)   # 0.7.53: the page switches to it
             return ok(result)
         except eve_import.ImportError_ as exc:
             return bad(str(exc))

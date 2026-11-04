@@ -246,7 +246,7 @@
       call.value = (c.relationship || {}).call || "";
       return h("div", { class: "stack" }, h("div", { class: "row" }, h("strong", { text: c.label, style: "min-width:7em" }), tpl, rel, call,
         h("button", { class: "ghost", type: "button", text: "保存", onclick: async () => {
-          try { await api("POST", "/api/persona/channel", { channel: c.id, template: tpl.value || null, kind: rel.value || null, call: call.value }); toast(`${c.label} 已保存`); loaders.persona(); }
+          try { await api("POST", "/api/persona/channel", { channel: c.id, template: tpl.value || null, kind: rel.value || null, call: call.value }); toast(`${c.label} 已保存`); loaders.persona(); loadPersonaPicker(); }
           catch (e) { toast(e.message, false); }
         } })), c.in_effect ? inEffect(c.in_effect) : null);
     });

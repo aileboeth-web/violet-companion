@@ -255,6 +255,15 @@ def test_any_channel_any_persona(admin, tmp_path, violetdb, env_guard):
         assert {m["channel"] for m in violetdb.fetch_all("SELECT channel FROM messages")} == {"telegram"}
         assert violetdb.fetch_one("SELECT COUNT(*) AS n FROM core_memories")["n"] == 2
     assert "wechat" not in pt.channel_map()                                   # the other channels are untouched
+    assert r.get_json()["data"]["scope"] == "genki"                           # the page switches to it
+    # 0.7.53 (user: 我还以为我眼花了): the menu's picker names that persona and the channel waiting for it, with counts
+    personas = {x["scope"]: x for x in admin.get("/api/control/personas").get_json()["data"]["personas"]}
+    assert personas["genki"]["label"] == pt.in_effect("telegram")["persona"] and personas["genki"]["messages"] == 4
+    assert personas["genki"]["channel_names"] == ["Telegram（还没添加）"] and personas["main"]["messages"] == 0
+    with memory_scope.use("genki"):
+        chans = {c["id"]: c for c in admin.get("/api/control/history", headers={"X-Violet-Persona": "genki"})
+                 .get_json()["data"]["channels"]}
+    assert chans["telegram"]["label"] == "Telegram（还没添加）" and chans["telegram"]["owner_messages"] == 4
     (tmp_path / "bad").mkdir()
     p2 = upload(admin, package(tmp_path / "bad")).get_json()["data"]
     assert admin.post(f"/api/control/eve-import/{p2['token']}/commit", headers=SAME, json={

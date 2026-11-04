@@ -116,7 +116,9 @@
               (r.persona ? `都归人设“${r.persona}”。` : "") }),
             h("p", { class: "note", text: "上传的文件已经从服务器上删掉。" }),
             h("div", { class: "row" }, h("button", { type: "button", class: "ghost", text: "去看聊天记录", onclick: () => goTo("chat") }))));
-          toast("已导入");
+          // 0.7.53 (user: 导入后聊天记录页空空的，还以为眼花了): the pages now show the persona the import went to
+          if (r.scope) { PERSONA = r.scope; await loadPersonaPicker(); }
+          toast(r.persona ? `已导入，现在看的是“${r.persona}”的记录` : "已导入");
         } catch (e) { toast("导入失败：" + e.message, false); }
       } }))].filter(Boolean));
   }

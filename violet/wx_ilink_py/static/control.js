@@ -28,9 +28,24 @@ async function loadPersonaPicker() {
     const list = d.personas || [];
     const sel = $("#persona-scope");
     if (!list.some((p) => p.scope === PERSONA)) PERSONA = "main";
-    sel.replaceChildren(...list.map((p) => h("option", { value: p.scope, text: p.label + (p.channels.length ? "（" + p.channels.length + " 个渠道）" : "（没有渠道在用）") })));
+    // 0.7.53 (user: 我还以为我眼花了 -- an Eve import into a channel not added yet, the page on the empty main persona,
+    // "Violet（默认）（1 个渠" cut off): on the first load the page opens on a persona that has messages; each option
+    // says the name and the channels (by name), and the full text is in the title
+    let switched = false;
+    if (!loadPersonaPicker.done) {
+      loadPersonaPicker.done = true;
+      const main = list.find((p) => p.scope === "main");
+      if (main && !main.messages) { const other = list.find((p) => p.messages); if (other) { PERSONA = other.scope; switched = true; } }
+    }
+    sel.replaceChildren(...list.map((p) => h("option", { value: p.scope, text: p.label })));
     sel.value = personaScope();
+    const cur = list.find((p) => p.scope === PERSONA) || {};
+    $("#persona-where").textContent = "用在：" + ((cur.channel_names || []).join("、") || "没有渠道在用");
     $("#persona-pick").hidden = list.length < 2;
+    if (switched) {                                // the page already shows main's data: show the chosen one's
+      const active = document.querySelector("#tabs button.active");
+      if (active && loaders[active.dataset.tab]) loaders[active.dataset.tab]();
+    }
   } catch (_) { /* older server or not logged in */ }
 }
 async function api(method, url, body) {
@@ -1175,6 +1190,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 // 2026-11-02: the persona picker (see personaScope)
 $("#persona-scope").addEventListener("change", (e) => {
   PERSONA = e.target.value;
+  loadPersonaPicker();                            // the "用在：…" line under it
   const active = document.querySelector("#tabs button.active");
   if (active) (loaders[active.dataset.tab] || (() => {}))();
   toast("现在看的是：" + e.target.selectedOptions[0].textContent);
