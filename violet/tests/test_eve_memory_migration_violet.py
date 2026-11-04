@@ -55,6 +55,14 @@ def test_lines_in_a_row_are_one_message(monkeypatch):
     assert merge_runs(history) == history
 
 
+def test_pack_command_never_copies_its_own_old_package():
+    """0.7.50 (user: 用页面上的指令会报错): a second run found /root/eve-export/Memories.db and copied it onto itself."""
+    js = (ROOT / "wx_ilink_py" / "static" / "control_eve_import.js").read_text(encoding="utf-8")
+    assert "rm -rf /root/eve-export /root/eve-export.tar.gz; mkdir -p /root/eve-export;" in js
+    assert "-printf '%T@ %h\\\\n'" in js and "sort -nr | head -n1" in js          # the newest Memories.db = running Eve
+    assert "没找到 Eve 的 Memories.db" in js and " exit" not in js                # never closes the SSH session
+
+
 def test_memories_page_marks_the_searched_words():
     js = (ROOT / "wx_ilink_py" / "static" / "control.js").read_text(encoding="utf-8")
     css = (ROOT / "wx_ilink_py" / "static" / "control.css").read_text(encoding="utf-8")

@@ -3,10 +3,16 @@
 // import. Server side: ai/eve_import.py, routes in control_routes.py (/api/control/eve-import/...).
 "use strict";
 (() => {
-  const PACK = "mkdir -p /root/eve-export; D=$(dirname \"$(find / -xdev -name Memories.db -not -path '/opt/violet/*' -not -path '/proc/*' 2>/dev/null | head -n1)\"); " +
-    "echo \"Eve 目录: $D\"; python3 -c \"import sqlite3,sys;s=sqlite3.connect(sys.argv[1]);d=sqlite3.connect(sys.argv[2]);s.backup(d);d.close();print('数据库已复制')\" \"$D/Memories.db\" /root/eve-export/Memories.db; " +
-    "cp \"$D/proactive_config.json\" /root/eve-export/; grep -E '^[A-Z0-9_]+=' \"$D/.env\" | grep -vE 'KEY|TOKEN|SECRET|PASSWORD|PROMPT|URL|MQTT' > /root/eve-export/env-safe.txt; " +
-    "cd /root; tar czf eve-export.tar.gz eve-export; ls -l /root/eve-export.tar.gz";
+  // 0.7.50 (user: 用页面上的指令会报错): a second run found the first run's /root/eve-export/Memories.db (or an old copy)
+  // and copied it onto itself. Now: the old package goes first, and the Memories.db written to most lately wins (the
+  // running Eve's); nothing is copied when none is found
+  const PACK = "rm -rf /root/eve-export /root/eve-export.tar.gz; mkdir -p /root/eve-export; " +
+    "D=$(find / -xdev -name Memories.db -not -path '/opt/violet/*' -not -path '/proc/*' -printf '%T@ %h\\n' 2>/dev/null | sort -nr | head -n1 | cut -d' ' -f2-); " +
+    "if [ -n \"$D\" ] && [ -f \"$D/Memories.db\" ]; then echo \"Eve 目录: $D\"; " +
+    "python3 -c \"import sqlite3,sys;s=sqlite3.connect(sys.argv[1]);d=sqlite3.connect(sys.argv[2]);s.backup(d);d.close();print('数据库已复制')\" \"$D/Memories.db\" /root/eve-export/Memories.db; " +
+    "cp \"$D/proactive_config.json\" /root/eve-export/ 2>/dev/null || echo '没有 proactive_config.json（跳过）'; " +
+    "grep -E '^[A-Z0-9_]+=' \"$D/.env\" 2>/dev/null | grep -vE 'KEY|TOKEN|SECRET|PASSWORD|PROMPT|URL|MQTT' > /root/eve-export/env-safe.txt; " +
+    "cd /root && tar czf eve-export.tar.gz eve-export && ls -l /root/eve-export.tar.gz; else echo '没找到 Eve 的 Memories.db'; fi";
   const SIZE = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB");
   const show = (v) => (v === true ? "开" : v === false ? "关" : typeof v === "object" && v !== null ? JSON.stringify(v) : fmt(v));
 
