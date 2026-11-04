@@ -57,7 +57,8 @@
       kind.value = persona.value === "eve" && (!c.kind || c.kind === "close") ? "partner" : (c.kind || "close");
       nowLine.textContent = (c.added === false
         ? `${c.label}还没添加：现在就能导入，以后在“渠道”页添加${c.label}时，这些聊天和它自动对上。`
-        : `这个渠道现在：${c.persona || "—"}。`) + "导入前会把它的人设和关系改成上面选的（以后在“人设与生活”里随时能改）。";
+        : `这个渠道现在：${c.persona || "—"}。`) +
+        "导入前会把这个渠道单独设成上面选的人设和关系（“人设与生活”的人设卡片上会写“在用：…”，那里随时能改）。";
     };
     channel.addEventListener("change", pickDefaults); pickDefaults();
     const msgBox = h("input", { type: "checkbox", checked: !!(m && m.count) , disabled: !(m && m.count) });

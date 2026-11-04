@@ -4,8 +4,9 @@ A channel with its own persona (人设页, "这个渠道用别的人设") is a d
 own memories of the owner, her own virtual life and mood, her own proactive rhythm. Channels that use the same persona
 are the same person and share all of it. The unit is the persona ("scope"):
 
-    "main"          every channel without its own persona, and a channel whose own persona is the main one
-    <template key>  e.g. "eve", "dafeiyu", "custom": the channels that chose this persona for themselves
+    "main"          the persona the main database file belongs to (persona.json "store"; 0.7.55)
+    <template key>  e.g. "eve", "dafeiyu", "custom": every other persona, whichever channels use her (as their own
+                    persona or by following the main persona)
 
 Storage: the main scope is the database Violet always had; any other scope is a database file of its own next to it
 (<db folder>/personas/<scope>.db). VioletDatabase routes every statement that touches a table of SCOPED_TABLES to the
@@ -58,15 +59,22 @@ def clean(scope: str | None) -> str:
     return scope or MAIN
 
 
-def for_channel(channel: str | None) -> str:
-    """The scope a channel talks in: its own persona's, or main (no own persona / the same as the main one)."""
-    if not channel:
-        return MAIN
+def template_scope(template: str | None) -> str:
+    """0.7.55: where one persona's records are -- ONE place per persona, whatever the main persona is. The main
+    database file belongs to one persona (persona_templates.store_owner, recorded in persona.json); every other
+    persona has her own file. Before, "the same as the main persona" meant the main file: a persona that already had
+    her own file (an Eve import) lost it the moment she became the main persona (friend's case 2026-11-04:
+    4507 imported messages in personas/eve.db, Telegram on Eve reading the empty main file -- "这是你们第一次聊天")."""
     from ai import persona_templates as pt
-    own = (pt.channel_map().get(channel) or {}).get("template")
-    if not own or own == pt.current().get("template"):
-        return MAIN
-    return clean(own)
+    template = template or pt.current().get("template")
+    return MAIN if not template or template == pt.store_owner() else clean(template)
+
+
+def for_channel(channel: str | None) -> str:
+    """The scope a channel talks in: the one of the persona it uses (its own, else the main persona)."""
+    from ai import persona_templates as pt
+    own = (pt.channel_map().get(channel) or {}).get("template") if channel else None
+    return template_scope(own)
 
 
 def channels() -> list[str]:
@@ -85,23 +93,24 @@ def channels_of(scope: str) -> list[str]:
 
 
 def all_scopes() -> list[str]:
-    """main + the scope of every channel that has its own persona."""
-    out = [MAIN]
+    """The scopes someone talks in: the scope of every channel, and main while it is the main persona's (background
+    work for main without a channel runs as the main persona -- right only when the main file is hers)."""
+    out = [MAIN] if template_scope(None) == MAIN else []
     for channel in channels():
         scope = for_channel(channel)
         if scope not in out:
             out.append(scope)
-    return out
+    return out or [MAIN]
 
 
 def label(scope: str) -> str:
     """The persona's name for the pages."""
     from ai import persona_templates as pt
     try:
-        if scope == MAIN:
-            return pt.in_effect(None)["persona"]
         channel = next(iter(channels_of(scope)), None)
-        return pt.in_effect(channel)["persona"] if channel else scope
+        if channel:
+            return pt.in_effect(channel)["persona"]
+        return pt.template_title(pt.store_owner() if scope == MAIN else scope)
     except Exception:                                     # noqa: BLE001
         return scope
 
@@ -138,16 +147,20 @@ def _split_done() -> dict:
 
 def split_channels(db) -> dict[str, dict[str, int]]:
     """2026-11-02 (user: 已有的聊天按渠道拆): the first time a channel has a persona of its own, the chat it had in the
-    main memory goes with it -- its messages and outbox rows, and the event memories that came only from those
+    main file goes with it -- its messages and outbox rows, and the event memories that came only from those
     messages (with their revisions). Memories without a known source stay with the main persona. Once per channel
     (<data>/control/persona-split.json); later persona changes move nothing (a new persona is a new person)."""
     from ai import persona_templates as pt
     import json
+    pt.ensure_store_owner(db)                 # 0.7.55: whose the main file is, recorded once (start, persona changes)
     done = _split_done()
     moved: dict[str, dict[str, int]] = {}
+    own = pt.channel_map()
     for channel in channels():
         scope = for_channel(channel)
-        if scope == MAIN or channel in done:
+        # only a channel with a persona OF ITS OWN takes its chat along (0.7.55: a channel following a main persona
+        # that has her own file is not "its own persona" -- its old chat belongs to whoever the main file is)
+        if scope == MAIN or channel in done or not (own.get(channel) or {}).get("template"):
             continue
         moved[channel] = _move_channel(db, channel, scope)
         done[channel] = {"scope": scope, "at": db.now(), **moved[channel]}

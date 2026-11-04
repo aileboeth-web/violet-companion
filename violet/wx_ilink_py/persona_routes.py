@@ -62,7 +62,27 @@ def register_persona_routes(app: Flask, violetdb) -> None:
                    # 2026-10-30: the second layer, and per channel
                    "relationship": pt.relationship(), "in_effect": pt.in_effect(),
                    "relationships": [{"key": k, "label": v[0], "text": v[1]} for k, v in pt.RELATIONSHIPS.items()],
-                   "channels": _channel_rows(pt)})
+                   "channels": (rows := _channel_rows(pt)), "used_by": _used_by(pt, rows),
+                   "records": _records(pt)})
+
+    def _records(pt) -> dict[str, int]:
+        """0.7.55: template key -> messages in that persona's own records (the switch dialog says she goes on with
+        hers instead of taking over the current persona's)."""
+        from ai import memory_scope
+        files, out = set(violetdb.scope_files()), {}
+        for key in [t["key"] for t in pt.templates()] + ["custom"]:
+            scope = memory_scope.template_scope(key)
+            if scope != memory_scope.MAIN and scope not in files:
+                continue
+            with memory_scope.use(scope):
+                n = violetdb.fetch_one("SELECT COUNT(*) AS n FROM messages")["n"]
+            if n:
+                out[key] = n
+        return out
+
+    # 0.7.55 (user: 导入时选了人设，人设页却没变，两边同步一下): every channel the 渠道 page can add, also one an import
+    # set a persona for before it was added
+    KINDS = {"napcat": "QQ", "qq": "QQ（机器人）", "telegram": "Telegram"}
 
     def _channel_rows(pt) -> list[dict]:
         from ai.channels.manager import ChannelStore
@@ -72,9 +92,20 @@ def register_persona_routes(app: Flask, violetdb) -> None:
             if cid != "wechat" and isinstance(entry, dict):
                 names[cid] = entry.get("label") or cid
         own = pt.channel_map()
+        for cid in own:
+            if cid not in names:
+                names[cid] = f"{KINDS.get(cid, cid)}（还没添加）"
         return [{"id": cid, "label": label, "template": (own.get(cid) or {}).get("template"),
                  "relationship": (own.get(cid) or {}).get("relationship"), "in_effect": pt.in_effect(cid)}
                 for cid, label in names.items()]
+
+    def _used_by(pt, rows: list[dict]) -> dict[str, list[str]]:
+        """template key -> the channels talking as that persona (their own choice, else the main persona)."""
+        main = pt.current()["template"]
+        out: dict[str, list[str]] = {}
+        for r in rows:
+            out.setdefault(r["template"] or main, []).append(r["label"])
+        return out
 
     @app.post("/api/persona/relationship")
     def persona_relationship():

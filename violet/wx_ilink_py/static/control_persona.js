@@ -126,17 +126,21 @@
   }
 
   // 2026-10-29: persona templates -- switching asks whether to keep the memory or start empty (archived first)
-  function switchDialog(t) {
+  // 0.7.55: every persona has ONE set of records -- one that already has her own (an Eve import) goes on with hers
+  function switchDialog(t, own) {
     return new Promise((resolve) => {
       const keep = h("input", { type: "radio", name: "pt-mem", value: "keep", checked: true });
       const clear = h("input", { type: "radio", name: "pt-mem", value: "clear" });
       const name = h("input", { maxlength: 20, placeholder: "可以不填，以后聊天时再起" });
       const d = h("dialog", {}, h("form", { method: "dialog", class: "stack" },
-        h("h3", { text: `换成“${t.title}”` }),
+        h("h3", { text: `把主人设换成“${t.title}”` }),
         h("p", { class: "note", text: t.summary }),
+        h("p", { class: "note", text: "主人设是没有单独设人设的渠道用的（下面“不同聊天渠道用不同人设”里单独设过的渠道不变）。" }),
         t.blank ? h("label", {}, "给她起个名字（可选） ", name) : null,
-        h("label", { class: "check" }, keep, " 保留记忆：她记得你、记得以前聊过的事，只是性格和说话方式换了"),
-        h("label", { class: "check" }, clear, " 清除记忆：从零开始（记忆、你的资料、她的生活经历都清空，并且翻篇：她看不到以前的聊天；聊天记录保留在后台；清除前会在服务器上存一份备份）"),
+        h("label", { class: "check" }, keep, own
+          ? ` 用她自己的记录：她已经有自己的聊天记录和记忆（${own} 条聊天），换上后接着用她的；现在这个人设的记录也原样保留，换回来还在`
+          : " 保留记忆：她接着用现在这个人设的记忆和聊天记录，只是性格和说话方式换了"),
+        h("label", { class: "check" }, clear, " 清除记忆：她从零开始（她的记忆、你的资料、她的生活经历都清空，并且翻篇：她看不到以前的聊天；聊天记录保留在后台；清除前会在服务器上存一份备份）"),
         h("div", { class: "row" },
           h("button", { type: "button", class: "ghost", text: "取消", onclick: () => { d.close(); d.remove(); resolve(null); } }),
           h("button", { type: "button", text: "换人设", onclick: () => {
@@ -260,9 +264,10 @@
     renderRelationship(d);
     renderChannelPersonas(d);
     const own = h("div", { class: "card platform" },
-      h("div", { class: "platform-head" }, h("strong", { text: "自定义人设" }), d.current.template === "custom" ? pill("正在使用", "ok") : pill("自己写", "")),
+      h("div", { class: "platform-head" }, h("strong", { text: "自定义人设" }),
+        ((d.used_by || {}).custom || []).length ? pill("正在使用", "ok") : d.current.template === "custom" ? pill("主人设", "ok") : pill("自己写", "")),
       h("p", { class: "note platform-intro", text: d.custom ? `你写过的：${d.custom.name}${d.custom.summary ? "，" + d.custom.summary : ""}` : "名字、性格、说话方式、兴趣都自己写；从现在用的人设开始改。" }),
-      h("div", { class: "platform-body" }),
+      h("div", { class: "platform-body" }, usedLine((d.used_by || {}).custom || [], d.current.template === "custom")),
       h("div", { class: "row platform-foot" }, h("button", { type: "button", class: "ghost",
         text: d.current.template === "custom" ? "修改" : (d.custom ? "修改并换回它" : "自己写一个"), onclick: () => customDialog(d.custom) })));
     withPreview(own, d.custom);
@@ -284,23 +289,33 @@
           try { await api("POST", "/api/persona/test-mode", { on: true, hours: Number(hours.value) }); toast("测试模式已打开"); loaders.persona(); } catch (e) { toast(e.message, false); }
         } }))));
     $("#pl-templates").replaceChildren(testCard, ...d.templates.map((t) => {
-      const using = d.current.template === t.key;
-      return withPreview(h("div", { class: "card platform" },
-        h("div", { class: "platform-head" }, h("strong", { text: t.title }), using ? pill("正在使用", "ok") : pill("模板", "")),
+      const isMain = d.current.template === t.key;
+      const users = (d.used_by || {})[t.key] || [];
+      return withPreview(h("div", { class: "card platform" + (users.length ? " current" : "") },
+        h("div", { class: "platform-head" }, h("strong", { text: t.title }),
+          users.length ? pill("正在使用", "ok") : isMain ? pill("主人设", "ok") : pill("模板", "")),
         h("p", { class: "note platform-intro", text: t.summary }),
-        h("div", { class: "platform-body" }, t.personality.length ? h("p", { class: "note", text: "性格：" + t.personality.slice(0, 2).join("；") }) : null),
-        h("div", { class: "row platform-foot" }, using ? h("span", { class: "note", text: d.current.switched_at ? `${when(d.current.switched_at)} 换上` : "默认人设" })
-          : h("button", { type: "button", class: "ghost", text: "用这个人设", onclick: async () => {
-            const choice = await switchDialog(t);
+        h("div", { class: "platform-body" },
+          // 0.7.55 (user: 导入时选了人设，人设页却看不出来，两边同步): which channels talk as her, wherever it was chosen
+          usedLine(users, isMain),
+          t.personality.length ? h("p", { class: "note", text: "性格：" + t.personality.slice(0, 2).join("；") }) : null),
+        h("div", { class: "row platform-foot" }, isMain ? h("span", { class: "note", text: d.current.switched_at ? `主人设 · ${when(d.current.switched_at)} 换上` : "主人设（默认）" })
+          : h("button", { type: "button", class: "ghost", text: "设为主人设", onclick: async () => {
+            const choice = await switchDialog(t, (d.records || {})[t.key]);
             if (!choice) return;
-            if (choice.memory === "clear" && !(await confirmBox("确定清除全部记忆？她会忘记你和以前的一切（服务器上会保留一份备份文件）。"))) return;
+            if (choice.memory === "clear" && !(await confirmBox("确定清除她的全部记忆？她会忘记你和以前的一切（服务器上会保留一份备份文件）。"))) return;
             try {
               const r = await api("POST", "/api/persona/switch", { template: t.key, memory: choice.memory, name: choice.name, confirm: true });
-              toast(r.archive ? `已换人设，记忆已清除（备份：${r.archive}）` : "已换人设，记忆保留");
-              loaders.persona();
+              toast(r.archive ? `已换主人设，她的记忆已清除（备份：${r.archive}）`
+                : r.records === "own" ? "已换主人设，她用自己的记录" : "已换主人设，记忆保留");
+              loaders.persona(); loadPersonaPicker();
             } catch (e) { toast(e.message, false); }
           } }))), t);
     }), own);
+  }
+  function usedLine(users, isMain) {
+    if (users.length) return h("p", { class: "note used-by", text: "在用：" + users.join("、") });
+    return isMain ? h("p", { class: "note used-by", text: "所有渠道都单独设了别的人设，现在没有渠道用它" }) : null;
   }
 
   // 2026-11-02: her look (what a selfie / a picture of her shows) -- per persona (the picker in the menu), kept in the

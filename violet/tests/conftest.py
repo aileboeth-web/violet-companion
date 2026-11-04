@@ -166,6 +166,17 @@ def violetdb():
     for table in _TABLES:
         db.execute(f"DELETE FROM {table}")
     db.execute("UPDATE message_stats SET value = 0")
+    # 0.7.55: the persona files next to it too (personas/<scope>.db) -- a test importing Eve left 4 messages in eve.db
+    # for the next one
+    import sqlite3
+    from ai import memory_scope
+    for scope in db.scope_files():
+        with memory_scope.use(scope):
+            for table in memory_scope.SCOPED_TABLES:
+                try:
+                    db.execute(f"DELETE FROM {table}")
+                except sqlite3.Error:
+                    pass
     import shutil                                       # 2026-11-02: her look per persona lives in the data folder
     shutil.rmtree(Path(os.environ["VIOLET_DATA_DIR"]) / "control" / "visual", ignore_errors=True)
     yield db

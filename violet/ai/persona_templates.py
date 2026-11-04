@@ -90,6 +90,87 @@ def current() -> dict[str, Any]:
             "switched_at": info.get("switched_at"), "memory": info.get("memory"), "archive": info.get("archive")}
 
 
+def _info() -> dict[str, Any]:
+    try:
+        info = json.loads((control_dir() / "persona.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        info = {}
+    return info if isinstance(info, dict) else {}
+
+
+def store_owner() -> str:
+    """0.7.55 (ai/memory_scope.template_scope): the persona the main database file belongs to. Recorded in
+    persona.json "store"; not recorded yet = the main persona (what Violet always assumed)."""
+    return str(_info().get("store") or current()["template"])
+
+
+def ensure_store_owner(db) -> str:
+    """Record whose the main file is, once. A main persona that already has a file of her own (friend's case: Eve
+    imported for Telegram, then Eve chosen as the main persona) cannot be the owner of the main file too -- that file
+    then is the shipped Violet's, and Eve's own file is hers again."""
+    info = _info()
+    if info.get("store"):
+        return str(info["store"])
+    owner = current()["template"]
+    if owner != "violet" and has_own_records(db, owner):
+        owner = "violet"
+    info["store"] = owner
+    _write(control_dir() / "persona.json", info)
+    return owner
+
+
+def has_own_records(db, template: str) -> bool:
+    """A persona with a file of her own that holds chat or memories."""
+    from ai import memory_scope
+    scope = memory_scope.clean(template)
+    if scope == memory_scope.MAIN or scope not in db.scope_files():
+        return False
+    with memory_scope.use(scope):
+        return any(db.fetch_one(f"SELECT 1 AS x FROM {t} LIMIT 1")
+                   for t in ("messages", "core_memories", "event_memories"))
+
+
+def template_title(key: str) -> str:
+    if key == "custom":
+        data = custom_saved() or {}
+        return data.get("_title") or (data.get("identity") or {}).get("name") or "自定义人设"
+    try:
+        data = json.loads((TEMPLATE_DIR / f"{key}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return key
+    return data.get("_title") or (data.get("identity") or {}).get("name") or key
+
+
+def _records_for_switch(db, key: str, memory: str) -> dict[str, Any]:
+    """0.7.55: which records the new main persona `key` goes on with. Every persona keeps exactly one set:
+      keep  -- she has records of her own (her own file, or the main file is hers): she goes on with HERS (the persona
+               she replaces keeps hers too); she has none: she takes over the records of the persona she replaces,
+               as a switch with "keep" always did.
+      clear -- she starts empty: her own records are archived and emptied (the ones of the persona she replaces stay).
+    Returns the persona.json fields "store" and "archive", the rows removed, and whose records she now has."""
+    from ai import memory_scope
+    owner, old = ensure_store_owner(db), current()["template"]
+    hers = key == owner or has_own_records(db, key)
+    archive, counts, store, took_over = None, {}, owner, None
+    if memory == "keep":
+        if not hers and key != old:
+            took_over = old
+            if old == owner:
+                store = key                                          # the main file becomes hers
+            else:
+                db.move_scope(old, key)                              # the replaced persona's own file becomes hers
+    else:
+        if hers:
+            archive, counts = clear_memory(db, memory_scope.template_scope(key))
+        elif old == owner:
+            archive, counts = clear_memory(db, memory_scope.MAIN)    # as before: the main file, emptied, is hers
+            store = key
+        from ai import context_cut                    # 2026-10-30: and 翻篇, or the recent chat brings it all back
+        context_cut.cut(db, "all")
+    return {"store": store, "archive": archive, "removed": counts,
+            "records": "own" if hers else ("took_over" if took_over else "new"), "took_over": took_over}
+
+
 def _write(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
@@ -97,11 +178,12 @@ def _write(path: Path, value: Any) -> None:
     os.replace(tmp, path)
 
 
-def clear_memory(db) -> tuple[str, dict[str, int]]:
+def clear_memory(db, scope: str | None = None) -> tuple[str, dict[str, int]]:
     """Archive, then empty MEMORY_TABLES and the social impressions. (archive file, rows removed per table)
-    2026-11-02: always the main persona's memory (switching the main persona), whatever page picker is set."""
+    2026-11-02: the main file's memory unless a scope is given (0.7.55: the records of the persona a switch clears),
+    whatever page picker is set."""
     from ai import memory_scope
-    with memory_scope.use(memory_scope.MAIN):
+    with memory_scope.use(scope or memory_scope.MAIN):
         return _clear_memory(db)
 
 
@@ -168,16 +250,13 @@ def custom(db, fields: dict[str, Any], memory: str) -> dict[str, Any]:
             "immutable": []}
     if not any(data[k] for k in LIST_FIELDS):
         raise ValueError("性格、说话习惯这些至少写一条")
-    archive, counts = (None, {})
-    if memory == "clear":
-        archive, counts = clear_memory(db)
-        from ai import context_cut                    # 2026-10-30: and 翻篇, or the recent chat brings it all back
-        context_cut.cut(db, "all")
+    rec = _records_for_switch(db, "custom", memory)
     _write(control_dir() / "persona_core.json", data)
     _write(control_dir() / CUSTOM_COPY, data)            # 2026-10-30: channels may use it while another is the main
-    info = {"template": "custom", "switched_at": db.now(), "memory": memory, "archive": archive, **_kept_relationship()}
+    info = {"template": "custom", "switched_at": db.now(), "memory": memory, "archive": rec["archive"],
+            "store": rec["store"], **_kept_relationship()}
     _write(control_dir() / "persona.json", info)
-    return {**info, "removed": counts}
+    return {**info, "removed": rec["removed"], "records": rec["records"], "took_over": rec["took_over"]}
 
 
 def _kept_relationship() -> dict[str, Any]:
@@ -324,15 +403,12 @@ def switch(db, key: str, memory: str, name: str | None = None) -> dict[str, Any]
     if name:
         name = name.strip()[:20]
         data.setdefault("identity", {})["name"] = name
-    archive, counts = (None, {})
-    if memory == "clear":
-        archive, counts = clear_memory(db)
-        from ai import context_cut                    # 2026-10-30: and 翻篇, or the recent chat brings it all back
-        context_cut.cut(db, "all")
+    rec = _records_for_switch(db, key, memory)
     if key == "violet" and not name:
         (control_dir() / "persona_core.json").unlink(missing_ok=True)      # back to the shipped (updated) Violet
     else:
         _write(control_dir() / "persona_core.json", data)
-    info = {"template": key, "switched_at": db.now(), "memory": memory, "archive": archive, **_kept_relationship()}
+    info = {"template": key, "switched_at": db.now(), "memory": memory, "archive": rec["archive"],
+            "store": rec["store"], **_kept_relationship()}
     _write(control_dir() / "persona.json", info)
-    return {**info, "removed": counts}
+    return {**info, "removed": rec["removed"], "records": rec["records"], "took_over": rec["took_over"]}

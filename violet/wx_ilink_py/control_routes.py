@@ -96,7 +96,7 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
         from ai import memory_scope
         from ai import persona_templates as pt
         scopes = memory_scope.all_scopes()
-        scopes += [s for s in violetdb.scope_files() if s not in scopes]
+        scopes += [s for s in [memory_scope.MAIN, *violetdb.scope_files()] if s not in scopes]   # 0.7.55: main too
         kinds = {cid: label for cid, _t, label in IMPORT_KINDS}
         labels = {k: v.get("label") or k for k, v in _channel_labels().items()}
         out = []
@@ -113,6 +113,8 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
                 pt.in_effect(waiting[0])["persona"] if waiting else memory_scope.label(s)
             with memory_scope.use(s):
                 count = violetdb.fetch_one("SELECT COUNT(*) AS n FROM messages")["n"]
+            if not names and not count and len(scopes) > 1:
+                continue                                    # nobody's records, nobody using it
             out.append({"scope": s, "label": label, "channels": channels, "channel_names": names, "messages": count})
         return ok({"personas": out})
 
@@ -467,7 +469,7 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
         # or it looks lost (the persona picker in the menu shows it)
         from ai import memory_scope
         here, elsewhere = memory_scope.current(), []
-        for scope in [*memory_scope.all_scopes(), *violetdb.scope_files()]:
+        for scope in [*memory_scope.all_scopes(), memory_scope.MAIN, *violetdb.scope_files()]:
             if scope == here or any(e["scope"] == scope for e in elsewhere):
                 continue
             with memory_scope.use(scope):

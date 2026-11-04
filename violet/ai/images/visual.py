@@ -144,7 +144,8 @@ class VisualIdentityManager:
         """The persona of this scope (its name, and its template's own look if it has one)."""
         from ai import memory_scope
         from ai.persona import PersonaCore
-        channel = "" if self.scope == memory_scope.MAIN else next(iter(memory_scope.channels_of(self.scope)), "")
+        # 0.7.55: main is not always the main persona's (memory_scope.template_scope) -- a channel of it says whose
+        channel = next(iter(memory_scope.channels_of(self.scope)), "")
         try:
             return PersonaCore.load(channel=channel).data
         except Exception:                                 # noqa: BLE001

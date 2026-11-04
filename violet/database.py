@@ -89,6 +89,37 @@ class VioletDatabase:
                 self._scopes[scope] = db
             return db
 
+    def move_scope(self, src: str, dst: str) -> bool:
+        """0.7.55 (persona_templates._records_for_switch): one persona's own file becomes another's -- a new main
+        persona taking over, with "keep", the records of the one she replaces. A file the new one already had (no chat,
+        no memories, see has_own_records) is kept beside it as <dst>.db.replaced-<time>, never deleted."""
+        import os
+        import time as _time
+        from ai.memory_scope import MAIN, clean
+        src, dst = clean(src), clean(dst)
+        if MAIN in (src, dst) or src == dst or self._is_scope_db or str(self.db_path) == ":memory:":
+            return False
+        with self._lock:
+            if self._tx_depth:
+                raise RuntimeError("move_scope inside a transaction")
+            for scope in (src, dst):
+                db = self._scopes.pop(scope, None)
+                if db is not None:
+                    db.conn.close()
+            a, b = self.scope_path(src), self.scope_path(dst)
+            if not a.is_file():
+                return False
+            if b.is_file():
+                os.replace(b, b.with_name(f"{dst}.db.replaced-{_time.strftime('%Y%m%d-%H%M%S')}"))  # not *.db
+            for suffix in ("-wal", "-shm"):
+                Path(str(b) + suffix).unlink(missing_ok=True)
+            os.replace(a, b)
+            for suffix in ("-wal", "-shm"):
+                old = Path(str(a) + suffix)
+                if old.exists():
+                    os.replace(old, Path(str(b) + suffix))
+        return True
+
     def scope_files(self) -> list[str]:
         """Scopes that have a database file (also ones no channel uses any more)."""
         folder = self.db_path.parent / "personas"
