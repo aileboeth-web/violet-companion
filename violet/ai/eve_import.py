@@ -84,6 +84,11 @@ def _dir(token: str) -> Path:
     return path
 
 
+def check_token(token: str) -> None:
+    """Raises ImportError_ when the upload is not (any longer) there."""
+    _dir(token)
+
+
 def _cleanup_old() -> None:
     base = _base()
     if not base.is_dir():

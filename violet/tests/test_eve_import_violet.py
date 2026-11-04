@@ -207,6 +207,39 @@ def test_a_newer_eve_copy_fills_in_after_the_first_import(admin, tmp_path, viole
     assert [m["content"] for m in page["messages"]] == ["十一月的第一句", "十一月的回复", "Violet 时代的第一句"]
 
 
+def test_eve_persona_first_keeps_every_memory_with_eve(admin, tmp_path, violetdb, env_guard):
+    """0.7.51 (user screenshot: 导入到 微信（人设：Violet（默认））): imported into a channel on another persona, Eve's
+    memories became that persona's, and choosing Eve afterwards left the ones without a source behind. as_eve sets the
+    channel's persona to Eve (恋人) BEFORE the import, so the chat and ALL memories are Eve's."""
+    from ai import memory_scope
+    from ai import persona_templates as pt
+    p = upload(admin, package(tmp_path)).get_json()["data"]
+    wechat = next(c for c in p["channels"] if c["id"] == "wechat")
+    assert wechat["template"] != "eve"                              # the page offers "Eve first"
+    r = admin.post(f"/api/control/eve-import/{p['token']}/commit", headers=SAME, json={
+        "confirm": True, "channel": "wechat", "messages": True, "memories": True, "as_eve": True})
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["data"]["persona"].startswith("Eve")
+    assert pt.channel_map()["wechat"] == {"template": "eve", "relationship": {"kind": "partner"}}
+    assert memory_scope.for_channel("wechat") == "eve"
+    with memory_scope.use("eve"):
+        assert violetdb.fetch_one("SELECT COUNT(*) AS n FROM core_memories")["n"] == 2
+        assert violetdb.fetch_one("SELECT COUNT(*) AS n FROM event_memories")["n"] == 1
+        assert violetdb.fetch_one("SELECT COUNT(*) AS n FROM messages WHERE id <= 0")["n"] == 4
+    with memory_scope.use(memory_scope.MAIN):
+        assert violetdb.fetch_one("SELECT COUNT(*) AS n FROM core_memories")["n"] == 0
+    (tmp_path / "again").mkdir()
+    p2 = upload(admin, package(tmp_path / "again")).get_json()["data"]
+    assert next(c for c in p2["channels"] if c["id"] == "wechat")["template"] == "eve"   # no offer any more
+
+
+def test_eve_persona_first_needs_a_live_upload(admin, env_guard):
+    from ai import persona_templates as pt
+    r = admin.post("/api/control/eve-import/" + "a" * 24 + "/commit", headers=SAME,
+                   json={"confirm": True, "channel": "wechat", "messages": True, "as_eve": True})
+    assert r.status_code == 400 and "wechat" not in pt.channel_map()          # nothing changed for a gone upload
+
+
 def test_refusals(admin, tmp_path):
     assert upload(admin, b"not an eve file at all", "x.txt").status_code == 400
     p = upload(admin, package(tmp_path, with_env=False)).get_json()["data"]

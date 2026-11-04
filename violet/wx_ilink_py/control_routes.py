@@ -495,9 +495,24 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
         from ai import eve_import
         data = eve_import.preview(token, violetdb)
         from ai import memory_scope
-        data["channels"] = [{"id": k, **v, "persona": memory_scope.label(memory_scope.for_channel(k))}
+        from ai import persona_templates as pt
+        main_template = pt.current().get("template")
+        data["channels"] = [{"id": k, **v, "persona": memory_scope.label(memory_scope.for_channel(k)),
+                             # 0.7.51: the template in effect, so the page can offer "Eve first" when it is not Eve
+                             "template": (pt.channel_map().get(k) or {}).get("template") or main_template}
                             for k, v in _channel_labels().items()]
         return data
+
+    def _eve_persona_first(channel: str) -> None:
+        """0.7.51 (user screenshot: 导入到 微信（人设：Violet（默认））): an import into a channel still on another persona put
+        Eve's chat and memories into THAT persona's memory; choosing Eve afterwards moved the chat along but not the
+        memories without a source message (all core memories, many events) -- "记忆没迁移到位". The channel gets the
+        Eve persona (relationship 恋人 unless it has its own) BEFORE the import."""
+        from ai import memory_scope
+        from ai import persona_templates as pt
+        own = (pt.channel_map().get(channel) or {}).get("relationship") or {}
+        pt.set_channel(channel, "eve", own.get("kind") or "partner", own.get("call"))
+        memory_scope.split_channels(violetdb)
 
     @app.post("/api/control/eve-import/upload")
     def control_eve_upload():
@@ -529,6 +544,9 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
             return bad("没有这个聊天渠道")
         settings = [str(k) for k in (body.get("settings") or []) if isinstance(k, str)][:100]
         try:
+            if body.get("as_eve") is True and channel:
+                eve_import.check_token(token)                   # nothing changes for an upload that is gone
+                _eve_persona_first(channel)
             return ok(eve_import.commit(token, violetdb, channel=channel, messages=bool(body.get("messages")),
                                         memories=bool(body.get("memories")), settings=settings, actor=actor(),
                                         apply=apply_now))
@@ -536,6 +554,8 @@ def register_control_routes(app: Flask, violetdb, client=None, proactive_schedul
             return bad(str(exc))
         except ValidationError as exc:
             return bad("设置没有导入：" + str(exc), problems=exc.problems)
+        except ValueError as exc:                               # the persona step (persona_templates.set_channel)
+            return bad("人设没有改成 Eve：" + str(exc))
 
     # ------------------------------------------------------------------ 2026-11-02: reminders (commitments)
     # "明天 8 点提醒我…" became a row here and was sent on time, but nothing listed them and only the chat could cancel one

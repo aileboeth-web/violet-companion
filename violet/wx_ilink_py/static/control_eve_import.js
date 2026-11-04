@@ -39,6 +39,17 @@
     const m = p.messages, core = p.core, ev = p.events;
     const channel = h("select", { "aria-label": "导入到哪个渠道" }, ...p.channels.map((c) => h("option", { value: c.id, text: c.label + (c.persona ? "（人设：" + c.persona + "）" : "") })));
     channel.value = p.channels.some((c) => c.id === "wechat") ? "wechat" : (p.channels[0] || {}).id || "";
+    // 0.7.51 (user: 导入到 微信（人设：Violet（默认））也是个问题): imported into a channel on another persona, Eve's memories
+    // became THAT persona's; choosing Eve afterwards left the ones without a source message behind. Eve first, by default
+    const asEve = h("input", { type: "checkbox", checked: true });
+    const asEveRow = h("label", { class: "check" }, asEve, h("span", { text: " 导入前先把这个渠道的人设设为 Eve（关系：恋人）——推荐" }));
+    const asEveWarn = h("p", { class: "err", text: "不勾的话，聊天记录和记忆会归这个渠道现在的人设，之后再换成 Eve，记忆不会全部跟过去。" });
+    const chosen = () => p.channels.find((c) => c.id === channel.value) || {};
+    const syncEve = () => {
+      const eve = chosen().template === "eve";
+      asEveRow.hidden = eve; asEveWarn.hidden = eve || asEve.checked;
+    };
+    channel.addEventListener("change", syncEve); asEve.addEventListener("change", syncEve); syncEve();
     const msgBox = h("input", { type: "checkbox", checked: !!(m && m.count) , disabled: !(m && m.count) });
     const memBox = h("input", { type: "checkbox", checked: !!((core && core.count) || (ev && ev.count)), disabled: !((core && core.count) || (ev && ev.count)) });
     const picks = [];
@@ -61,7 +72,10 @@
       before,
       h("div", { class: "card" },
         h("label", { class: "check" }, msgBox, h("span", { text: " 导入聊天记录到 " }), channel),
-        h("p", { class: "note", text: "会排在现有聊天的前面（按时间），算作你在这个渠道上和她的私聊，她之后聊天、判断你们多熟时会看到。聊天记录和记忆都归这个渠道用的人设：别的人设不会知道（每个人设是不同的人）。想让 Eve 的记忆归 Eve，先在“人设与生活”里给这个渠道选好 Eve 人设，再导入。图片、语音只导入当时记下的文字。" }),
+        asEveRow, asEveWarn,
+        h("p", { class: "note", text: "这里只列出已经添加的渠道；QQ、Telegram 要先在“渠道”页添加，才会出现在这里。" +
+          "聊天记录和记忆归人设，不归渠道：用同一个人设（比如都用 Eve）的渠道共用一份，导入到其中一个，其他渠道上的她也都记得，不用每个渠道导一遍。" +
+          "导入的聊天会排在现有聊天的前面（按时间）。图片、语音只导入当时记下的文字。" }),
         h("label", { class: "check" }, memBox, h("span", { text: " 导入记忆（核心记忆和事件记忆）" }))),
       usable.length ? h("div", { class: "card" }, h("h3", { text: "设置（发送频率等）" }),
         h("p", { class: "note", text: "勾上的会覆盖 Violet 现在的值，记在“修改记录”里，可以回滚。和 Violet 一样的默认不勾。" }),
@@ -72,12 +86,14 @@
       h("div", { class: "row" }, h("button", { type: "button", text: "确认导入", onclick: async () => {
         const settings = picks.filter(([, cb]) => cb.checked).map(([k]) => k);
         if (!msgBox.checked && !memBox.checked && !settings.length) { toast("什么都没选", false); return; }
+        const setEve = !asEveRow.hidden && asEve.checked && (msgBox.checked || memBox.checked);
         const what = [msgBox.checked ? `聊天记录 → ${channel.options[channel.selectedIndex].text}` : null, memBox.checked ? "记忆" : null,
           settings.length ? `${settings.length} 项设置` : null].filter(Boolean).join("、");
-        if (!(await confirmBox(`导入 ${what}？聊天记录导入后不能在页面上删除。`, { danger: false, ok: "导入" }))) return;
+        const first = setEve ? `先把“${chosen().label || channel.value}”的人设设为 Eve（恋人），再` : "";
+        if (!(await confirmBox(`${first}导入 ${what}？聊天记录导入后不能在页面上删除。`, { danger: false, ok: "导入" }))) return;
         try {
           const r = await api("POST", `/api/control/eve-import/${p.token}/commit`, { confirm: true, channel: channel.value,
-            messages: msgBox.checked, memories: memBox.checked, settings });
+            messages: msgBox.checked, memories: memBox.checked, settings, as_eve: setEve });
           box.replaceChildren(h("div", { class: "card" }, h("h3", { text: "导入完成" }),
             h("p", { text: `聊天记录 ${r.messages} 条` + (r.messages_skipped ? `（${r.messages_skipped} 条已经有了，跳过）` : "") +
               `；核心记忆 ${r.core} 条` + (r.core_skipped ? `（跳过 ${r.core_skipped} 条）` : "") + `；事件记忆 ${r.events} 条；设置 ${r.settings.length} 项。` }),
