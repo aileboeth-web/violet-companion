@@ -36,7 +36,13 @@ from pathlib import Path
 from typing import Any, Callable
 
 IMAGE = "motricseven7/snowluma:v2.2.1"
-MIRRORS = ("", "docker.1ms.run/", "docker.xuanyuan.me/", "docker.m.daocloud.io/")
+# 0.7.56: two more public mirrors; sources that do not answer are skipped before pulling
+MIRRORS = ("", "docker.1ms.run/", "docker.xuanyuan.me/", "docker.m.daocloud.io/", "docker.1panel.live/",
+           "hub.rat.dev/")
+IMAGE_MB = 740
+STALL_SECONDS = 240                 # no new bytes for 4 minutes: the source is stuck
+SLOW_AFTER, SLOW_BPS = 150, 300 * 1024      # after 2.5 minutes under 300 KB/s: try another (not in the last round)
+PULL_ROUNDS = 3
 CONTAINER = "violet-snowluma"
 LABEL_KEY, LABEL_VALUE = "violet.managed", "snowluma"
 ACCOUNT = "violet-qq"
@@ -242,19 +248,110 @@ def ensure_docker(run: Callable[..., Any], stream: Callable[..., tuple[int, str]
     raise SnowlumaError("Docker 装好了但没有启动（systemctl status docker 看原因）")
 
 
+def _name(prefix: str) -> str:
+    return prefix.rstrip("/") or "Docker Hub"
+
+
+def reachable(prefix: str, timeout: float = 8.0) -> bool:
+    """0.7.56: the registry answers at all (200 / 401 on /v2/). A blocked Docker Hub used to cost a long wait."""
+    import urllib.error
+    host = prefix.rstrip("/") or "registry-1.docker.io"
+    try:
+        urllib.request.urlopen(urllib.request.Request(f"https://{host}/v2/", headers={"User-Agent": "violet-installer"}),
+                               timeout=timeout).close()                  # noqa: S310 -- fixed https URLs
+        return True
+    except urllib.error.HTTPError:
+        return True                                                     # 401: there, it wants a token -- fine
+    except Exception:                                                   # noqa: BLE001
+        return False
+
+
+def disk_used(run: Callable[..., Any] = subprocess.run) -> Callable[[], int]:
+    """Bytes used on Docker's disk (grows while a pull downloads; `docker pull` without a terminal says nothing for
+    minutes inside one big layer)."""
+    done = run(["docker", "info", "--format", "{{.DockerRootDir}}"], capture_output=True, text=True)
+    root = (getattr(done, "stdout", "") or "").strip() or "/var/lib/docker"
+    return lambda: shutil.disk_usage(root if Path(root).exists() else "/").used
+
+
+def stream_watched(cmd: list[str], on_line: Callable[[str], None], env: dict | None, *, measure: Callable[[], int],
+                   report: Callable[[int, float], None], may_leave_slow: bool, clock: Callable[[], float] = time.monotonic,
+                   poll: float = 5.0, stall: float = STALL_SECONDS, slow_after: float = SLOW_AFTER,
+                   slow_bps: float = SLOW_BPS) -> tuple[int, str, str]:
+    """`docker pull` that is given up when it does not get anywhere (0.7.56, friend's server: docker.1ms.run hung
+    at ~70 KB/s for 24 minutes, the page stuck at 84 %): no new bytes for `stall` seconds -> "stalled"; slower than
+    slow_bps after slow_after seconds while another source is still untried -> "slow". The layers already downloaded
+    stay (the next source continues from them). Returns (exit code, last lines, why it was stopped or "")."""
+    import queue
+    import threading
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True,
+                            encoding="utf-8", errors="replace", env=env)
+    lines: "queue.Queue[str | None]" = queue.Queue()
+
+    def read() -> None:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            lines.put(line)
+        lines.put(None)
+    threading.Thread(target=read, daemon=True).start()
+    tail: list[str] = []
+    start = last_growth = clock()
+    base = mark = measure()
+    why, finished = "", False
+    while not finished:
+        try:
+            line = lines.get(timeout=poll)
+            if line is None:
+                finished = True
+            else:
+                tail = (tail + [line.rstrip()])[-40:]
+                on_line(line)
+        except queue.Empty:
+            pass
+        now, used = clock(), measure()
+        if used - mark > 512 * 1024:
+            mark, last_growth = used, now
+        got = max(0, used - base)
+        report(got, got / max(1.0, now - start))
+        if finished:
+            break
+        if now - last_growth > stall:
+            why = "stalled"
+        elif may_leave_slow and now - start > slow_after and got / (now - start) < slow_bps:
+            why = "slow"
+        if why:
+            proc.kill()
+            break
+    return proc.wait(), "\n".join(tail), why
+
+
 def pull(run: Callable[..., Any], stream: Callable[..., tuple[int, str]], on_line: Callable[[str], None],
-         env: dict, image: str = IMAGE) -> str:
-    """The image from Docker Hub, else from a mirror (then tagged with its real name). Returns where it came from."""
+         env: dict, image: str = IMAGE, *, check: Callable[[str], bool] | None = None,
+         watched: Callable[..., tuple[int, str, str]] | None = None) -> str:
+    """The image from Docker Hub, else from a mirror (then tagged with its real name). Returns where it came from.
+    0.7.56: sources that do not answer are skipped (check); with `watched`, a source that hangs or crawls is left for
+    the next one, and up to PULL_ROUNDS rounds are made (the layers already downloaded are kept between them), the last
+    round never leaving a slow source -- slow still finishes."""
+    sources = [p for p in MIRRORS if check is None or check(p)] or list(MIRRORS)
     problems = []
-    for prefix in MIRRORS:
-        code, tail = stream(["docker", "pull", prefix + image], on_line, env)
-        if code == 0:
-            if prefix:
-                run(["docker", "tag", prefix + image, image], capture_output=True)
-                run(["docker", "rmi", prefix + image], capture_output=True)       # only the extra name
-            return (prefix.rstrip("/") or "docker.io")
-        problems.append(f"{(prefix.rstrip('/') or 'Docker Hub')}：{_last(tail, 2)}")
-    raise SnowlumaError("下载 SnowLuma 镜像失败（Docker Hub 和镜像站都不通）：\n" + "\n".join(problems))
+    for round_no in range(PULL_ROUNDS if watched else 1):
+        for i, prefix in enumerate(sources):
+            cmd = ["docker", "pull", prefix + image]
+            if watched is not None:
+                last = round_no == PULL_ROUNDS - 1 or (round_no > 0 and i == len(sources) - 1)
+                code, tail, why = watched(cmd, prefix, may_leave_slow=not last and len(sources) > 1)
+            else:
+                (code, tail), why = stream(cmd, on_line, env), ""
+            if code == 0:
+                if prefix:
+                    run(["docker", "tag", prefix + image, image], capture_output=True)
+                    run(["docker", "rmi", prefix + image], capture_output=True)       # only the extra name
+                return (prefix.rstrip("/") or "docker.io")
+            reason = {"stalled": f"{STALL_SECONDS // 60} 分钟没有下载进展，换下一个", "slow": "太慢，换下一个"}.get(why)
+            problems.append(f"{_name(prefix)}：{reason or _last(tail, 2)}")
+    skipped = [_name(p) for p in MIRRORS if p not in sources]
+    raise SnowlumaError("下载 SnowLuma 镜像失败：\n" + "\n".join(problems[-8:]) +
+                        (f"\n连不上、没有试：{'、'.join(skipped)}" if skipped else ""))
 
 
 def container_label(run: Callable[..., Any]) -> str | None:
@@ -326,8 +423,24 @@ def install(layout: Any, state: dict[str, Any], *, port_free: Callable[[int, str
     label = container_label(run)
     if label == "":
         raise SnowlumaError(f"这台服务器上已经有一个不是 Violet 建的容器 {CONTAINER}，没有改动")
-    _say(progress, max(seen[0], 20), "下载 SnowLuma 镜像（含 Linux QQ，约 740 MB）")
-    source = pull(run, stream, on_line, env)
+    _say(progress, max(seen[0], 20), f"下载 SnowLuma 镜像（含 Linux QQ，约 {IMAGE_MB} MB）")
+    watched = None
+    if stream is _stream:                            # the real server (tests give their own stream)
+        measure = disk_used(run)
+        total = [0]                                  # bytes of the sources before the current one
+
+        def watched(cmd, prefix, may_leave_slow):
+            def report(got, bps):                    # 0.7.56: real MB instead of "one step per log line, up to 84 %"
+                mb = (total[0] + got) / 1048576
+                _say(progress, 20 + min(64, int(mb / IMAGE_MB * 64)),
+                     f"下载 SnowLuma 镜像：已下 {mb:.0f} / 约 {IMAGE_MB} MB · 每秒 {bps / 1024:.0f} KB · 来自 {_name(prefix)}")
+            start = measure()
+            try:
+                return stream_watched(cmd, lambda line: None, env, measure=measure, report=report,
+                                      may_leave_slow=may_leave_slow)
+            finally:
+                total[0] += max(0, measure() - start)
+    source = pull(run, stream, on_line, env, check=reachable if watched else None, watched=watched)
 
     _say(progress, 86, "写配置（只监听本机）")
     taken: set[int] = set()
