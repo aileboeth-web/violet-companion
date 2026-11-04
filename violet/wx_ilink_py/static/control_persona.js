@@ -251,7 +251,7 @@
         } })), c.in_effect ? inEffect(c.in_effect) : null);
     });
     $("#pl-channels").replaceChildren(...(rows.length ? rows : [h("p", { class: "note", text: "还没有聊天渠道。" })]),
-      h("p", { class: "note", text: "比如：微信上是“Violet + 恋人”，QQ 上是“AI + 开发者”。人设不同就是不同的人：聊天记录、记忆、提醒、生活和心情各是各的（左边菜单上方可以选看谁的记忆）；课表共用。第一次给一个渠道选自己的人设时，这个渠道以前的聊天会跟着过去。QQ 群里也按 QQ 这一行的设定。" }));
+      h("p", { class: "note", text: "比如：微信上是“Violet + 恋人”，QQ 上是“AI + 开发者”。人设不同就是不同的人：聊天记录、记忆、提醒、生活和心情各是各的（聊天记录、记忆页上方和本页下面可以选看谁的）；课表共用。第一次给一个渠道选自己的人设时，这个渠道以前的聊天会跟着过去。QQ 群里也按 QQ 这一行的设定。" }));
   }
 
   async function renderTemplates() {
@@ -321,7 +321,7 @@
     const colors = h("input", { maxlength: 120, "aria-label": "衣服颜色" });
     colors.value = ((p.wardrobe || {}).colors || []).join("、");
     box.replaceChildren(
-      h("p", { class: "note", text: `她画自己（自拍、照片）时按这里画。现在看的是：${d.persona || "主人设"}（左边菜单上方可以换）。改了会记一个新版本，升级 Violet 不会冲掉。` }),
+      h("p", { class: "note", text: `她画自己（自拍、照片）时按这里画。现在看的是：${d.persona || "主人设"}（上面“下面这些是谁的”可以换）。改了会记一个新版本，升级 Violet 不会冲掉。` }),
       ...inputs, h("label", { class: "stack" }, h("span", { class: "note", text: "衣服颜色（用顿号隔开）" }), colors),
       h("div", { class: "row" }, h("button", { type: "button", text: "保存她的样子", onclick: async () => {
         const patch = { appearance: { ...(p.appearance || {}) }, wardrobe: { ...(p.wardrobe || {}) } };

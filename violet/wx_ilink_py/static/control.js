@@ -21,12 +21,18 @@ function toast(text, ok = true) {
 // 2026-11-02 (ai/memory_scope): a channel with its own persona is another person with her own memory; the picker in
 // the menu says whose memory, chat history, life and mood the pages show (sent with every request)
 let PERSONA = "main";                             // per page load (the Control Center keeps nothing in the browser)
-function personaScope() { return PERSONA; }
+// 0.7.54 (user: 看谁的记忆应该放在聊天记录里面，不要放到左边栏；点了别的页面它还不消失): the picker is ON the pages whose
+// content is a persona's own -- the chat history, the memories, and her look / persona changes / life on 人设与生活 --
+// and only those pages show the chosen persona; every other page is the main one's
+const PERSONA_TABS = new Set(["chat", "memories", "persona"]);
+function personaScope() {
+  const tab = document.querySelector("#tabs button.active");
+  return tab && PERSONA_TABS.has(tab.dataset.tab) ? PERSONA : "main";
+}
 async function loadPersonaPicker() {
   try {
     const d = await api("GET", "/api/control/personas");
     const list = d.personas || [];
-    const sel = $("#persona-scope");
     if (!list.some((p) => p.scope === PERSONA)) PERSONA = "main";
     // 0.7.53 (user: 我还以为我眼花了 -- an Eve import into a channel not added yet, the page on the empty main persona,
     // "Violet（默认）（1 个渠" cut off): on the first load the page opens on a persona that has messages; each option
@@ -37,14 +43,18 @@ async function loadPersonaPicker() {
       const main = list.find((p) => p.scope === "main");
       if (main && !main.messages) { const other = list.find((p) => p.messages); if (other) { PERSONA = other.scope; switched = true; } }
     }
-    sel.replaceChildren(...list.map((p) => h("option", { value: p.scope, text: p.label })));
-    sel.value = personaScope();
     const cur = list.find((p) => p.scope === PERSONA) || {};
-    $("#persona-where").textContent = "用在：" + ((cur.channel_names || []).join("、") || "没有渠道在用");
-    $("#persona-pick").hidden = list.length < 2;
-    if (switched) {                                // the page already shows main's data: show the chosen one's
-      const active = document.querySelector("#tabs button.active");
-      if (active && loaders[active.dataset.tab]) loaders[active.dataset.tab]();
+    for (const sel of document.querySelectorAll(".persona-scope")) {
+      sel.replaceChildren(...list.map((p) => h("option", { value: p.scope, text: p.label })));
+      sel.value = PERSONA;
+    }
+    for (const w of document.querySelectorAll(".persona-where")) {
+      w.textContent = "用在：" + ((cur.channel_names || []).join("、") || "没有渠道在用");
+    }
+    for (const bar of document.querySelectorAll("[data-persona-pick]")) bar.hidden = list.length < 2;
+    const active = document.querySelector("#tabs button.active");
+    if (switched && active && PERSONA_TABS.has(active.dataset.tab) && loaders[active.dataset.tab]) {
+      loaders[active.dataset.tab]();               // the page already shows main's data: show the chosen one's
     }
   } catch (_) { /* older server or not logged in */ }
 }
@@ -330,6 +340,8 @@ function renderChannels() {
 }
 async function loadHistoryList() {
   renderChannels();
+  // 0.7.54: no chat at all -> no "主人" pane with an "更早的消息" button, only the note
+  document.querySelector("#tab-chat .hist").hidden = !hist.channel;
   if (!hist.channel) { $("#hist-list").replaceChildren(); $("#chat-list").replaceChildren(); return; }
   try {
     const d = await api("GET", `/api/control/history/${encodeURIComponent(hist.channel)}?` + withPersona(new URLSearchParams()));
@@ -1187,10 +1199,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   btn.click();
 });
 
-// 2026-11-02: the persona picker (see personaScope)
-$("#persona-scope").addEventListener("change", (e) => {
+// 2026-11-02: the persona picker (see personaScope); 0.7.54: one on each page it is for, all showing the same choice
+for (const sel of document.querySelectorAll(".persona-scope")) sel.addEventListener("change", (e) => {
   PERSONA = e.target.value;
-  loadPersonaPicker();                            // the "用在：…" line under it
+  loadPersonaPicker();                            // the other pickers and the "用在：…" line
   const active = document.querySelector("#tabs button.active");
   if (active) (loaders[active.dataset.tab] || (() => {}))();
   toast("现在看的是：" + e.target.selectedOptions[0].textContent);

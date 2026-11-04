@@ -490,13 +490,11 @@ label.inline{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .kv{grid-template-columns:1fr auto}.kv .k{grid-column:1/-1}.kv>.v:first-child{grid-column:1}.kv .note{grid-column:1/-1}
 }
 
-/* 2026-11-02: which persona's memory the pages show (only when there is more than one) */
-.persona-pick { display: block; margin: 0 4px 8px; font-size: 12px; color: var(--muted, #888); }
-.persona-pick[hidden] { display: none; }
-/* 0.7.53: the whole sidebar width, smaller text, ellipsis instead of a cut (full text in the title) */
-.persona-pick select { display: block; width: 100%; margin-top: 4px; font-size: 13px; padding: 7px 28px 7px 10px;
-  text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
+/* which persona's records a page shows (only when there is more than one); 0.7.54: on the pages it is for
+   (chat history, memories, 人设与生活), one row -- no longer in the menu */
+.persona-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-bottom: 14px; }
+.persona-bar label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.persona-bar select { width: auto; min-width: 180px; }
 /* 0.7.53: no empty white strip when there is no chat */
-.persona-where { display: block; margin-top: 4px; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hist-side:has(> .hist-list:empty) { background: none; border: 0; padding: 0; box-shadow: none; }
 .tabs { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted) 40%, transparent) transparent; }

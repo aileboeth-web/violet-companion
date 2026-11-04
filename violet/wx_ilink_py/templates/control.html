@@ -9,7 +9,6 @@
 <body>
 <aside class="side" id="side">
   <div class="brand"><span class="logo" aria-hidden="true"></span><span>Violet<small>Control Center</small></span></div>
-  <label class="persona-pick" id="persona-pick" hidden title="每个人设有自己的聊天记录、记忆和生活，这里选看哪一个">看谁的记忆<select id="persona-scope"></select><span id="persona-where" class="persona-where"></span></label>
   <button class="menu" id="menu-toggle" type="button" aria-label="打开菜单" aria-expanded="false" aria-controls="tabs"></button>
   <nav class="tabs" id="tabs">
     <button data-tab="setup">开始</button>
@@ -115,6 +114,9 @@
   </section>
 
   <section id="tab-chat" class="tab">
+    <!-- 0.7.54 (user: 看谁的记忆应该放在聊天记录里面，不要放到左边栏): the persona picker lives on the pages it is for -->
+    <div class="persona-bar" data-persona-pick hidden title="每个人设有自己的聊天记录、记忆和生活，这里选看哪一个">
+      <label>看谁的记录 <select class="persona-scope" aria-label="看哪个人设的聊天记录"></select></label><span class="note persona-where"></span></div>
     <div id="hist-chans" class="hist-chans" role="tablist" aria-label="聊天渠道"></div>
     <div id="hist-persona" class="row"></div>
     <div class="hist">
@@ -160,6 +162,8 @@
 
 
   <section id="tab-memories" class="tab">
+    <div class="persona-bar" data-persona-pick hidden title="每个人设有自己的聊天记录、记忆和生活，这里选看哪一个">
+      <label>看谁的记忆 <select class="persona-scope" aria-label="看哪个人设的记忆"></select></label><span class="note persona-where"></span></div>
     <div class="filters">
       <label>类型 <select id="mem-kind"><option value="event">事件记忆</option><option value="core">核心记忆</option><option value="profile">关于你的档案（喜好、称呼、学校……）</option><option value="situation">你此刻的状态</option><option value="pref">你希望她怎么聊</option><option value="reminder">提醒</option></select></label>
       <label>状态 <select id="mem-status"><option value="">全部</option></select></label>
@@ -383,6 +387,8 @@
     <div class="card" id="pl-relationship"></div>
     <h3>不同聊天渠道用不同人设 <span class="note">（不设就和上面一样。用别的人设的渠道是另一个人：聊天记录、记忆、生活和心情都是她自己的，互相不知道）</span></h3>
     <div class="card" id="pl-channels"></div>
+    <div class="persona-bar" data-persona-pick hidden>
+      <label>下面这些是谁的（样子、人设动态、生活） <select class="persona-scope" aria-label="看哪个人设的样子、人设动态和生活"></select></label><span class="note persona-where"></span></div>
     <h3>她的样子 <span class="note">（画她自己时用；每个人设一份）</span></h3>
     <div class="card" id="pl-look"></div>
     <div class="card" id="pl-core"></div>
