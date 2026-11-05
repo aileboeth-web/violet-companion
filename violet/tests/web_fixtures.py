@@ -15,6 +15,7 @@ import json
 import socket
 import threading
 import time
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -37,8 +38,11 @@ PRIVATE = {
     "loop.example.org": ["127.0.0.1"],
 }
 
+# 2026-11-05: the article's date is a few days before today -- the fixed 2026-10-05 aged out of the explorer's
+# 30-day freshness window (the search results' dates were made relative on 2026-11-03)
+ARTICLE_DATE = (datetime.now() - timedelta(days=5)).date().isoformat()
 ARTICLE = """<html><head><title>秋季新书书评：一部关于小镇夏天的小说</title>
-<meta property="article:published_time" content="2026-10-05T09:00:00+08:00">
+<meta property="article:published_time" content=\"""" + ARTICLE_DATE + """T09:00:00+08:00">
 <meta name="description" content="书评人认为这部小说节奏缓慢，适合在安静的晚上读。"></head>
 <body><nav>首页 菜单</nav><article><h1>小镇夏天</h1><p>这部小说写一个小镇的夏天。</p>
 <p>书评人认为节奏缓慢。</p></article><script>steal()</script></body></html>"""

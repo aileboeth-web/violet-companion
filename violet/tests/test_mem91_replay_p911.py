@@ -4,7 +4,7 @@ Same fictional user, same messages, same simulated dates (2026-11-02 → 11-30, 
 (the Control Center routes), and the memory model making the calls the real one made -- including the ones that went
 wrong: a correction without naming the old fact, the agreement linked to the interview with only its date. What is
 checked is the stored state and what reaches the Chat request (sections only: the history is real dialogue and is
-checked on its own). Whether a real model then words it well is for a real run to show (tools/README.md §22).
+checked on its own). Whether a real model then words it well is for a real run to show (tools/TESTING-HISTORY.md §22).
 """
 
 from __future__ import annotations

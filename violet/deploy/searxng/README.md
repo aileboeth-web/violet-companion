@@ -1,8 +1,10 @@
-# Violet 的私有 SearXNG（Phase 9.3）
+# 用 Docker 部署 SearXNG（另一种方式）
 
-Violet 的 `web_search` 默认用自建的开源 SearXNG（`VIOLET_WEB_SEARCH_PROVIDER=searxng`），不依赖付费搜索 API（博查 / Brave 的代码保留为可选实现，不是默认来源）。这个目录是 SearXNG 在 Linux 服务器上的 Docker Compose 部署，**只在你明确执行 `./searxng.sh up` 时**才会拉镜像、启动容器。Violet、`start.sh`、`git pull` 都不会运行它，也不会安装 Docker（仓库里没有 git 钩子）。
+> **一般不需要看这一页。** 用一行命令装的 Violet，在后台“工具与手机 → 联网工具”点“一键安装联网搜索”就行（或者在服务器上运行 `/opt/violet/violet searxng install`）。那种方式不需要 Docker，会注册成系统服务 `violet-searxng`，只在 127.0.0.1 监听。这一页只给没有 systemd、或者更想用 Docker 的人参考。
 
-**采用的方式（用户决定）：Violet 不容器化，照旧用 `start.sh` 跑在服务器上；SearXNG 跑在 Docker 里，只通过宿主机 `127.0.0.1:18089` 提供搜索。**
+Violet 的 `web_search` 默认用自建的开源 SearXNG（`VIOLET_WEB_SEARCH_PROVIDER=searxng`），不依赖付费搜索 API（博查 / Brave 的代码保留为可选实现，不是默认来源）。这个目录是 SearXNG 的 Docker Compose 部署，**只在你明确执行 `./searxng.sh up` 时**才会拉镜像、启动容器。Violet 自己不会运行它，也不会安装 Docker。
+
+这种方式下 Violet 照常跑在服务器上（不进容器），SearXNG 跑在 Docker 里，只通过宿主机 `127.0.0.1:18089` 提供搜索。
 
 ## 文件
 

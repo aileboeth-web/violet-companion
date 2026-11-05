@@ -4,7 +4,7 @@ Fictional user, isolated DB, fake WeChat, fake SDK, scenario clock, nightly deca
 the dashboard edits. The fake memory model makes the tool calls a careful model would make; the fake Intent model
 NEVER calls query_memory (the worst case of R-M2). What is checked is what really reaches the Chat request -- the
 memory lines, their state labels and what is absent -- and what is stored. Whether a real model then words it
-naturally is not provable offline (see the real-model plan in tools/README.md §22).
+naturally is not provable offline (see the real-model plan in tools/TESTING-HISTORY.md §22).
 """
 
 from __future__ import annotations

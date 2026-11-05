@@ -328,6 +328,6 @@ def test_the_known_keys_section_and_the_profile_are_unchanged(violetdb):
 # ---------------------------------------------------------------------------
 
 def test_scoring_notes_for_rounds_11_13_14_are_documented():
-    readme = (PROJECT / "tools" / "README.md").read_text(encoding="utf-8")
+    readme = (PROJECT / "tools" / "TESTING-HISTORY.md").read_text(encoding="utf-8")
     for needle in ("第 11 轮", "第 13 轮", "第 14 轮", "关怀式追问", "计入全局问句比例"):
         assert needle in readme

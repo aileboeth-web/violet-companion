@@ -4,7 +4,7 @@ The fake campus MCP server (tools/fake_mcp_server.py) runs as a real stdio child
 models are the fake SDK. What is proven: which tools are offered to which agent and when, what is called, what the
 reply is built from, that nothing is invented or turned into a task when a tool is missing / off / down, and that the
 Control Center's switches act on the running system. Whether a real model picks tools well is not provable offline
-(the real-model plan is in tools/README.md §23)."""
+(the real-model plan is in tools/TESTING-HISTORY.md §23)."""
 
 from __future__ import annotations
 
@@ -387,7 +387,7 @@ def test_a_replaced_credential_is_never_shown(make_world, monkeypatch, admin):
 
 
 def test_free_chat_can_run_with_the_fictional_tools_only(tmp_path):
-    """The real-model verification of tools/README §23 needs free_chat with the fake campus server; nothing else."""
+    """The real-model verification of tools/TESTING-HISTORY.md §23 needs free_chat with the fake campus server; nothing else."""
     from tests.test_free_chat_budget_p911 import launch, real
     from tools import free_chat as fc
     path = tmp_path / "tools-1"
@@ -455,7 +455,7 @@ def tool_launch(argv, lines):
 
 
 def test_free_chat_traces_every_tool_step_and_switches_the_fictional_tools(tmp_path):
-    """The real-model check (tools/README §23) runs in one free_chat session with the fake campus server only; each
+    """The real-model check (tools/TESTING-HISTORY.md §23) runs in one free_chat session with the fake campus server only; each
     round records the catalog, Intent's tool_query, the plan, the tools offered + tool_choice, the model's tool calls
     and the MCP results, and /tool and /fake-mode switch the fictional tools between rounds."""
     from tests.test_free_chat_budget_p911 import KEY, real

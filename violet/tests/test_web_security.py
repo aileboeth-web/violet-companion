@@ -268,5 +268,6 @@ def test_published_dates_are_only_verified_from_page_metadata(violetdb, web):
     out = svc.search("小说 书评")
     assert out["results"][0]["published_verified"] is False
     page = svc.fetch("http://books.example.org/a")
-    assert page["published_at"].startswith("2026-10-05") and page["published_verified"] is True
+    from tests.web_fixtures import ARTICLE_DATE
+    assert page["published_at"].startswith(ARTICLE_DATE) and page["published_verified"] is True
     assert parse_published("2999-01-01") is None and parse_published("not a date") is None

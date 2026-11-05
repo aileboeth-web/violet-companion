@@ -23,7 +23,7 @@ VIOLET_WEB_SEARCH_PROVIDER selects one:
            For both: the key is the Control Center's replaced credential if set, else VIOLET_WEB_SEARCH_API_KEY; read
            at call time, sent only to the provider endpoint (VIOLET_WEB_SEARCH_ENDPOINT overrides the default URL),
            which may not redirect. Response shapes follow the providers' public documentation and are NOT yet
-           verified against the real services (tools/README §24).
+           verified against the real services (tools/TESTING-HISTORY.md §24).
 
 Other backends: implement SearchProvider and register_provider("name", factory).
 """

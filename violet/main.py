@@ -228,7 +228,7 @@ def _dashboard_bind() -> tuple[str, int]:
     if not loopback and _dashboard_tls() is None:
         logger.error("VIOLET_DASHBOARD_HOST=%s is not a loopback address and HTTPS is not configured: listening on "
                      "127.0.0.1 only. For remote access install with --access public (HTTPS), use an SSH tunnel or an "
-                     "HTTPS reverse proxy on this machine (see tools/README §21).", host)
+                     "HTTPS reverse proxy on this machine (see INSTALL.md, 访问方式).", host)
         return "127.0.0.1", port
     return host, port
 
