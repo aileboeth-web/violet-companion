@@ -1,6 +1,8 @@
 # tools/
 
-This directory holds two kinds of things: install and management scripts used on the server, and test tools used during development. The full record of development testing (Phase 7–9 acceptance, real-model evaluations) is in [TESTING-HISTORY.md](TESTING-HISTORY.md) (Chinese).
+**English** | [简体中文](README.zh-CN.md)
+
+This directory holds two kinds of things: install and management scripts used on the server, and test tools used during development. The full record of development testing (Phase 7–9 acceptance, real-model evaluations) is in [TESTING-HISTORY.md](TESTING-HISTORY.md).
 
 ## Used on the server
 

@@ -2,7 +2,7 @@
 
 ## dafeiyu.json
 
-The persona text (`prompt_text`) comes from [dsh-aurabot-qq](https://github.com/accomplish07zrh-eng/dsh-aurabot-qq) `personas/dafeiyu.md`, with one line changed (she does not deny being an AI when sincerely asked). The 大肥鱼 artwork is not included (it is under CC BY-NC-SA 4.0 in that project).
+The persona text (`prompt_text`) comes from [dsh-aurabot-qq](https://github.com/accomplish07zrh-eng/dsh-aurabot-qq) `personas/dafeiyu.md`, with one line changed (she does not deny being an AI when sincerely asked). The dafeiyu ("Big Fat Fish") artwork is not included (it is under CC BY-NC-SA 4.0 in that project).
 
 ```
 MIT License

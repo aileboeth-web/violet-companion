@@ -1,509 +1,511 @@
-# Violet 2.0 本地测试工具（Phase 7 B.1）
+# Violet 2.0 local test tools (Phase 7 B.1)
 
-三个命令行工具，全部跑在**真实的 Violet 2.0 流水线**上（VioletRuntime → IntentAgent / ChatAgent / MemoryAgent、ContextEngine、
-MemoryWorker、outbox、ProactiveScheduler），没有另写简化版聊天逻辑。
+**English** | [简体中文](TESTING-HISTORY.zh-CN.md)
 
-| 工具 | 用途 | 默认 |
+Three command-line tools, all running on the **real Violet 2.0 pipeline** (VioletRuntime → IntentAgent / ChatAgent / MemoryAgent, ContextEngine,
+MemoryWorker, outbox, ProactiveScheduler); there is no separate, simplified chat logic.
+
+| Tool | Purpose | Default |
 |---|---|---|
-| `python -m tools.violet_test_chat` | 在隔离环境里和 Violet 聊天 | 模拟模型，免费、离线 |
-| `python -m tools.dialogue_eval` | 32 轮验收对话（虚构用户“小满”）+ 评分表 | 模拟模型 |
-| `python -m tools.model_compat` | 检查模型对 Chat Completions 各项参数的兼容性 | 模拟服务商 |
-| `python -m tools.free_chat` | 自由聊天体验测试：会话可以接着聊，每轮细节和标记都保存（§20，Phase 8.9.6） | 模拟模型 |
-| `python -m tools.fake_mcp_server` | 虚构的课表 / 天气 / 搜索 MCP 服务器（stdio，不联网），用来试 Violet 的工具使用（§23，Phase 9.2） | 虚构数据 |
-| `python -m tools.memory_conflicts` | 只读列出跨记忆的冲突（§22，Phase 9.1.2） | 只读 |
+| `python -m tools.violet_test_chat` | Chat with Violet in an isolated environment | Simulated model, free, offline |
+| `python -m tools.dialogue_eval` | 32-round acceptance dialogue (fictional user "Xiaoman") + score sheet | Simulated model |
+| `python -m tools.model_compat` | Checks a model's compatibility with each Chat Completions parameter | Simulated provider |
+| `python -m tools.free_chat` | Free-chat experience test: sessions can be continued, every round's details and flags are saved (§20, Phase 8.9.6) | Simulated model |
+| `python -m tools.fake_mcp_server` | A fictional timetable / weather / search MCP server (stdio, no network) for trying Violet's tool use (§23, Phase 9.2) | Fictional data |
+| `python -m tools.memory_conflicts` | Lists conflicts across memories, read-only (§22, Phase 9.1.2) | Read-only |
 
-## 1. 隔离保证
+## 1. Isolation guarantees
 
-- 每次启动都新建一个临时目录（`%TEMP%\violet-testchat-*`），数据库、数据、媒体都在里面；结束后自动删除（`--keep` 保留）。
-  删除前先停止后台线程并关闭 SQLite 连接；只删除**本次运行创建**的目录（目录里有本次的归属标记），不按通配符删除。删不掉（例如 Windows 上文件仍被占用）会明确报告剩下哪些文件，退出码为 3；正常退出、Ctrl+C、异常退出都会清理，清理失败不会掩盖原来的错误。
-- 以前遗留的测试目录只列出、不自动删除：`python -m tools.violet_test_chat --list-leftovers`。
-  项目目录、`violet.db`、`data/` 会被拒绝作为测试目录。
-- `VIOLET_ENV_FILE` 指向临时目录里的**空文件**：工具不会读取任何真实 `.env`，生产配置、微信凭据、生产数据库都碰不到。
-- shell 里已有的 `VIOLET_*`、`LLM_*`、`MCP_*` 变量都会被清掉；模型名和提示词只从 `env_example`（或 `--config`）读取。
-- 强制关闭：微信（换成内存里的假客户端）、MCP、Web 搜索与探索、图片、生活引擎、Dashboard、主动调度线程、启动消息、代理。
-  主动消息只在你输入 `/proactive` 时判断一次。
-- 每次模型调用（包括语义守卫等辅助模型）都经过 `BudgetedClient`：**先检查预算，再发请求**。
-- 报告保存在 `tools/output/<时间>/`（已加入 `.gitignore`），写入前会把 Key 替换成 `<redacted>`。
+- Every start creates a new temporary directory (`%TEMP%\violet-testchat-*`) holding the database, data and media; it is deleted automatically at the end (`--keep` keeps it).
+  Before deleting, background threads are stopped and the SQLite connections closed; only the directory **created by this run** is deleted (it carries this run's ownership marker), never by wildcard. If it cannot be deleted (for example a file still in use on Windows), the remaining files are reported explicitly and the exit code is 3; normal exit, Ctrl+C and crashes all clean up, and a failed cleanup never hides the original error.
+- Test directories left over from earlier runs are only listed, never deleted automatically: `python -m tools.violet_test_chat --list-leftovers`.
+  The project directory, `violet.db` and `data/` are refused as test directories.
+- `VIOLET_ENV_FILE` points to an **empty file** in the temporary directory: the tools never read a real `.env`, and production configuration, WeChat credentials and the production database are out of reach.
+- `VIOLET_*`, `LLM_*` and `MCP_*` variables already set in the shell are cleared; model names and prompts are read only from `env_example` (or `--config`).
+- Forced off: WeChat (replaced by a fake in-memory client), MCP, web search and exploration, images, the life engine, the Dashboard, the proactive scheduler thread, startup messages, proxies.
+  Proactive messages are judged only once each time you type `/proactive`.
+- Every model call (including helper models such as the semantic guard) goes through `BudgetedClient`: **the budget is checked first, then the request is sent**.
+- Reports are saved in `tools/output/<time>/` (in `.gitignore`); keys are replaced with `<redacted>` before writing.
 
-### 报告里的调用明细（Phase 7 B.2）
+### Call details in the report (Phase 7 B.2)
 
-`report.json` / `chat_transcript.json` 中每次模型调用一条记录（`call_details`），只含白名单里的结构化字段：
-轮次、Agent、模型、全局序号 / 本轮序号、所属运行（run_id）及第几步、请求消息数、请求字符数、工具定义数量及字符数、调用了哪些工具、工具结果摘要（工具名、ok、action / reason 代码、返回记录数量和 id、档案 key）、延迟、`prompt_tokens` / `completion_tokens` / `total_tokens` / `cached_tokens` / `reasoning_tokens`、错误类型和 HTTP 状态码。
+`report.json` / `chat_transcript.json` have one record per model call (`call_details`), with only allowlisted structured fields:
+round, agent, model, global / per-round sequence number, the run it belongs to (run_id) and its step, number of request messages, request characters, number and characters of tool definitions, which tools were called, tool result summaries (tool name, ok, action / reason codes, number and ids of returned records, profile keys), latency, `prompt_tokens` / `completion_tokens` / `total_tokens` / `cached_tokens` / `reasoning_tokens`, error type and HTTP status code.
 
-- 不写入：Key、提示词全文、用户消息、记忆原文、工具参数里的文字、错误信息原文。
-- token 字段只照录上游返回的值；上游没有给的字段保持 `null`，不推算。没有 usage 的调用单独计数，预算的 token 上限对它们无效（此时只有调用次数上限）。
-- `call_summary` 按 Agent 汇总调用数、token、延迟、工具使用和运行次数；`total_tokens` 与 prompt+completion 的差异只做统计。
-- `fit_prompt_tokens_vs_request_chars` 是 prompt_tokens 对请求字符数的最小二乘拟合，**只是统计量**，截距不代表已确认的固定开销。
-- `runs` 记录每次 Agent 运行的步数和是否在工具执行后直接结束（`finished_after_tools`）；Chat 运行附带上下文各段的字符数和 fact id。
-- 对话原文（用户的话、Violet 的回复、最终档案状态）仍保存在轮次记录里，供人工评分；这些都是虚构数据。
+- Not written: keys, full prompts, user messages, memory texts, text inside tool arguments, original error messages.
+- Token fields only copy the values the upstream returned; fields the upstream did not give stay `null` and are not estimated. Calls without usage are counted separately, and the budget's token limit does not apply to them (only the call count limit does).
+- `call_summary` sums calls, tokens, latency, tool use and runs per agent; the difference between `total_tokens` and prompt+completion is only counted.
+- `fit_prompt_tokens_vs_request_chars` is a least-squares fit of prompt_tokens against request characters, **only a statistic**; the intercept is not a confirmed fixed overhead.
+- `runs` records each agent run's number of steps and whether it ended right after tool execution (`finished_after_tools`); chat runs include the character count and fact ids of each context section.
+- The dialogue text (the user's words, Violet's replies, the final profile state) is still kept in the round records for human scoring; all of it is fictional data.
 
-## 2. 启动（Windows PowerShell）
+## 2. Starting (Windows PowerShell)
 
 ```powershell
 cd "D:\unity\violet\Violet"
 ..\.venv\Scripts\Activate.ps1
 
-# 模拟模式聊天（不花钱、不联网）
+# Chat in simulated mode (no cost, no network)
 python -m tools.violet_test_chat
 
-# 模拟模式跑 32 轮（检查流程是否通畅；回复是“（模拟回复）……”，不能用来评自然度）
+# Run the 32 rounds in simulated mode (checks that the flow runs; replies are "(simulated reply)…", useless for judging naturalness)
 python -m tools.dialogue_eval --scripted-memory --quiet-hours off
 
-# 模拟模式的兼容性检查
+# Compatibility check in simulated mode
 python -m tools.model_compat
 ```
 
-聊天里的命令：
+Commands in the chat:
 
-| 命令 | 作用 |
+| Command | What it does |
 |---|---|
-| `/advance 3` | 假装过去了 3 小时（把所有记录的时间往前挪） |
-| `/proactive` | 让主动消息调度器判断一次“现在要不要发” |
-| `/state` | 查看档案事实、情境、记忆、约定、Violet 的生活事件 |
-| `/usage` | 调用次数、token、平均延迟、错误、估算费用 |
-| `/score 2 备注` | 给上一轮打分（0/1/2） |
-| `/quit` 或 Ctrl+C | 停止并保存记录 |
+| `/advance 3` | Pretend 3 hours have passed (moves all recorded times back) |
+| `/proactive` | Let the proactive scheduler decide once "should I send something now" |
+| `/state` | Show profile facts, situations, memories, promises, Violet's life events |
+| `/usage` | Calls, tokens, average latency, errors, estimated cost |
+| `/score 2 note` | Score the previous round (0/1/2) |
+| `/quit` or Ctrl+C | Stop and save the records |
 
-## 3. 真实模型：授权与退出
+## 3. Real models: authorisation and exit
 
-需要同时满足以下 **4 个条件**，缺一个都不会发出任何真实请求：
+All **4 conditions** below must be met; if any one is missing, no real request is ever sent:
 
-1. 当前 PowerShell 窗口里设置 `VIOLET_TEST_ALLOW_REAL_API=1`；
-2. 命令行加 `--real`；
-3. 提供**单独的测试 Key**：用 `VIOLET_TEST_API_KEY` 环境变量，或者在隐藏提示里输入（不回显、不保存）；
-4. 看完屏幕上的“接口 / 模型 / 预算”说明后，输入 `yes`。
+1. `VIOLET_TEST_ALLOW_REAL_API=1` is set in the current PowerShell window;
+2. `--real` is on the command line;
+3. a **separate test key** is given: through the `VIOLET_TEST_API_KEY` environment variable, or typed at a hidden prompt (not echoed, not saved);
+4. after reading the "API / models / budget" summary on screen, you type `yes`.
 
 ```powershell
 $env:VIOLET_TEST_ALLOW_REAL_API = "1"
-# Key 建议在提示时输入；如果用环境变量，只在这个窗口里设置：
-# $env:VIOLET_TEST_API_KEY = "<测试 Key>"
+# Typing the key at the prompt is recommended; if you use the environment variable, set it only in this window:
+# $env:VIOLET_TEST_API_KEY = "<test key>"
 
-# 先跑兼容性检查（每个模型约 11 个很小的请求，每个请求输出上限 16–64 token）
-python -m tools.model_compat --real --api-url https://你的测试接口/v1 --model grok-4.2 --model gpt-5-mini
+# Run the compatibility check first (about 11 tiny requests per model, each capped at 16–64 output tokens)
+python -m tools.model_compat --real --api-url https://your-test-api/v1 --model grok-4.2 --model gpt-5-mini
 
-# 再聊天，或跑前 5 轮试试
-python -m tools.violet_test_chat --real --api-url https://你的测试接口/v1 --max-calls 40
-python -m tools.dialogue_eval --real --api-url https://你的测试接口/v1 --rounds 1-5 --max-calls 60
+# Then chat, or try the first 5 rounds
+python -m tools.violet_test_chat --real --api-url https://your-test-api/v1 --max-calls 40
+python -m tools.dialogue_eval --real --api-url https://your-test-api/v1 --rounds 1-5 --max-calls 60
 ```
 
-**预算**（任何一项达到就停止；价格未知时只按次数和 token 限制）：
+**Budget** (stops when any one is reached; with unknown prices only calls and tokens are limited):
 
-| 参数 | 默认 | 说明 |
+| Option | Default | Notes |
 |---|---|---|
-| `--max-calls-per-round` | 15 | 单轮上限；超过时这一轮由 Violet 的降级回复兜底，下一轮重新计数 |
-| `--max-calls` | 120 | 全程上限；达到后整个会话停止调用 |
-| `--max-tokens` | 300000 | 全程 token 上限 |
-| `--price-per-1k` / `--max-cost` | 不设 | 知道价格时再填，按估算费用封顶 |
+| `--max-calls-per-round` | 15 | Per-round limit; beyond it the round falls back to Violet's degraded reply, and counting restarts next round |
+| `--max-calls` | 120 | Limit for the whole run; once reached, the session makes no more calls |
+| `--max-tokens` | 300000 | Token limit for the whole run |
+| `--price-per-1k` / `--max-cost` | not set | Fill in when you know the price, to cap the estimated cost |
 
-参考：一轮正常对话大约 3–8 次调用（意图 1–3、聊天 1–2、记忆 1–3）。32 轮按默认预算可能在中途停止，
-需要完整跑完时请自己评估费用后再调高 `--max-calls`。
+For reference: a normal round takes about 3–8 calls (intent 1–3, chat 1–2, memory 1–3). With the default budget the 32 rounds may stop part way;
+to run all of them, estimate the cost yourself before raising `--max-calls`.
 
-**退出**：随时按 Ctrl+C 或输入 `/quit`，已完成的轮次会保存。用完后关闭这个 PowerShell 窗口，或者执行：
+**Exit**: press Ctrl+C or type `/quit` at any time; finished rounds are saved. When done, close this PowerShell window, or run:
 
 ```powershell
 Remove-Item Env:VIOLET_TEST_ALLOW_REAL_API, Env:VIOLET_TEST_API_KEY -ErrorAction SilentlyContinue
 ```
 
-`--config 文件` 只允许写模型名、提示词、温度、超时之类的设置（例如 `CHAT_LLM_MODEL=...`）；
-文件里如果出现 KEY / TOKEN / SECRET，会直接拒绝启动。
+`--config FILE` may only contain settings such as model names, prompts, temperature and timeouts (for example `CHAT_LLM_MODEL=...`);
+if the file contains KEY / TOKEN / SECRET, the tool refuses to start.
 
-## 4. 32 轮验收（`tools.dialogue_eval`）
+## 4. 32-round acceptance (`tools.dialogue_eval`)
 
-计划来自 `tests/samples/acceptance_dialogue_30.json`（32 轮，虚构用户小满），覆盖：时间推进、用户纠正事实、
-已结束的事件不再被提起、主动消息选择不发、用户正在忙、Violet 生活经历的一致性、观点分歧、需要回忆的轮次。
+The plan comes from `tests/samples/acceptance_dialogue_30.json` (32 rounds, fictional user Xiaoman) and covers: time passing, the user correcting facts,
+finished events not being brought up again, proactive messages choosing not to send, the user being busy, consistency of Violet's life experiences, disagreements, and rounds that need recall.
 
-| 选项 | 作用 |
+| Option | What it does |
 |---|---|
-| `--rounds 1-10` | 只跑部分轮次 |
-| `--manual` | 手动模式：每轮显示计划的话，回车照发，也可以输入改写后的内容，`/skip` 跳过，`/quit` 停止 |
-| `--manual-score` | 每轮结束后立即打分 |
-| `--scripted-memory` | 用计划里写好的记忆动作代替记忆模型，只考察聊天模型 |
-| `--no-memory` | 记忆模型什么都不存：看看 Violet 在没有记忆时怎么表现 |
-| `--quiet-hours off` | 关闭静默时段（深夜测试时主动消息也能判断） |
+| `--rounds 1-10` | Run only some rounds |
+| `--manual` | Manual mode: each round shows the planned message; Enter sends it as is, or type a rewritten version, `/skip` skips, `/quit` stops |
+| `--manual-score` | Score right after each round |
+| `--scripted-memory` | Use the memory actions written in the plan instead of the memory model, to test only the chat model |
+| `--no-memory` | The memory model stores nothing: see how Violet behaves without memory |
+| `--quiet-hours off` | Turn off quiet hours (so proactive messages can be judged when testing late at night) |
 
-输出：`report.json`（每轮回复、调用次数、token、延迟、错误、自动证据、最终状态）和 `score_sheet.csv`（评分表，可用 Excel 打开）。
-填好分数后汇总：
+Output: `report.json` (each round's reply, calls, tokens, latency, errors, automatic evidence, final state) and `score_sheet.csv` (score sheet, opens in Excel).
+After filling in the scores, summarise:
 
 ```powershell
-python -m tools.dialogue_eval --summarize tools\output\<时间>\report.json --scores tools\output\<时间>\score_sheet.csv
+python -m tools.dialogue_eval --summarize tools\output\<time>\report.json --scores tools\output\<time>\score_sheet.csv
 ```
 
-### 评分模板
+### Scoring template
 
-每轮 0 / 1 / 2 分（2 = 好，1 = 能接受但有毛病，0 = 不合格），对照 `rubric` 列和下面的维度：
+Each round gets 0 / 1 / 2 (2 = good, 1 = acceptable but flawed, 0 = fails), judged against the `rubric` column and the dimensions below:
 
-| 维度 | 2 分 | 0 分 |
+| Dimension | 2 points | 0 points |
 |---|---|---|
-| 自然度 | 像朋友在微信上回话，长度和语气合适 | 客服腔、说教、模板句、刻意的口头禅 |
-| 人设贴合 | 符合 Violet 的性格和说话方式 | 像换了一个人，或者过分讨好 |
-| 背景理解 | 用对了之前知道的事（住校、专业、最近的事） | 张冠李戴、把常住地说成此刻所在地 |
-| 记忆正确 | 记得该记的，纠正后用新的 | 用了已被纠正的旧事实 |
-| 不重复追问 | 已回答过的不再问 | 反复问同一件事 |
-| 已结束的事 | 不再当成没结束 | 又问“考试准备得怎么样” |
-| 不编造经历 | Violet 只提记录里有的经历 | 编出没发生过的经历 |
-| 不过度提问 | 不是每条都以问句结尾 | 连续追问、查户口 |
-| 主动消息 | 用户忙 / 刚聊完时选择不发 | 打扰正在忙的用户 |
+| Naturalness | Like a friend replying on WeChat, with fitting length and tone | Customer-service tone, lecturing, template sentences, forced catchphrases |
+| Persona fit | Matches Violet's character and way of talking | Like a different person, or overly ingratiating |
+| Understanding the background | Uses what she knew before correctly (lives on campus, major, recent events) | Mixes things up, treats where the user usually lives as where they are right now |
+| Correct memory | Remembers what she should; uses the new fact after a correction | Uses an old fact that was already corrected |
+| No repeated questions | Does not ask again what was already answered | Asks the same thing over and over |
+| Finished events | No longer treats them as unfinished | Asks again "how is your exam prep going" |
+| No invented experiences | Violet only mentions experiences in her records | Makes up experiences that never happened |
+| Not too many questions | Not every message ends with a question | Question after question, interrogation |
+| Proactive messages | Chooses not to send when the user is busy / just finished chatting | Disturbs a busy user |
 
-**逐轮补充说明（Phase 7 B.5；只补充评分说明，验收剧本和已有评分都不变）：**
+**Per-round notes (Phase 7 B.5; they only add scoring notes, the acceptance script and existing scores are unchanged):**
 
-- **第 11 轮**（问“猜猜我现在在哪”，此刻位置未知）：自然地承认不知道并接住对方的话 → 2 分；明确说明只是猜测、
-  没有把常住地当成已知事实（例如“在宿舍？我瞎猜的”）→ 1 分；把猜测当事实说出 → 0 分。
-- **第 13 轮**（对方刚说过在家，又问在哪）：正确使用已知位置并自然回答（可以带玩笑）→ 2 分；
-  无视明确、有效的位置而猜成别的地方 → 0 分。
-- **第 14 轮**（面试前紧张）：允许一个针对对方当前困扰的关怀式追问（例如“最担心哪一部分”），
-  不算了解类问题，不扣分；但仍计入全局问句比例。
+- **Round 11** (asks "guess where I am now", current location unknown): naturally admits not knowing and goes along with it → 2 points; says clearly it is only a guess,
+  without treating the usual residence as a known fact (e.g. "in the dorm? just guessing") → 1 point; states a guess as fact → 0 points.
+- **Round 13** (the user just said they are at home, then asks where they are): uses the known location correctly and answers naturally (a joke is fine) → 2 points;
+  ignores a clear, valid location and guesses somewhere else → 0 points.
+- **Round 14** (nervous before an interview): one caring follow-up question about the user's current worry (e.g. "which part worries you most") is allowed;
+  it does not count as a getting-to-know-you question and costs no points, but still counts toward the global question ratio.
 
-报告里的 `location`（上下文中的位置、回复提到的地点和来源、是否用上已知位置、是否标明是猜测）和汇总里的
-`reply_location_flags` 只是给评分人的证据，不会改变 verdict。已完成的报告可以用
-`python -m tools.dialogue_eval --recheck <report.json>` 离线复核：数据库会先复制，不会改动测试目录。
+The report's `location` (location in the context, places mentioned in the reply and their source, whether the known location was used, whether it was marked as a guess) and the summary's
+`reply_location_flags` are only evidence for the scorer and do not change the verdict. A finished report can be re-checked offline with
+`python -m tools.dialogue_eval --recheck <report.json>`: the database is copied first, so the test directory is not changed.
 
-**通过标准**（`summary.json` 的 `verdict`）：每轮都打过分；总分 ≥ 满分的 54/64；关键轮次（9、10、14、24、25、27）没有 0 分；
-用户忙时没有发主动消息；以问句结尾的回复 ≤ 40%，且不连续 3 轮以问句结尾。
+**Pass criteria** (`verdict` in `summary.json`): every round scored; total ≥ 54/64 of the maximum; no 0 in the key rounds (9, 10, 14, 24, 25, 27);
+no proactive message while the user was busy; replies ending in a question ≤ 40%, and never 3 rounds in a row ending in a question.
 
-上下文检查按字面匹配；第 3 轮的“身份：大学生”另外接受结构化的等价档案：本轮 Chat 上下文里有已确认的身份（大学生 / 研究生……），或者有已确认的大学名称、同时有已确认且对 Violet 可见的年级（大一……）。只出现“学校”两个字、未确认的候选、被禁用的档案都不算。报告的 `matched_by` 说明是按哪条规则通过的。
+Context checks match literally; round 3's "identity: university student" also accepts an equivalent structured profile: a confirmed identity (university student / graduate student…) in this round's chat context, or a confirmed university name together with a confirmed year (first year…) visible to Violet. The word "school" alone, unconfirmed candidates and disabled profile entries do not count. The report's `matched_by` says which rule passed it.
 
-自动字段只是**给评分人的证据**，不能代替人工判断自然度：以问句结尾、一致性守卫标记、提到已结束的事件、
-需要回忆时意图模型有没有调用 `query_memory`（R‑M2 风险的观察指标）、每轮调用数 / token / 延迟 / 错误率。
+Automatic fields are only **evidence for the scorer** and cannot replace human judgement of naturalness: replies ending in a question, consistency guard flags, mentions of finished events,
+whether the intent model called `query_memory` when recall was needed (the observation metric for risk R‑M2), and calls / tokens / latency / error rate per round.
 
-第 16 轮的 `ended_event_not_allowed` 检查（Phase 7 B.6.1）除了“已结束的事件不在主动消息可提的列表里”，还要求记忆里
-没有**同一件事的两条互相矛盾的有效记录**：一条已结束（done / cancelled），另一条仍是未结束（例如“进展未知”）。
-发现时检查失败，`contradictory_events` 列出两条记录的 id 和判断依据（文本相似度或共同关键词）。
+Round 16's `ended_event_not_allowed` check (Phase 7 B.6.1) requires, besides "finished events are not in the list proactive messages may mention", that memory has
+no **two contradictory valid records of the same thing**: one finished (done / cancelled) and the other still unfinished (e.g. "progress unknown").
+When found, the check fails and `contradictory_events` lists the ids of both records and the basis of the judgement (text similarity or shared keywords).
 
-### 跨轮回放与继续测试（Phase 7 B.3）
+### Cross-round replay and continuing a test (Phase 7 B.3)
 
-`--replay-from <真实测试的 report.json>` 在隔离环境里**离线**重建所选轮次之前的轮次，然后接着跑真实（或模拟）轮次：
+`--replay-from <report.json of a real test>` rebuilds the rounds before the selected ones **offline** in an isolated environment, then goes on with real (or simulated) rounds:
 
-- 只接受真实模型测试的报告（`real: true`），而且必须正好包含要回放的轮次；每轮用户原话必须与剧本逐字一致。
-- Violet 的回复逐字使用报告里记录的真实回复，经正常消息流水线发送和入库；回放阶段不创建真实模型客户端、不发网络请求、
-  不计调用次数和 token、不参与评分。
-- 档案和事件只按报告能确认的内容恢复（最终状态里的值 + 调用明细里的轮次和动作）；档案证据用值本身（必须逐字出现在
-  当轮原话里）；事件日期只在记忆内容里写有日期时才用。报告里没有的元数据列在报告的 `replay.not_restored`，
-  与剧本记忆步骤的差异列在 `replay.differences_vs_plan`。
-- 剧本时钟：从原始运行的开始时刻（剧本预置生活事件的时间 + `hours_ago`）起算，每轮按报告记录的调用耗时推进；
-  之后的轮次接着这个时间走，不使用宿主机当前日期。
-- 回放后逐项核对档案、事件、Violet 生活（含分享次数）、情境、提醒，与报告不一致就停止（退出码 4），不会发起任何真实调用。
+- Only reports of real-model tests (`real: true`) are accepted, and they must contain exactly the rounds to replay; each round's user message must match the script word for word.
+- Violet's replies are taken word for word from the real replies in the report and sent and stored through the normal message pipeline; the replay creates no real model client, sends no network requests,
+  counts no calls or tokens, and is not scored.
+- Profile and events are restored only from what the report can confirm (values in the final state + rounds and actions in the call details); profile evidence uses the value itself (which must appear word for word in
+  that round's message); event dates are used only when the memory text contains a date. Metadata missing from the report is listed in the report's `replay.not_restored`,
+  and differences from the script's memory steps in `replay.differences_vs_plan`.
+- Script clock: starts at the original run's start time (the time of the script's preset life events + `hours_ago`), and advances each round by the call durations recorded in the report;
+  later rounds continue on this time and do not use the host's current date.
+- After the replay, profile, events, Violet's life (including share counts), situations and reminders are checked item by item; any mismatch with the report stops it (exit code 4) without making any real call.
 
-测试目录里的 `.violet-eval-state.json` 记录回放状态和已完成的轮次。加 `--keep` 保留目录后，下次用同一个 `--workdir`
-加 `--rounds <下一轮起>` 就能继续（不会重复回放）。以下情况一律拒绝：再次回放、轮次重叠或不连续、回放未成功完成、
-目录里有聊天记录但没有状态文件、在含模拟回复的目录上跑真实测试。
+`.violet-eval-state.json` in the test directory records the replay state and finished rounds. With `--keep` the directory is kept, and next time the same `--workdir`
+plus `--rounds <next round on>` continues (without replaying again). Always refused: replaying again, overlapping or non-consecutive rounds, a replay that did not finish successfully,
+a directory with chat history but no state file, a real test on a directory containing simulated replies.
 
-主动消息检查会给出拦截原因：未触发调度 / 静默时段 / 用户忙碌 / 冷却时间 / 用户偏好或每日上限 / 模型决定不发送 /
-已发送 / 错误。第 9 轮只有在**本轮保存了忙碌状态、被忙碌规则拦下、且没有发送**时才通过；第 10 轮检查忙碌状态
-已经不再有效。任何一项不通过，汇总结论都是 fail。
+The proactive message check gives the blocking reason: scheduler not triggered / quiet hours / user busy / cooldown / user preference or daily limit / model decided not to send /
+already sent / error. Round 9 passes only if **this round saved a busy state, the busy rule blocked it, and nothing was sent**; round 10 checks that the busy state
+is no longer valid. If any item fails, the summary verdict is fail.
 
-**多份报告连续回放（Phase 7 B.5）**：`--replay-from` 可以按顺序给多次，例如先给第 1–5 轮的报告，再给第 6–10 轮的报告。
+**Replaying several reports in a row (Phase 7 B.5)**: `--replay-from` can be given several times in order, for example the report of rounds 1–5 first, then the report of rounds 6–10.
 
-- 轮次必须连续、不重复、不重叠；后一份报告必须记录过它回放的正是前一份报告（哈希一致），否则拒绝运行。
-- 每一段回放完都与该段报告的最终状态逐项核对：聊天记录的内容和顺序，档案、事件、情境（含过期时间）、提醒，
-  Violet 生活事件的时间和分享次数。
-- 情境只按报告能确认的内容恢复：类型和内容来自最终状态；过期时间优先使用该轮忙碌检查记下的原始值，
-  否则用最终值加上之后的旧式时间推进推算；证据用整句用户原话（报告里没有工具参数）。
-- B.4 之前录制的报告（每轮没有 `scenario_time`）在原位置重放当时的旧式时间推进（整体后移时间戳）和第 9 轮的主动消息检查，
-  并逐字核对拦截原因和第 10 轮结束时的情境；B.4 之后的报告直接使用记录的每轮场景时间。
-- 报告的 `replay` 里有每段的核对结果、时钟偏差、重放的检查、回放结束时有效的情境，以及每条情境由哪一轮的记忆任务写入。
+- Rounds must be consecutive, without repeats or overlap; a later report must have recorded that what it replayed was exactly the previous report (same hash), otherwise it refuses to run.
+- After each segment is replayed it is checked item by item against that segment report's final state: content and order of the chat history, profile, events, situations (including expiry times), reminders,
+  times and share counts of Violet's life events.
+- Situations are restored only from what the report can confirm: kind and content from the final state; the expiry time preferably from the original value recorded by that round's busy check,
+  otherwise estimated from the final value plus the later old-style time advances; evidence is the whole user message (the report has no tool arguments).
+- Reports recorded before B.4 (no `scenario_time` per round) replay the old-style time advance of that time (shifting all timestamps) and round 9's proactive check in their original place,
+  and check the blocking reason and the situation at the end of round 10 word for word; reports after B.4 use the recorded per-round scenario time directly.
+- The report's `replay` holds each segment's check results, clock drift, replayed checks, the situations valid at the end of the replay, and which round's memory job wrote each situation.
 
-### 场景时间与剧本修正版（Phase 7 B.4）
+### Scenario time and script revisions (Phase 7 B.4)
 
-- 时间推进只推进会话的**场景时钟**（`/advance`、剧本的 `advance_hours` / `time`、第 9 轮的 1.6 小时）；
-  已保存的消息、档案证据、事件时间、生活事件和情境时间一律不改写，已保存的绝对日期保持不变。
-  情境过期、事件到期（计划中 → 不确定）、提醒和主动消息判断都用同一个场景时间。推进本身不发消息、不调用模型；
-  提醒只有在剧本要求的调度检查里才会处理。时间运算按 UTC 进行，跨天、跨时区和夏令时都按真实经过的时长计算。
-- 报告每轮记录 `scenario_time`；有推进的轮次记录 `time_advance`：起止时间、小时数、推进中自然过期的情境、
-  因时间改变状态的事件。
-- 旧的“整体移动时间戳”函数 `advance_time` 仍保留：实时轮次从不调用；只有回放 B.4 之前录制的报告时，才在原位置重放当时的推进（Phase 7 B.5）。
-- 验收剧本 `acceptance_dialogue_30.json` 不改动。修正版写在单独的 `acceptance_dialogue_30.rev2.json`，绑定原剧本哈希，
-  只能改未完成轮次的 `time` / `advance_hours`；`--plan-revision auto`（默认）使用匹配的最新修正版，`none` 用原剧本。
-  保留的测试目录会检查原剧本哈希。每个已完成的轮次都记录了用哪个版本跑的（`plan_revision`），状态里记录了每个修正版的
-  文件哈希；继续测试时逐轮核对（Phase 7 B.7.1）：当前修正版改动的已完成轮次，必须是用同一个修正版、同一个文件哈希跑的；
-  用别的版本跑过的轮次，两个版本都不能改动它；没有版本记录的旧轮次，当前修正版不能改动它。已完成轮次还必须从第 1 轮起
-  连续、不重复。`--seed-from` 复制的目录和直接 `--workdir` 续跑用同一套检查。
-  修正版 2：第 15 轮在第 4 轮所说“下周三”的第二天上午 10 点（答辩日期之后），不再是第 14 轮之后 30 小时。
-- 第 11 轮“不知道在哪”和第 13 轮“此刻所在：家里”按本轮 Chat 上下文里的情境判断：第 11 轮要求上下文里没有当前位置
-  （只有活动情境也算通过）；第 13 轮要求上下文里有当前位置，值为“家里 / 在家 / 家中 / 在家里 / 回家了 / 老家”之一，
-  并且能追溯到本轮之前某一轮的记忆整理；真实测试中必须是真实 MemoryAgent 写入的。聊天记录里出现“家”字不算。
-  回复里提到的地点（宿舍、学校、家……）列在 `places_in_reply`，供人工评分参考。
+- Advancing time only advances the session's **scenario clock** (`/advance`, the script's `advance_hours` / `time`, round 9's 1.6 hours);
+  saved messages, profile evidence, event times, life events and situation times are never rewritten, and saved absolute dates stay as they are.
+  Situation expiry, events coming due (planned → uncertain), reminders and proactive decisions all use the same scenario time. Advancing itself sends no messages and calls no model;
+  reminders are handled only in the scheduler checks the script asks for. Time arithmetic is done in UTC, and crossing days, time zones and daylight saving all use the real elapsed duration.
+- The report records `scenario_time` for each round; rounds with an advance record `time_advance`: start and end time, hours, situations that expired naturally during the advance,
+  and events whose state changed because of the time.
+- The old "shift all timestamps" function `advance_time` is still kept: live rounds never call it; it replays the advance of that time in its original place only when replaying reports recorded before B.4 (Phase 7 B.5).
+- The acceptance script `acceptance_dialogue_30.json` is not changed. Revisions are written in a separate `acceptance_dialogue_30.rev2.json`, bound to the original script's hash,
+  and may only change `time` / `advance_hours` of unfinished rounds; `--plan-revision auto` (default) uses the latest matching revision, `none` the original script.
+  Kept test directories check the original script's hash. Each finished round records which version it ran with (`plan_revision`), and the state records each revision's
+  file hash; continuing checks round by round (Phase 7 B.7.1): finished rounds changed by the current revision must have run with the same revision and the same file hash;
+  rounds run with another version may not be changed by either version; old rounds without a version record may not be changed by the current revision. Finished rounds must also be consecutive
+  from round 1 without repeats. A directory copied with `--seed-from` and a direct `--workdir` continuation go through the same checks.
+  Revision 2: round 15 is at 10 a.m. the day after the "next Wednesday" mentioned in round 4 (after the thesis defence date), no longer 30 hours after round 14.
+- Round 11 "doesn't know where" and round 13 "currently at: home" are judged by the situations in this round's chat context: round 11 requires no current location in the context
+  (an activity situation alone still passes); round 13 requires a current location in the context whose value is one of "home / at home / in the home / at home (variant) / back home / hometown",
+  traceable to the memory processing of an earlier round; in a real test it must have been written by the real MemoryAgent. The word "home" appearing in the chat history does not count.
+  Places mentioned in the reply (dorm, school, home…) are listed in `places_in_reply` for human scoring.
 
-### 复制测试目录与续跑回放（Phase 7 B.6.2）
+### Copying test directories and continuation replays (Phase 7 B.6.2)
 
-- `--seed-from <已保存的测试目录>`：把它的 `violet-test.db` 和 `.violet-eval-state.json` **只读复制**到一个还不存在的
-  `--workdir`，再按续跑规则继续。源目录只被读取：复制前后核对哈希；写入日志非空的数据库拒绝复制（可能缺数据）；
-  检查源目录时以不可变方式只读打开，不会在源目录里生成 `-wal` / `-shm` 文件。
-- `--continue-replay <报告> --continue-replay-sha256 <哈希>`（必须同时给 `--seed-from`）：用“接着这个目录跑的真实报告”
-  离线重建紧接着的轮次，例如目录完成到第 13 轮、`--rounds 15`，就回放第 14 轮。拒绝运行的情况：
-  - 报告哈希与给定的不一致（报告被改动过），或没有给哈希；
-  - 报告的 `completed_rounds_before` 与目录的轮次不同，剧本或修正版哈希不同，或第一轮回放的场景时间与目录的
-    `clock_end` 相差超过 1 毫秒（不是同一条时间线）；
-  - 用户原话与剧本不同，轮次带主动消息检查或时间推进，或包含 `save_memory`（含 needs_decision → 新建）以外的写入；
-  - 新建的记忆在之后的轮次里被改动过（无法确认它当时的样子）；
-  - 目录里已经有这一轮（不会重复回放）。
-- 回放时核对：相似候选记忆的内容和进展与报告起点一致，下一条事件 id 与报告一致，没有未完成的记忆任务；
-  Violet 回复逐字一致，每次记忆写入的结果（needs_decision 的候选、新建的 id）与报告一致；新建记忆的内容、类型、进展、日期一致；
-  除了这一轮的消息和记忆以外，档案、情境、提醒、生活事件、了解问题的数量都不变；结束后没有未完成的后台任务。
-  场景时钟停在报告记录的下一轮开始时刻（跳跃之前）。
-- 任何一项不一致都停止（退出码 4），状态里的续跑回放标为 `failed`，这个目录不能再继续测试；没有任何计费调用。
-- 报告里没有的元数据（save_memory 的类别、重要度、情绪权重、具体时刻，消息和任务的精确时间）列在 `not_restored`。
-- `--replay-only`：只回放、保存状态，不运行 `--rounds` 里的轮次。准备一次基准目录，之后每次真实复测都用
-  `--seed-from <基准目录>` 复制一份新的，互不影响。
+- `--seed-from <saved test directory>`: copies its `violet-test.db` and `.violet-eval-state.json` **read-only** into a `--workdir` that does not exist yet,
+  then continues under the continuation rules. The source directory is only read: hashes are compared before and after copying; a database with a non-empty write-ahead log is refused (data may be missing);
+  the source directory is opened read-only in immutable mode when checked, so no `-wal` / `-shm` files are created in it.
+- `--continue-replay <report> --continue-replay-sha256 <hash>` (must be given together with `--seed-from`): uses "the real report that ran on top of this directory"
+  to rebuild the immediately following round offline; for example, if the directory is complete up to round 13 and `--rounds 15`, round 14 is replayed. Refused when:
+  - the report's hash differs from the one given (the report was changed), or no hash is given;
+  - the report's `completed_rounds_before` differs from the directory's rounds, the script or revision hash differs, or the scenario time of the first replayed round differs from the directory's
+    `clock_end` by more than 1 millisecond (not the same timeline);
+  - the user message differs from the script, the round has a proactive check or time advance, or contains writes other than `save_memory` (including needs_decision → create);
+  - a memory it created was changed in later rounds (what it looked like at the time cannot be confirmed);
+  - the directory already has this round (no replaying twice).
+- During the replay it checks: content and progress of similar candidate memories match the report's starting point, the next event id matches the report, no memory jobs are unfinished;
+  Violet's replies match word for word, the result of each memory write (needs_decision candidates, created ids) matches the report; content, type, progress and date of created memories match;
+  apart from this round's messages and memories, profile, situations, reminders, life events and the number of getting-to-know-you questions are unchanged; no background jobs are left unfinished at the end.
+  The scenario clock stops at the start of the next round recorded in the report (before the jump).
+- Any mismatch stops it (exit code 4); the continuation replay in the state is marked `failed`, and this directory can no longer be continued; no billable call is made.
+- Metadata missing from the report (save_memory's category, importance, emotional weight, exact time, the exact times of messages and jobs) is listed in `not_restored`.
+- `--replay-only`: only replays and saves the state, without running the rounds in `--rounds`. Prepare a baseline directory once, and for every later real re-test
+  copy a fresh one with `--seed-from <baseline directory>`, so they do not affect each other.
 
-### 离线 Mock 图片（Phase 7 B.8.1，`--image-mock`）
+### Offline mock images (Phase 7 B.8.1, `--image-mock`)
 
-默认图片功能关闭（`VIOLET_IMAGE_ENABLED=0`，测试用微信替身拒绝发图），不变。`--image-mock` 打开图片，但图片链路完全离线：
+Images are off by default (`VIOLET_IMAGE_ENABLED=0`, and the test WeChat stand-in refuses to send images); that is unchanged. `--image-mock` turns images on, but the whole image path stays offline:
 
-- **只有 Mock 图片模型**：在测试目录写 `image_providers.mock.json`，只含一个离线 `mock/mock-image-1`（生成纯色 PNG，
-  不需要 Key）。启动时检查原始文件和产品注册表的读取结果：任何非 mock 适配器、`base_url`、`api_key_env`、
-  返回 URL 的输出都会被拒绝（退出码 2，不留下目录）。
-- **程序强制，不靠提示词**：本次运行里，除 mock 以外的图片适配器都换成直接拒绝的替身；图片适配器的 HTTP 传输层拒绝一切请求；
-  另有 socket 级拦截，只允许连接文字模型接口（`--real` 时为 `--api-url` 的地址），以及 asyncio 内部的本机自连接；
-  其他连接（包括本机上的其他服务）一律拒绝并记录。报告里的 `network_guard` 列出放行和拦截的连接。
-- **测试用发送器**：发图时把文件复制到 `<测试目录>/sent_images/`，并在 `sent_images.jsonl` 记录轮次、文件、字节数和
-  sha256；不会连接微信。发送失败时没有记录，outbox 中为 failed。
-- **每轮的 `images`** 记录图片任务、调用、生成的图片和发送情况（只含 id、状态码、哈希，不含提示词）。
-  **`image_checks`** 把三件事分开判断：
-  1. 模型是否调用了 `create_image`；
-  2. Mock 是否成功生成了 AI 图片（任务成功、图片可用）；
-  3. 测试发送器是否记录了同一张图（outbox 为 sent，且 sha256 一致）。
-  
-  剧本里的 `tools_has` / `tools_lacks` / `db: violet_picture_sent` 按这三件事判断；只调用了工具不算发出了图。
-- 紧跟图片轮次的那一轮（第 22 轮）会检查前提：之前确实发出过 AI 图片（按数据库判断，续跑和复制目录同样适用）。
-  没有发出过，这一轮的图片真实性验收标为无效（`valid: false`），并列在汇总的 `image_rounds_invalid` 里。
-- 回复的证据标记：把 AI 图片说成照片、拍的或摄像头拍的（`claims_photo_or_camera`）；没有发出图片却说“给你画了 / 看这张”
-  （`claims_picture_without_one_sent`）。产品自己的回复守卫会先删掉或改写“说成照片”的句子，漏网的才会在这里标出。
-- **验证不了的**：Mock 图是纯色块，图片内容本身（画面是否像读书、画风、与人设是否一致）无法验证；真实生图服务的协议、
-  费用和效果都**需要生产环境验证**。
+- **Only the mock image model**: `image_providers.mock.json` is written in the test directory with a single offline `mock/mock-image-1` (generates a solid-colour PNG,
+  no key needed). At startup both the raw file and the product registry's reading of it are checked: any non-mock adapter, `base_url`, `api_key_env`
+  or URL output is refused (exit code 2, no directory left behind).
+- **Enforced by the program, not by prompts**: in this run every image adapter other than mock is replaced by a stand-in that refuses; the image adapters' HTTP transport refuses every request;
+  on top of that a socket-level block only allows connections to the text model API (the `--api-url` address with `--real`) and asyncio's internal loopback self-connections;
+  every other connection (including other services on the machine) is refused and recorded. The report's `network_guard` lists allowed and blocked connections.
+- **Test sender**: when an image is sent, the file is copied to `<test directory>/sent_images/` and `sent_images.jsonl` records the round, file, bytes and
+  sha256; WeChat is never contacted. When sending fails there is no record, and the outbox shows failed.
+- **Each round's `images`** records image jobs, calls, generated images and sending (only ids, status codes and hashes, no prompts).
+  **`image_checks`** judges three things separately:
+  1. whether the model called `create_image`;
+  2. whether the mock successfully generated an AI image (job succeeded, image usable);
+  3. whether the test sender recorded the same image (outbox sent, same sha256).
 
-### 剧本检查的判定（Phase 7 B.9.1）
+  The script's `tools_has` / `tools_lacks` / `db: violet_picture_sent` are judged on these three; only calling the tool does not count as sending an image.
+- The round right after the image round (round 22) checks its precondition: an AI image was really sent before (judged from the database; also for continuations and copied directories).
+  If none was sent, this round's image-authenticity acceptance is marked invalid (`valid: false`) and listed in the summary's `image_rounds_invalid`.
+- Evidence flags on replies: calling an AI image a photo, something taken, or taken by a camera (`claims_photo_or_camera`); saying "I drew this for you / look at this" without having sent an image
+  (`claims_picture_without_one_sent`). The product's own reply guard first deletes or rewrites sentences that "call it a photo"; only the ones that slip through are flagged here.
+- **What cannot be verified**: mock images are solid blocks of colour, so the image content itself (whether it looks like reading, the style, whether it fits the persona) cannot be verified; the protocol,
+  cost and quality of real image services **need verification in production**.
 
-剧本里的 `tools_has` / `tools_lacks` / `db` 检查，每一项都记录在当轮的 `checks` 里，结果是下面四种之一：
+### Verdicts of script checks (Phase 7 B.9.1)
 
-| 结果 | 含义 |
+Each of the script's `tools_has` / `tools_lacks` / `db` checks is recorded in that round's `checks`, with one of four results:
+
+| Result | Meaning |
 |---|---|
-| `PASS` / `FAIL` | 正常判定 |
-| `NOT_APPLICABLE` | 这项功能在本次运行中关闭，**未测试**：没加 `--image-mock` 时的图片检查；网页工具（测试工具没有接入 web MCP）。附带原因 |
-| `UNSUPPORTED` | 测试工具判断不了：未知的工具或未实现的 `db` 检查。会明确列出，不会静默跳过 |
+| `PASS` / `FAIL` | Normal verdict |
+| `NOT_APPLICABLE` | The feature is off in this run, **not tested**: image checks without `--image-mock`; web tools (the test tool has no web MCP). Comes with a reason |
+| `UNSUPPORTED` | The test tool cannot judge it: an unknown tool or an unimplemented `db` check. Listed explicitly, never silently skipped |
 
-- 工具按类别区分：图片（`create_image` / `edit_image` / `look_at_image`）、网页（`violet-web__*`）、其他。只有图片类的结果进入
-  `image_checks` 和汇总的 `image_check_failures`；其他类别的失败进入 `check_failures`。
-- `db: commitment_created`（第 26 轮）：这一轮新建的提醒（不算以前已有的），状态为 pending；内容与剧本的提醒事项一致；
-  证据按产品自己的规则（`check_explicit_request`）必须是用户原话里的明确请求；到期时间按剧本（`明天` + `08:00`）以当轮场景
-  日期、Violet 的时区计算，必须是同一时刻。任何一项不满足都判 FAIL，并写明原因。
-- 汇总：`check_failures`、`untested_checks`（NOT_APPLICABLE / UNSUPPORTED）、`image_rounds_not_applicable`。
-  有未测试的检查时，结论最多是 `pass_with_untested_checks`，不会是 `pass`。
+- Tools are grouped: images (`create_image` / `edit_image` / `look_at_image`), web (`violet-web__*`), other. Only image results go into
+  `image_checks` and the summary's `image_check_failures`; failures of other groups go into `check_failures`.
+- `db: commitment_created` (round 26): a reminder created in this round (not an earlier one), status pending; content matches the script's reminder item;
+  the evidence must, by the product's own rule (`check_explicit_request`), be an explicit request in the user's own words; the due time per the script (`tomorrow` + `08:00`), computed from that round's scenario
+  date in Violet's time zone, must be the same instant. If anything is not met, it is FAIL with the reason written down.
+- Summary: `check_failures`, `untested_checks` (NOT_APPLICABLE / UNSUPPORTED), `image_rounds_not_applicable`.
+  With untested checks the verdict is at best `pass_with_untested_checks`, never `pass`.
 
-### 执行是否完整、预算预留、到期提醒（Phase 7 B.10.1）
+### Complete execution, budget reservation, due reminders (Phase 7 B.10.1)
 
-**“轮次执行过”和“后台任务都完成了”是两件事。** 每轮另外记录：
+**"The round ran" and "the background jobs all finished" are two different things.** Each round also records:
 
-- `memory_jobs`：本轮记忆任务的最终状态、尝试次数、错误类型（不含原文以外的内容，Key 会被替换）；
-- `background_complete`：本轮的记忆任务是否都是 `done`；
-- `execution_errors`：API 错误以外、没有执行完的事情——没完成的记忆任务、被预算拒绝的调用（从未发出）、处理失败的用户消息。
+- `memory_jobs`: final state, attempts and error type of this round's memory jobs (nothing beyond that; keys are replaced);
+- `background_complete`: whether this round's memory jobs are all `done`;
+- `execution_errors`: things that did not finish, other than API errors — unfinished memory jobs, calls refused by the budget (never sent), user messages that failed to process.
 
-有 `execution_errors` 时，即使 API 错误为 0、分数满分，汇总结论也是 `fail_execution_incomplete`；
-汇总里另有 `execution_errors` 和 `rounds_with_unfinished_background_work`。状态文件里每轮也记下 `background_complete`。
+With `execution_errors`, the summary verdict is `fail_execution_incomplete` even with 0 API errors and full marks;
+the summary also has `execution_errors` and `rounds_with_unfinished_background_work`. The state file records `background_complete` for each round too.
 
-**被预算拒绝的记忆任务不再立即重试**：测试工具的重试间隔是 0，产品的 MemoryWorker 会马上重试两次，但预算拒绝在本次
-测试里不可能恢复。测试工具只把这种任务直接标成 failed（错误信息末尾注明 `[test tool: a budget refusal is not retried]`），
-产品自己的重试策略不变。
+**Memory jobs refused by the budget are no longer retried immediately**: the test tool's retry interval is 0 and the product's MemoryWorker would retry twice right away, but a budget refusal cannot recover within
+this test. The test tool simply marks such jobs failed (the error message ends with `[test tool: a budget refusal is not retried]`);
+the product's own retry policy is unchanged.
 
-**续跑**：测试目录里有没完成的记忆任务（数据库里 `memory_jobs` 不是 `done`，或状态文件标了 `background_complete: false`）时，
-`--seed-from` / 续跑会拒绝。确认接受这个状态，加 `--accept-incomplete-memory`，报告的 `continuation` 里会列出被接受的任务。
+**Continuing**: when the test directory has unfinished memory jobs (`memory_jobs` in the database not `done`, or the state file says `background_complete: false`),
+`--seed-from` / continuing is refused. To accept that state, add `--accept-incomplete-memory`; the report's `continuation` lists the accepted jobs.
 
-**预算预留**：每次真实调用之前检查“已用 token（服务商报告的 usage）+ 这次调用的预留”是否超过 `--max-tokens`。
-预留是估算：同一个 Agent 以前最大的一次调用 × 1.1；这个 Agent 还没调用过就取所有调用里最大的一次 × 1.1；
-本次还没有任何调用时取 16,000。超过就拒绝这次调用并停止本次测试。报告的 `budget` 里分开记录：
+**Budget reservation**: before every real call it checks whether "tokens used (the usage reported by the provider) + this call's reservation" exceeds `--max-tokens`.
+The reservation is an estimate: the same agent's largest previous call × 1.1; if this agent has not called yet, the largest call of all × 1.1;
+if there has been no call at all, 16,000. If it exceeds, the call is refused and the test stops. The report's `budget` records separately:
 
-| 字段 | 含义 |
+| Field | Meaning |
 |---|---|
-| `used_tokens` / `remaining_tokens` | 服务商报告的真实用量和剩余（**不含**任何估算，usage 原样记录） |
-| `stop_detail` | 停止原因、当时的已用量、剩余量、预留量和预留依据 |
-| `refused_calls` | 被拒绝的调用（Agent、轮次、原因）：都没有发出，不计费 |
+| `used_tokens` / `remaining_tokens` | Real usage reported by the provider and what remains (**no** estimates; usage recorded as is) |
+| `stop_detail` | Why it stopped, with usage, remainder, reservation and the basis of the reservation at that moment |
+| `refused_calls` | Refused calls (agent, round, reason): none were sent, none are billed |
 
-**限制**：上游服务没有“每个请求最多用多少 token”的限制，所以调用前检查只能做到“不在明知会超时发起调用”。
-如果某一次调用比预留的大，累计用量仍可能略超上限。
+**Limitation**: the upstream service has no "maximum tokens per request" limit, so the check before a call can only ensure "no call is started knowing it will exceed".
+If one call is larger than its reservation, total usage can still go slightly over the limit.
 
-**第 28 轮的 `allowed_or_skipped_without_bypass`**：开始前那次调度检查的结果分成两部分：
+**Round 28's `allowed_or_skipped_without_bypass`**: the result of the scheduler check before it is split in two:
 
-- `reminders`：检查前已经到期的提醒，每条记录 `commitment_id`、提醒事件、发件记录和 `delivery`：
-  - `sent`：提醒状态 sent、对应的 `commitment_reminder` 事件 sent、该事件的发件记录 sent 且提到了提醒的事；
-  - `postponed_quiet_hours`：在静默时段，按产品规则推迟；
-  - `not_sent` / `sent_without_matching_message`：没有成功提醒。**普通主动消息不算提醒成功**，哪怕它提到了同一件事。
-  - `late_minutes` / `late_cause`：比到期时间晚了多久。场景时钟一次推进跨过了到期时间时标注“测试时间跳跃导致的延迟”
-    （测试工具不运行后台调度线程，提醒只在这次检查里处理；生产环境里调度线程每分钟检查一次）。
-- `chat_proactive`：普通主动聊天的事件和发出的消息，与提醒分开。
+- `reminders`: reminders already due before the check, each recording `commitment_id`, the reminder event, the outbox record and `delivery`:
+  - `sent`: the reminder is sent, the matching `commitment_reminder` event is sent, that event's outbox record is sent and mentions the reminder's subject;
+  - `postponed_quiet_hours`: in quiet hours, postponed per the product's rules;
+  - `not_sent` / `sent_without_matching_message`: the reminder did not succeed. **An ordinary proactive message does not count as a successful reminder**, even if it mentions the same thing.
+  - `late_minutes` / `late_cause`: how late it was compared with the due time. When one advance of the scenario clock jumped past the due time it is marked "delay caused by a test time jump"
+    (the test tool runs no background scheduler thread, so reminders are only handled in this check; in production the scheduler thread checks every minute).
+- `chat_proactive`: ordinary proactive chat events and the messages sent, kept apart from reminders.
 
-判定：普通主动消息没有经过调度闸门就发出、提醒在静默时段发出、到期提醒没有成功发出（推迟到静默时段结束的除外），都算未通过。
-测试只发到本地模拟微信，不会发到真实微信。
+Verdict: an ordinary proactive message sent without going through the scheduler gate, a reminder sent during quiet hours, or a due reminder not sent successfully (except one postponed until quiet hours end) all fail.
+The test only sends to the local simulated WeChat, never to real WeChat.
 
-## 5. 模型兼容性检查（`tools.model_compat`）
+## 5. Model compatibility check (`tools.model_compat`)
 
-逐项检查：基本文本回复、`temperature`、`max_tokens` 与 `max_completion_tokens`、`reasoning_effort`、tool_calls、
-工具结果回传（多轮工具调用）、`response_format=json_object`、只靠提示词的 JSON 输出、未知模型的 4xx。
-错误按 Violet 的重试规则分类：`rate_limited` / `server_error` / `timeout` / `transport` 会重试，`bad_request` 不重试。
-429 / 500 在真实接口上无法安全地主动触发，这部分用模拟服务商离线验证；`--include-timeout` 会在真实模式下多发一个超时请求。
+Checks item by item: a basic text reply, `temperature`, `max_tokens` vs `max_completion_tokens`, `reasoning_effort`, tool_calls,
+returning tool results (multi-turn tool calls), `response_format=json_object`, JSON output from the prompt alone, and a 4xx for an unknown model.
+Errors are classified by Violet's retry rules: `rate_limited` / `server_error` / `timeout` / `transport` are retried, `bad_request` is not.
+429 / 500 cannot be triggered safely on a real API, so that part is verified offline with a simulated provider; `--include-timeout` sends one extra timeout request in real mode.
 
-结果只根据接口的实际响应判断，不看模型名。结果会给出 `config/model_params.json` 的建议条目；
-只有加 `--write-policy`、并且是真实检查、并且再输入一次 `yes` 时才会写入（带 `_verified` 记录日期和报告名）。
-不会修改服务商或中转服务的任何配置。
+Results are judged only from the API's actual responses, never from the model name. The results suggest entries for `config/model_params.json`;
+they are written only with `--write-policy`, on a real check, after typing `yes` once more (with `_verified` recording the date and report name).
+No configuration of the provider or relay service is ever changed.
 
-## 5b. 减少冗余模型调用的开关（Phase 7 B.2）
+## 5b. Switches that cut redundant model calls (Phase 7 B.2)
 
-四个开关默认都是 `1`，可以在 `--config` 文件里设为 `0` 做对比（例如同一组轮次分别跑一次）：
+All four switches default to `1` and can be set to `0` in a `--config` file for comparison (for example, running the same rounds once each way):
 
-| 开关 | 作用 | 报告里怎么看 |
+| Switch | What it does | How to see it in the report |
 |---|---|---|
-| `VIOLET_INTENT_HIDE_EMPTY_MEMORY_TOOL` | 记忆库里没有任何 `query_memory` 能查到的事件（已删除、被用户禁用的不算；过期的仍算）时，不给 IntentAgent 提供这个工具 | Intent 调用的 `tools` 为 0、每轮 Intent 只调用 1 次 |
-| `VIOLET_MEMORY_FINISH_SIGNAL` | 后台记忆整理任务里提供 `memory_done`：模型在同一步里写入并调用它、且所有写入都返回明确的成功结果时，直接结束，不再请求收尾回复 | `runs` 里 MemoryAgent 的 `finished_after_tools: true`、`steps` 少 1 |
-| `VIOLET_MEMORY_HIDE_EMPTY_QUERY_TOOL` | （Phase 9.4，cys-p94-sched-r1）记忆库里一条事件记忆都没有（被用户禁用的也算有，因为 MemoryAgent 查询时会看到它们、避免重存）时，不给 MemoryAgent 提供 `query_memory`，并告诉它不会有重复、直接决定；有任何事件记忆时照常提供、照常提示先查 | MemoryAgent 第一次调用里没有 `query_memory`、少一轮调用 |
-| `VIOLET_CONTEXT_HIDE_LEGACY_NICKNAME` | 已有确认的称呼档案时，Chat 上下文不再显示旧核心记忆里的称呼（只影响显示，不改数据） | Chat 上下文的 `legacy_core` 段变短 |
+| `VIOLET_INTENT_HIDE_EMPTY_MEMORY_TOOL` | When memory has no event that `query_memory` could find (deleted ones and ones the user disabled don't count; expired ones still count), IntentAgent is not offered this tool | Intent calls have 0 `tools`, and Intent is called only once per round |
+| `VIOLET_MEMORY_FINISH_SIGNAL` | Offers `memory_done` in the background memory job: when the model writes and calls it in the same step, and every write returns a clear success, the job ends right there without asking for a closing reply | MemoryAgent in `runs` has `finished_after_tools: true` and one `step` less |
+| `VIOLET_MEMORY_HIDE_EMPTY_QUERY_TOOL` | (Phase 9.4, cys-p94-sched-r1) When memory has no event memories at all (ones disabled by the user count as present, because MemoryAgent sees them when querying and avoids storing them again), MemoryAgent is not offered `query_memory` and is told there can be no duplicates, so it decides directly; with any event memory it is offered as usual and told to query first as usual | MemoryAgent's first call has no `query_memory`, one call fewer |
+| `VIOLET_CONTEXT_HIDE_LEGACY_NICKNAME` | When a confirmed form-of-address profile exists, the chat context no longer shows the form of address from the old core memory (display only, data unchanged) | The `legacy_core` section of the chat context gets shorter |
 
-`memory_done` 是否被真实模型使用，只能用真实模型验证；模型不调用它时行为和以前完全一样（不节省，也不丢写入）。
+Whether a real model uses `memory_done` can only be verified with a real model; when the model does not call it, behaviour is exactly as before (no saving, and no lost writes).
 
-报告的 `memory_jobs` 里每个任务还有 `outcome`（Phase 9.4 r1）：`complete`（模型做完了，status=done）、`partial`（写进去了一部分，之后中断；`writes` 列出每次尝试真正成功的写入）、`interrupted`（尝试过、什么都没写、没做完）、`unprocessed`（还没尝试）；`budget_interrupted: true` 表示最后一次是测试工具的预算拒绝（测试工具不重试它，`budget_not_retried`）。`status=failed` 不再等于“什么都没记下”，要看 `outcome` 和 `writes`。
+Each job in the report's `memory_jobs` also has `outcome` (Phase 9.4 r1): `complete` (the model finished, status=done), `partial` (part was written, then interrupted; `writes` lists the writes that really succeeded in each attempt), `interrupted` (attempted, wrote nothing, did not finish), `unprocessed` (not attempted yet); `budget_interrupted: true` means the last attempt was a budget refusal by the test tool (the test tool does not retry it, `budget_not_retried`). `status=failed` no longer means "nothing was recorded"; look at `outcome` and `writes`.
 
-## 6. 本地无法模拟的微信行为
+## 6. WeChat behaviour that cannot be simulated locally
 
-以下内容只能在真实微信环境里验证（**需要生产环境验证**）：
+The following can only be verified in a real WeChat environment (**needs verification in production**):
 
-- iLink 长轮询的真实节奏、重复投递、`get_updates_buf` 的续传和登录过期；
-- 用户连续发多条时真实的防抖合并效果（测试工具的防抖缩短到 0.05–0.1 秒）；
-- “正在输入”提示、模拟打字延迟的观感（测试中关闭）；
-- 微信消息长度限制、分条发送的显示效果、表情和特殊字符的渲染；
-- 图片、语音、文件的收发与 CDN 加解密（测试工具不处理媒体，图片功能关闭）；
-- `send_image` 的真实可用性；
-- 主动消息在真实时间里的节奏（测试中靠 `/advance` 和 `/proactive` 模拟，不是后台线程）；
-- 手机 MCP、Web MCP、真实 MCP 服务器的延迟和故障；
-- 用户的真实回复习惯（测试用户是虚构的，按剧本说话）。
+- the real rhythm of iLink long polling, duplicate deliveries, resuming with `get_updates_buf`, and login expiry;
+- the real debounce merging when the user sends several messages in a row (the test tool shortens debounce to 0.05–0.1 seconds);
+- the "typing…" indicator and how the simulated typing delay feels (off in tests);
+- WeChat message length limits, how split messages display, rendering of emoji and special characters;
+- sending and receiving images, voice and files, and CDN encryption/decryption (the test tool handles no media; images are off);
+- whether `send_image` really works;
+- the rhythm of proactive messages in real time (simulated in tests with `/advance` and `/proactive`, not a background thread);
+- latency and failures of the phone MCP, web MCP and real MCP servers;
+- the user's real reply habits (the test user is fictional and follows a script).
 
-## 7. B.11.2 / B.11.3 第 27–28 轮合成种子专项
+## 7. B.11.2 / B.11.3 synthetic-seed special test of rounds 27–28
 
-这是 **synthetic 专项测试**，不是原第 1–26 轮数据库恢复，不是原连续验收，也不计入原 32 轮总分。
+This is a **synthetic special test**: not a restoration of the original rounds 1–26 database, not the original continuous acceptance, and not counted in the original 32-round total.
 
-在 `Violet` 目录运行，指定一个尚不存在、位于工作区 `local/` 内且不在 Windows TEMP 下的持久化目录：
+Run it in the `Violet` directory with a persistent directory that does not exist yet, inside the workspace's `local/` and not under the Windows TEMP:
 
 ```powershell
 ..\.venv\Scripts\python.exe -X utf8 -m tools.synthetic_rounds --workdir D:/unity/violet/local/b112/my-new-run
 ```
 
-默认离线；使用现有 VioletTestSession、ScenarioClock、本地微信替身、真实 MemoryAgent 工具处理器和提醒调度代码。
-默认所有外部网络及本机服务连接均被 NetworkGuard 拒绝。已存在的目录会在写入前被拒绝，运行失败也保留目录。
+Offline by default; it uses the existing VioletTestSession, ScenarioClock, the local WeChat stand-in, the real MemoryAgent tool handlers and the reminder scheduling code.
+By default NetworkGuard refuses every external network and local service connection. An existing directory is refused before anything is written, and a failed run keeps its directory.
 
-只读来源为 `20261014-001147`、`20261014-002003`、`20261013-073654` 三份历史 `report.json`：
+Read-only sources are three historical `report.json` files: `20261014-001147`, `20261014-002003`, `20261013-073654`:
 
-- `seed.json`：5 项档案、3 项事件、第 24–26 轮用户和 Violet 原话、pending 交作业提醒及来源哈希/JSON 指针。
-  每个状态字段标记为 `report`、`prior_observation`、`inferred` 或 `synthetic`；原始报告没有的数据列入 unknown，值为 null。
-- 报告的结束时间是 `2026-10-22T16:13:52.562000+08:00`；种子按本阶段要求截到 `16:13:52`，标为 inferred，原精确值另行保留。
-  “少追问”的值由第 19 轮原话保守推断为 `less`；报告只保存了写入动作，没有完整偏好行，不能声称精确恢复。
-- `seed_materialized.json`：新数据库五类种子表的逐字段值及来源。新 ID、默认权重、证据/审计和写入时间等为 synthetic；
-  Violet 回复的原发送时刻未知，采用对应轮次开始时间的近似记录明确标为 inferred。不恢复 Violet 生活、不把过期位置当作当前位置。
-- `.violet-synthetic.json`：独立范围标记。原 replay、`--seed-from`、连续验收、summarize、recheck 和原评分导入均拒绝该范围的数据。
-  不写 `.violet-eval-state.json`，不伪造“原 1–26 轮已恢复”。
-- `specialized_report.json`：第 27 轮模拟简短收尾及对长期偏好误写的对抗探针；第 28 轮先推进 20 小时，再处理提醒、重复检查、用户“早”的回复及静默控制探针。
-  `proactive_chat=no` 是独立的 synthetic 控制条件，不是历史偏好，也不是第 27 轮的写入结果。
-  所有探针都只作用于新数据库和测试目录配置。
-- 第 28 轮检查 commitment、proactive event、outbox 三方 ID/状态及提醒内容；场景跳到次日约 `12:13:52` 才调用调度，
-  因而晚于 `08:00` 约 253 分钟。报告标注“测试时间跳跃导致的延迟”，**没有验证现实环境按时送达**。
-- `specialized_scores.csv`：保留第 27、28 轮人工评分空栏。请复制为新的专项评分文件再填写，保留原始证据；
-  模拟台词通过字面检查不代表真实模型会自然收尾，必须人工评估，也不能把专项评分导入原总分。
+- `seed.json`: 5 profile items, 3 events, the user's and Violet's words in rounds 24–26, the pending homework reminder, and source hashes / JSON pointers.
+  Each state field is marked `report`, `prior_observation`, `inferred` or `synthetic`; data the original reports lack is listed as unknown with value null.
+- The report's end time is `2026-10-22T16:13:52.562000+08:00`; as this phase requires, the seed truncates it to `16:13:52`, marked inferred, with the exact original value kept separately.
+  The "fewer follow-up questions" value is conservatively inferred as `less` from round 19's words; the report only kept the write action, not the full preference row, so no exact restoration can be claimed.
+- `seed_materialized.json`: field-by-field values and sources of the five kinds of seed tables in the new database. New IDs, default weights, evidence/audit and write times are synthetic;
+  the original sending time of Violet's replies is unknown, so the approximate record using the start of the matching round is explicitly marked inferred. Violet's life is not restored, and an expired location is not treated as the current one.
+- `.violet-synthetic.json`: a separate scope marker. The original replay, `--seed-from`, continuous acceptance, summarize, recheck and the original score import all refuse data in this scope.
+  `.violet-eval-state.json` is not written, and "original rounds 1–26 restored" is never faked.
+- `specialized_report.json`: round 27 simulates a short wrap-up plus an adversarial probe against mis-writing a long-term preference; round 28 first advances 20 hours, then handles the reminder, the duplicate check, the user's "morning" reply and a quiet-control probe.
+  `proactive_chat=no` is a separate synthetic control condition, not a historical preference and not the result of round 27's writes.
+  All probes act only on the new database and the test directory's configuration.
+- Round 28 checks the IDs/states of commitment, proactive event and outbox, and the reminder text; the scenario jumps to about `12:13:52` the next day before the scheduler is called,
+  so it is about 253 minutes later than `08:00`. The report marks "delay caused by a test time jump"; **on-time delivery in the real environment was not verified**.
+- `specialized_scores.csv`: keeps empty human-score columns for rounds 27 and 28. Copy it to a new special-test score file before filling it in, keeping the original evidence;
+  simulated lines passing the literal checks do not mean a real model will wrap up naturally, so human judgement is required, and special-test scores may not be imported into the original total.
 
-离线回归：`run_tests.ps1 -q tests/test_synthetic_rounds_b112.py tests/test_reminder_b101.py`。
-变异测试只能在独立 worktree 内串行运行；方法与本阶段证据位置见 `docs/knowledge/testing.md` 的 B.11.2 节。
-### B.11.3 受控真实文字模型路径
+Offline regression: `run_tests.ps1 -q tests/test_synthetic_rounds_b112.py tests/test_reminder_b101.py`.
+Mutation tests may only run serially in a separate worktree; the method and where this phase's evidence is are in section B.11.2 of `docs/knowledge/testing.md`.
+### B.11.3 Controlled real text-model path
 
-必须同时具备 `--real`、当前 shell 的 `VIOLET_TEST_ALLOW_REAL_API=1`、文字接口地址、测试 Key 和交互输入 `yes`。
-复用现有 RealApiGate、VioletTestSession 的 OpenAI 客户端、BudgetedClient 和 NetworkGuard，没有第二套客户端。
-Key 通过隐藏输入或现有测试环境变量提供，不写配置文件；本入口不显示 Key 的前后缀，也没有 `--yes` 确认绕过选项。
-接口 URL 禁止用户名、密码、query 和 fragment。仅允许配置接口解析出的 IP/端口连接；使用代理时代理连接也会被拒绝。
-微信始终为本地替身，图片、MCP、Web 和后台生活线程关闭；真实文字模型不代表真实微信送达。
+Requires all of `--real`, `VIOLET_TEST_ALLOW_REAL_API=1` in the current shell, a text API address, a test key and typing `yes` interactively.
+It reuses the existing RealApiGate, VioletTestSession's OpenAI client, BudgetedClient and NetworkGuard; there is no second client.
+The key is given by hidden input or the existing test environment variable and is never written to a config file; this entry does not show the key's prefix or suffix, and has no `--yes` option to bypass confirmation.
+The API URL may not contain a username, password, query or fragment. Only connections to the IP/port the configured API resolves to are allowed; with a proxy, the proxy connection is refused too.
+WeChat is always the local stand-in, and images, MCP, web and the background life thread are off; a real text model does not mean real WeChat delivery.
 
-真实路径由模型实际运行 Intent / Chat / Memory，不注入模拟 MemoryScript；第27轮保留逐Agent调用数和人工评分入口。
-第28轮提醒先进入真实调度流程；模型生成无效而退回模板，或任何模型调用失败，即使本地发送成功，专项也判失败。
-`stages` 分别记录 chat、reminder_due、repeat_check、user_return 和静默探针；调用标注实际轮次和阶段，
-`calls`、逐轮 `calls`、`accounting` 和 `call_summary` 总数必须一致。提醒生成的 Chat 调用计入第28轮，
-调度和用户返回共享该轮预算，不会因切换阶段重置。`budget_reservations` 单列每次调用的预留和批准/拒绝；
-`budget.refused_calls` 保存未发出的请求。预算停止和模型失败分别记录为 `stopped_budget` / `failed_model_call`，不会标通过。
+On the real path the model actually runs Intent / Chat / Memory, with no simulated MemoryScript injected; round 27 keeps per-agent call counts and the human scoring entry.
+Round 28's reminder first goes through the real scheduling flow; if the model's output is invalid and it falls back to the template, or any model call fails, the special test fails even if local sending succeeded.
+`stages` records chat, reminder_due, repeat_check, user_return and the quiet probe separately; calls are tagged with their actual round and stage,
+and the totals of `calls`, per-round `calls`, `accounting` and `call_summary` must agree. The chat call that generates the reminder counts toward round 28,
+and the scheduler and user return share that round's budget, which is not reset when the stage changes. `budget_reservations` lists each call's reservation and approval/refusal;
+`budget.refused_calls` keeps requests that were not sent. A budget stop and a model failure are recorded as `stopped_budget` / `failed_model_call` respectively and never marked passed.
 
-默认上限：每轮10次、全程16次、150000 Token；首次预留16000，随后复用既有最大调用量×1.1规则。
-预留是估算，上游单次响应可能超过预留；真实使用量依供应商usage，缺失不伪造。可用 `--price-per-1k` 与 `--max-cost` 增加费用门槛。
-预计6–12次调用、约4万–10万Token只是规划范围；参考历史两份报告分别16次/134621Token、5次/44444Token，
-但合成上下文不同，实际依工具轮数、重试、模型和提示词而变，不能当报价或硬上限。
+Default limits: 10 calls per round, 16 in total, 150000 tokens; the first reservation is 16000, then the existing largest-call × 1.1 rule applies.
+The reservation is an estimate, and a single upstream response may exceed it; real usage follows the provider's usage and is never faked when missing. `--price-per-1k` and `--max-cost` can add a cost threshold.
+The expected 6–12 calls and about 40k–100k tokens are only a planning range; two historical reports for reference had 16 calls/134621 tokens and 5 calls/44444 tokens,
+but the synthetic context differs, and actual usage varies with tool turns, retries, model and prompts, so it is neither a quote nor a hard limit.
 
-以下命令仅供用户审核后手动运行；B.11.3开发阶段**未执行真实调用**。每次使用全新目录，启动后隐藏输入Key并确认预算：
+The command below is only for the user to run by hand after review; **no real call was made** during B.11.3 development. Use a fresh directory each time; after starting, enter the key at the hidden prompt and confirm the budget:
 
 ```powershell
 Set-Location 'D:\unity\violet\Violet'
 $env:PYTHONIOENCODING = 'utf-8'
 $env:VIOLET_TEST_ALLOW_REAL_API = '1'
 Remove-Item Env:VIOLET_TEST_API_KEY -ErrorAction SilentlyContinue
-$textEndpoint = Read-Host '文字模型 API 基础地址'
+$textEndpoint = Read-Host 'Text model API base URL'
 $textHost = ([Uri]$textEndpoint).DnsSafeHost
 $env:NO_PROXY = "$textHost,127.0.0.1,localhost"
 $specializedDir = 'D:\unity\violet\local\b113\real-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
 & ..\.venv\Scripts\python.exe -X utf8 -m tools.synthetic_rounds --real --api-url $textEndpoint --config 'D:\unity\violet\local\violet-test-config\gpt6luna.env' --workdir $specializedDir --max-calls-per-round 10 --max-calls 16 --max-tokens 150000
 ```
 
-该config必须仅含工具允许的模型设置，不能含Key；没有合适文件时可省略 `--config` 使用env_example模型设置，先核对门禁显示的模型。
-专项报告仍带 synthetic / specialized_test / 非连续标记，不能导入原32轮验收；人工评分另存副本，不改原证据。
-真实模型自然度、实际Token/费用、真实微信与现实准时送达均需各自验证，不能从离线fake SDK结果推断。
+That config must contain only model settings the tool allows and no key; without a suitable file, omit `--config` to use the env_example model settings, and check the model shown by the gate first.
+The special-test report still carries the synthetic / specialized_test / non-continuous markers and cannot be imported into the original 32-round acceptance; keep human scores in a separate copy without changing the original evidence.
+Real-model naturalness, actual tokens/cost, real WeChat and real on-time delivery each need their own verification and cannot be inferred from offline fake SDK results.
 
-## 8. B.11.5 第29–32轮独立合成专项
+## 8. B.11.5 Separate synthetic special test of rounds 29–32
 
-使用同一受控runner，新增 `--suite round29_32_specialized_test`；省略suite仍运行原27–28专项。
-默认完全离线；Intent查询、Memory更正、ContextEngine、后台任务、SQLite和本地发送均走产品代码，只有模型响应使用模拟。
-真实路径仍通过B.11.3同一RealApiGate、确认、预算、网络白名单和脱敏客户端，没有新API客户端。
+Uses the same controlled runner with the new `--suite round29_32_specialized_test`; without a suite it still runs the original 27–28 special test.
+Fully offline by default; Intent queries, Memory corrections, ContextEngine, background jobs, SQLite and local sending all go through product code, and only model responses are simulated.
+The real path still goes through B.11.3's same RealApiGate, confirmation, budget, network allowlist and redacting client; there is no new API client.
 
 ```powershell
 Set-Location 'D:\unity\violet\Violet'
 & ..\.venv\Scripts\python.exe -X utf8 -m tools.synthetic_rounds --suite round29_32_specialized_test --workdir 'D:\unity\violet\local\b115\my-new-mock' --max-calls 32 --max-tokens 300000
 ```
 
-所有目录必须全新、持久化且位于工作区local内。失败保留证据，不覆盖旧报告或种子。
-种子来源：B.11.2使用的三份历史报告，以及 `local/b113/real-20261019-014631/specialized_report.json` 中的提醒已发送证据。
-源报告和原剧本/rev2不修改、不复制数据库；种子逐字段列路径、哈希和JSON指针。
-已发送提醒的本地ID、事件/发件关联、默认值和新审计字段为synthetic；旧元数据、完整偏好/对话/生活和原29–32时间为unknown。
-少追问值less继续标inferred；不导入B.11.3的proactive_chat=no、全天静默、静默探针或近期答辩答案。
-锚点采用已有提醒发送时刻 `2026-10-23T12:15:12.640000+08:00`，标inferred并说明原29轮时间未知；不额外设置日期或跳时。
-“昨天交了作业”原话照读，不擅自为它跳一天。无Eve生活预载。
+Every directory must be fresh, persistent and inside the workspace's local. Failures keep their evidence and never overwrite old reports or seeds.
+Seed sources: the three historical reports used by B.11.2, plus the reminder-sent evidence in `local/b113/real-20261019-014631/specialized_report.json`.
+Source reports and the original script/rev2 are not modified, and no database is copied; the seed lists path, hash and JSON pointer field by field.
+The sent reminder's local ID, event/outbox links, defaults and new audit fields are synthetic; old metadata, the full preferences/dialogue/life and the original times of 29–32 are unknown.
+The "fewer follow-up questions" value less stays marked inferred; B.11.3's proactive_chat=no, all-day quiet, quiet probe and recent defence answer are not imported.
+The anchor is the existing reminder's sending time `2026-10-23T12:15:12.640000+08:00`, marked inferred with a note that the original round 29 time is unknown; no extra date is set and no time jump made.
+"I handed in my homework yesterday" is read as said, without jumping a day for it on our own. No Eve life is preloaded.
 
-- R29：不预置作业已交；验证不重建提醒、不重复发送/事件/发件箱。调度去重明确标为附加探针，不是改写原剧本的调度步骤。
-- R30：预置报告中done的答辩；无近期对话种子。检查Intent实际query_memory、返回目标ID/内容/done，以及Chat实际对应事件行；通用“已结束”提示语不能替代。
-- R31→32：只预置旧专业天文；等待真实MemoryAgent处理完成，检查物理新事实、旧事实superseded和双向替代ID。同一数据库直接进入32轮，核对实际上下文fact_ids和答案。31失败时32不执行，不允许提前种物理。
-- 报告保留原剧本user/rubric、逐轮状态、来源、调用/阶段/预算及人工评分空栏。回复字面检查仍有局限，人工自然度和原32轮累计指标不由自动结果证明。
+- R29: homework handed in is not preset; verifies that the reminder is not rebuilt and that sending/event/outbox are not duplicated. Scheduler dedup is explicitly marked as an extra probe, not a rewrite of the original script's scheduling step.
+- R30: presets the defence that is done in the report; no recent-dialogue seed. Checks that Intent really called query_memory and got the target ID/content/done back, and that Chat really had the matching event row; a generic "already finished" hint cannot replace it.
+- R31→32: presets only the old major, astronomy; waits for the real MemoryAgent to finish, then checks the new physics fact, the old fact superseded, and the replacement IDs both ways. The same database goes straight into round 32, checking the actual context fact_ids and the answer. If 31 fails, 32 is not run, and physics may not be seeded in advance.
+- The report keeps the original script's user/rubric, per-round state, sources, calls/stages/budget and empty human-score columns. Literal checks of replies still have limits; human naturalness and the original 32-round cumulative metrics are not proven by automatic results.
 
-新purpose即使独立出现也被原计划/报告读取、replay、状态续跑、seed复制、summary/recheck和评分导入拒绝；不能计入原32轮，也不恢复原连续数据库。
-独立worktree不会包含被忽略的报告，复跑离线/变异时须把上述四份报告逐字节复制到worktree全新路径并核对哈希；不能生成假历史替代。
+The new purpose, even when it appears alone, is refused by original plan/report reading, replay, state continuation, seed copying, summary/recheck and score import; it cannot count toward the original 32 rounds and does not restore the original continuous database.
+A separate worktree does not contain the ignored reports, so to re-run offline/mutation tests the four reports above must be copied byte for byte into a fresh path in the worktree and their hashes checked; fake history may not be generated in their place.
 
-以下真实命令仅供用户审核后手动执行；本阶段**未执行**。已知模型设置文件不得含Key，门禁显示模型后由用户核对；Key隐藏输入并输入yes确认：
+The real command below is only for the user to run by hand after review; it was **not run** in this phase. The known model settings file must not contain a key, and the user checks the model shown by the gate; enter the key at the hidden prompt and type yes to confirm:
 
 ```powershell
 Set-Location 'D:\unity\violet\Violet'
 $env:PYTHONIOENCODING = 'utf-8'
 $env:VIOLET_TEST_ALLOW_REAL_API = '1'
 Remove-Item Env:VIOLET_TEST_API_KEY -ErrorAction SilentlyContinue
-$textEndpoint = Read-Host '文字模型 API 基础地址'
+$textEndpoint = Read-Host 'Text model API base URL'
 $textHost = ([Uri]$textEndpoint).DnsSafeHost
 $env:NO_PROXY = "$textHost,127.0.0.1,localhost"
 $tailDir = 'D:\unity\violet\local\b115\real-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
 & ..\.venv\Scripts\python.exe -X utf8 -m tools.synthetic_rounds --suite round29_32_specialized_test --real --api-url $textEndpoint --config 'D:\unity\violet\local\violet-test-config\gpt6luna.env' --workdir $tailDir --max-calls-per-round 10 --max-calls 32 --max-tokens 300000
 ```
 
-预计真实四轮14–20次、约12万–18万Token，仅估算；依据此前27–28真实专项8次/66905Token，R30增加查询、R31可能增加工具回合。
-命令上限32次、每轮10次、300000Token；预留规则沿用原机制，单次响应仍可能超过估算预留。价格未知，不提供虚构金额；可按实际单价另加费用上限。
-真实文字模型不验证微信或现实准时送达。测试记录与方法见知识库testing.md §8。
+The four real rounds are expected to take 14–20 calls and about 120k–180k tokens, an estimate only; based on the earlier real 27–28 special test's 8 calls/66905 tokens, R30 adds a query and R31 may add tool turns.
+The command's limits are 32 calls, 10 per round, 300000 tokens; the reservation rules follow the original mechanism, and a single response can still exceed the estimated reservation. Prices are unknown, so no made-up amount is given; a cost limit can be added from the actual unit price.
+A real text model does not verify WeChat or real on-time delivery. Test records and method are in the knowledge base testing.md §8.
 
-### B.11.6 失败后的复验边界
+### B.11.6 Re-test boundaries after the failure
 
-B.11.6修复自然回忆问句在query_memory入口的词面匹配，并将R30模拟查询改为完整原用户问句；未降低专项断言。
-用户已有的R29真实通过报告应保留，后续可设计仅R30、31→32的独立复验；31→32必须沿用同一数据库并等待更正任务完成。
-**B.11.6时CLI尚无轮次选择或失败续跑参数**，不能把上述四轮命令当成“只测30–32”。B.11.7新增受限选轮，见§9；仍不支持读取旧数据库续跑。
-新目录中从可追溯种子开始，或从失败库的专用副本开始，必须明确两者区别并披露选择；不能修改/续写原失败库，也不能把专项纳入连续验收。模型实际query/category未保存在原报告，精确触发参数仍unknown；离线修复不代表真实模型复验已通过。
+B.11.6 fixed the literal matching of natural recall questions at the query_memory entry and changed the R30 simulated query to the user's full original question; the special-test assertions were not lowered.
+The user's existing real passing report of R29 should be kept; a separate re-test of only R30 and 31→32 can be designed later, and 31→32 must use the same database and wait for the correction job to finish.
+**At B.11.6 the CLI had no round selection or failure continuation options yet**, so the four-round command above cannot be treated as "test only 30–32". B.11.7 adds restricted round selection, see §9; continuing from an old database is still not supported.
+In a new directory, starting from the traceable seed or from a dedicated copy of the failed database must be clearly distinguished and the choice disclosed; the original failed database may not be modified or continued, and the special test may not be counted in the continuous acceptance. The model's actual query/category was not saved in the original report, so the exact trigger parameters remain unknown; an offline fix does not mean the real-model re-test has passed.
 
-## 9. B.11.7 受控选轮复验
+## 9. B.11.7 Controlled round-selection re-test
 
-新增 `--rounds 30-32`，仅适用于round29_32_specialized_test。默认或29-32仍执行四轮；不接受31-32、32等其他选择，避免绕过前置验证。
-新目录从既有合成种子启动；不读取旧数据库，不导入29轮对话/记忆写入，不预置物理。29本次未执行，报告单列历史真实通过来源及哈希/指针；缺失该证据时拒绝启动。需要保留第五份只读源报告 `local/b115/real-20261019-041807/specialized_report.json`，另四份来源同§8。
-30失败停止后续；31失败不能执行32，31→32使用同一数据库。报告只给选择轮次评分栏，调用账本只统计实际调用，不把历史29的调用/分数算入本次。
-memory_query_audit记录实际工具参数、实际数据库查询主题与过滤范围、返回事件ID/数量/progress；chat_context_audit在Chat请求边界记录目标是否进入实际事件行。参数经凭据脱敏，不从断言回填；空查询/异常不虚构搜索结果。审计可能含专项对话内容，仅保存在本地证据中；普通工具报告仍只保留摘要。
+Adds `--rounds 30-32`, only for round29_32_specialized_test. The default or 29-32 still runs four rounds; other choices such as 31-32 or 32 are not accepted, so earlier verification cannot be bypassed.
+A new directory starts from the existing synthetic seed; it does not read the old database, does not import round 29's dialogue/memory writes, and does not preset physics. 29 is not run this time; the report lists the historical real passing source and its hash/pointer separately, and refuses to start without that evidence. A fifth read-only source report `local/b115/real-20261019-041807/specialized_report.json` must be kept; the other four sources are as in §8.
+A failure in 30 stops the rest; if 31 fails, 32 cannot run, and 31→32 use the same database. The report only has score columns for the selected rounds, and the call ledger only counts actual calls, never adding historical round 29's calls/scores to this run.
+memory_query_audit records the actual tool arguments, the actual database query topics and filter range, and the returned event IDs/count/progress; chat_context_audit records at the chat request boundary whether the target got into the actual event rows. Arguments go through credential redaction and are never back-filled from assertions; empty queries/errors do not invent search results. The audit may contain special-test dialogue and is kept only in local evidence; ordinary tool reports still keep only summaries.
 
-离线运行：
+Offline run:
 
 ```powershell
 Set-Location 'D:\unity\violet\Violet'
@@ -511,63 +513,63 @@ $offlineDir = 'D:\unity\violet\local\b117\mock-' + (Get-Date -Format 'yyyyMMdd-H
 & ..\.venv\Scripts\python.exe -X utf8 -m tools.synthetic_rounds --suite round29_32_specialized_test --rounds 30-32 --workdir $offlineDir --max-calls-per-round 10 --max-calls 24 --max-tokens 250000
 ```
 
-以下真实命令仅供用户另行授权后手动执行；B.11.7未执行。仍须隐藏输入测试Key并输入yes确认：
+The real command below is only for the user to run by hand after separate authorisation; it was not run in B.11.7. The test key must still be entered at the hidden prompt and yes typed to confirm:
 
 ```powershell
 Set-Location 'D:\unity\violet\Violet'
 $env:PYTHONIOENCODING = 'utf-8'
 $env:VIOLET_TEST_ALLOW_REAL_API = '1'
 Remove-Item Env:VIOLET_TEST_API_KEY -ErrorAction SilentlyContinue
-$textEndpoint = Read-Host '文字模型 API 基础地址'
+$textEndpoint = Read-Host 'Text model API base URL'
 $textHost = ([Uri]$textEndpoint).DnsSafeHost
 $env:NO_PROXY = "$textHost,127.0.0.1,localhost"
 $selectedDir = 'D:\unity\violet\local\b117\real-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
 & ..\.venv\Scripts\python.exe -X utf8 -m tools.synthetic_rounds --suite round29_32_specialized_test --rounds 30-32 --real --api-url $textEndpoint --config 'D:\unity\violet\local\violet-test-config\gpt6luna.env' --workdir $selectedDir --max-calls-per-round 10 --max-calls 24 --max-tokens 250000
 ```
 
-预计30–32真实复验10–16次、约8万–14万Token：历史30实际5次/43172Token，31–32尚未真实执行，估算存在不确定性。命令上限24次/每轮10次/250000Token，沿用首次16000和后续预留规则；实际账单取决于usage与单价，不保证模型自然度或真实微信送达。必须全新目录，不覆盖历史证据。
+The real 30–32 re-test is expected to take 10–16 calls and about 80k–140k tokens: historical round 30 actually took 5 calls/43172 tokens, and 31–32 have not been run for real, so the estimate is uncertain. The command's limits are 24 calls/10 per round/250000 tokens, with the first 16000 and later reservation rules; the actual bill depends on usage and unit price, and neither model naturalness nor real WeChat delivery is guaranteed. A fresh directory is required, and historical evidence is never overwritten.
 
-## 10. B.11.8 扩展查询修复后的最低成本复验
+## 10. B.11.8 Lowest-cost re-test after the expanded-query fix
 
-本阶段不执行真实API。先以B117真实审计中的两条完整查询作离线回归，不能以短词查询代替：
+No real API is run in this phase. First the two full queries from the B117 real audit serve as offline regression; short-word queries cannot replace them:
 
 ```powershell
 Set-Location 'D:\unity\violet\Violet'
 .\run_tests.ps1 -q tests/test_expanded_recall_b118.py
 ```
 
-本地证据 `local/b118/20261019-codex/exact-queries-mock/specialized_report.json` 为模拟30–32，不是真实模型通过；其中11次模拟调用、两个真实参数均返回ID1/done并进入实际Chat事件行。原失败证据 `local/b117/real-20261019-053449` 保留。
-审计的normalized_query仍是传入数据库的实际外壳归一化查询；返回事件的retrieval记录topics/focus及original_similarity/topic_similarity/similarity，分别表示字面主题、原字符分数、主题分数和合并分数，不把期望答案当输入。
-模型扩展词不再压低已经匹配的主要主题；复合词不任意拆成前缀，零/负阈值也不能返回无字面证据的全部记录。仅查询路径启用，写入去重、阈值、候选范围和权限规则不变。Intent固定0.35，Memory使用实际传入阈值，schema已澄清。
-这是轻量词法检索，不保证无字面共享同义词、单个复合词内的无依据限定、错误首主题或同主题多事件的语义消歧。共同后缀匹配是候选扩展，不能证明修饰词或事件身份；expired仍带旧状态标签，disabled/deleted不增加上下文权限。
-审核并另行授权后，最低成本的现有真实入口仍是§9的30–32命令，使用新的 `local/b118/real-<时间戳>` 目录；不再付费执行29。30失败即停止31–32，30通过后才继续同库更正。当前不支持只选30，不能用预算截断伪装完整通过。
-依据本次30失败5调用/42896Token，30成功仍需真实模型核验；完整30–32预估约10–16调用/8万–14万Token，仅估算，retrieval元数据会增加少量上下文。保持24次/每轮10次/250000Token上限及原门禁、预留规则，实际按供应商usage记账。没有新增付费模型或额外检索API。
+The local evidence `local/b118/20261019-codex/exact-queries-mock/specialized_report.json` is a simulated 30–32, not a real-model pass; in it 11 simulated calls with the two real arguments both returned ID1/done and got into the actual chat event rows. The original failure evidence `local/b117/real-20261019-053449` is kept.
+The audit's normalized_query is still the actual shell-normalised query passed to the database; the retrieval of returned events records topics/focus and original_similarity/topic_similarity/similarity, meaning the literal topics, the original character score, the topic score and the combined score respectively; the expected answer is never used as input.
+Model expansion words no longer push down a main topic that already matched; compound words are not split into arbitrary prefixes, and zero/negative thresholds cannot return all records without literal evidence. Only the query path enables this; write dedup, thresholds, candidate range and permission rules are unchanged. Intent is fixed at 0.35, Memory uses the threshold actually passed, and the schema was clarified.
+This is lightweight lexical retrieval, and it does not guarantee synonyms with no shared characters, unfounded qualifiers inside a single compound word, a wrong first topic, or semantic disambiguation of several events on the same topic. Common-suffix matching is candidate expansion and cannot prove a modifier or event identity; expired still carries the old status label, and disabled/deleted add no context permission.
+After review and separate authorisation, the lowest-cost existing real entry is still the 30–32 command of §9, using a new `local/b118/real-<timestamp>` directory; 29 is not paid for again. If 30 fails, 31–32 stop; only after 30 passes does the same-database correction continue. Selecting only 30 is not supported, and budget truncation may not be disguised as a complete pass.
+Given this run's failed 30 at 5 calls/42896 tokens, a successful 30 still needs real-model verification; the full 30–32 is estimated at about 10–16 calls/80k–140k tokens, an estimate only, and the retrieval metadata adds a little context. The 24 calls/10 per round/250000 token limits and the original gate and reservation rules stay, and actual accounting follows the provider's usage. No new paid model or extra retrieval API was added.
 
-## 11. B.11.9 第30轮回复断言与事后离线复评
+## 11. B.11.9 Round 30 reply assertion and post-hoc offline reassessment
 
-第30轮文字断言为 `round30.answer_recalls_outcome/v2`（`tools/synthetic_tail.py` 的 `recalls_completed_outcome`），结构检查与运行时共用 `round30_checks`；报告第30轮记录 `answer_assertion`。根因与边界见 `docs/knowledge/bugs-and-risks.md` B.11.9。
+Round 30's text assertion is `round30.answer_recalls_outcome/v2` (`recalls_completed_outcome` in `tools/synthetic_tail.py`); the structural checks share `round30_checks` with the runtime, and the report records `answer_assertion` for round 30. Root cause and boundaries are in B.11.9 of `docs/knowledge/bugs-and-risks.md`.
 
-对已有真实运行做事后离线复评（不调用模型、不改原目录，输出目录必须不存在）：
+Post-hoc offline reassessment of an existing real run (no model calls, the original directory is not changed, the output directory must not exist):
 
 ```powershell
 Set-Location 'D:\unity\violet\Violet'
 & ..\.venv\Scripts\python.exe -X utf8 -m tools.reassess_tail --source 'D:\unity\violet\local\b118\real-20261019-060349' --out ('D:\unity\violet\local\b119\reassess-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 ```
 
-输出 `round30_reassessment.json`：kind=post_hoc_offline_reassessment、model_calls=0、源7文件SHA-256、v1/v2判定差异、violet_head及tools是否未提交。证据缺失、调用失败、非真实运行或v1无法复现原记录时为“无法验证”。31–32保持“未执行”，原报告分数和人工评分不变。
+Output `round30_reassessment.json`: kind=post_hoc_offline_reassessment, model_calls=0, SHA-256 of the 7 source files, the v1/v2 verdict difference, violet_head, and whether tools has uncommitted changes. Missing evidence, failed calls, a non-real run, or v1 failing to reproduce the original record give "cannot be verified". 31–32 stay "not run", and the original report's scores and human scores are unchanged.
 
-## 12. B.11.10 第31–32轮独立验收入口
+## 12. B.11.10 Separate acceptance entry for rounds 31–32
 
-`--rounds 31-32` 仅用于 `round29_32_specialized_test`。第29、30轮不调用模型，报告 `skipped_rounds` 标“未执行”并引用历史证据；不接受任何人工PASS参数。建目录前由 `tools/synthetic_tail.py` 的 `round30_evidence` 核验，任一不符即拒绝并列出原因：
+`--rounds 31-32` is only for `round29_32_specialized_test`. Rounds 29 and 30 call no model; the report's `skipped_rounds` marks them "not run" and cites the historical evidence; no manual PASS option is accepted. Before the directory is created, `round30_evidence` in `tools/synthetic_tail.py` verifies the following, and any mismatch refuses with the reasons listed:
 
-- `local/b118/real-20261019-060349/specialized_report.json` 与 `local/b119/reassess-20261019-063152/round30_reassessment.json` 的SHA-256等于代码内登记值；
-- 原报告为本专项真实运行，第30轮用户输入与原剧本一致、调用全部成功、结构检查全部通过、唯一失败项为v1文字断言；
-- 复评为post-hoc离线复评（0模型调用）、使用 `round30.answer_recalls_outcome/v2`、代码已提交、来源与登记报告一致、差异仅answer_recalls_outcome false→true、未复评31–32；
-- 当前v2代码现场复评同一报告，结果与登记复评一致。
+- the SHA-256 of `local/b118/real-20261019-060349/specialized_report.json` and `local/b119/reassess-20261019-063152/round30_reassessment.json` equal the values registered in the code;
+- the original report is a real run of this special test, round 30's user input matches the original script, all calls succeeded, all structural checks passed, and the only failure is the v1 text assertion;
+- the reassessment is a post-hoc offline reassessment (0 model calls), uses `round30.answer_recalls_outcome/v2`, its code is committed, its source matches the registered report, the only difference is answer_recalls_outcome false→true, and 31–32 were not reassessed;
+- the current v2 code reassesses the same report on the spot with the same result as the registered reassessment.
 
-第29轮沿用B.11.7的历史证据核验。31–32从全新合成库开始（专业仅预置旧值天文，无对话历史，不复用旧库）；31失败即停止，32使用31执行后的同一数据库。调用/Token只计31–32；仍不计原32轮。
+Round 29 uses B.11.7's historical evidence verification. 31–32 start from a fresh synthetic database (only the old major, astronomy, preset; no dialogue history; no old database reused); if 31 fails it stops, and 32 uses the same database after 31 ran. Calls/tokens count only 31–32, and still do not count toward the original 32 rounds.
 
-离线运行：
+Offline run:
 
 ```powershell
 Set-Location 'D:\unity\violet\Violet'
@@ -575,67 +577,68 @@ $offlineDir = 'D:\unity\violet\local\b1110\mock-' + (Get-Date -Format 'yyyyMMdd-
 & ..\.venv\Scripts\python.exe -X utf8 -m tools.synthetic_rounds --suite round29_32_specialized_test --rounds 31-32 --workdir $offlineDir --max-calls-per-round 10 --max-calls 16 --max-tokens 160000
 ```
 
-真实命令仅供用户另行授权后手动执行（B.11.10未执行）；隐藏输入测试Key并输入yes确认：
+The real command is only for the user to run by hand after separate authorisation (not run in B.11.10); enter the test key at the hidden prompt and type yes to confirm:
 
 ```powershell
 Set-Location 'D:\unity\violet\Violet'
 $env:PYTHONIOENCODING = 'utf-8'
 $env:VIOLET_TEST_ALLOW_REAL_API = '1'
 Remove-Item Env:VIOLET_TEST_API_KEY -ErrorAction SilentlyContinue
-$textEndpoint = Read-Host '文字模型 API 基础地址'
+$textEndpoint = Read-Host 'Text model API base URL'
 $textHost = ([Uri]$textEndpoint).DnsSafeHost
 $env:NO_PROXY = "$textHost,127.0.0.1,localhost"
 $selectedDir = 'D:\unity\violet\local\b1110\real-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
 & ..\.venv\Scripts\python.exe -X utf8 -m tools.synthetic_rounds --suite round29_32_specialized_test --rounds 31-32 --real --api-url $textEndpoint --config 'D:\unity\violet\local\violet-test-config\gpt6luna.env' --workdir $selectedDir --max-calls-per-round 10 --max-calls 16 --max-tokens 160000
 ```
 
-预估（仅估算）：31约4–6次/3.5万–5.5万Token（Intent 1–2、Chat 1、Memory 2–3），32约3–6次/2.5万–4.5万Token；合计约7–12次、6万–10万Token。依据B.11.8/B.11.9真实单次规模：Intent约7.7k、Chat约6k、Memory约10.7k。31–32从未真实执行，实际以供应商usage为准；上限16次/每轮10/160000Token，沿用首次16000与后续预留规则。
-## 13. Phase 8.1 聊天体验评估（`tools/chat_eval.py`，完全离线）
+Estimate (only an estimate): 31 about 4–6 calls/35k–55k tokens (Intent 1–2, Chat 1, Memory 2–3), 32 about 3–6 calls/25k–45k tokens; together about 7–12 calls and 60k–100k tokens. Based on the real per-call sizes in B.11.8/B.11.9: Intent about 7.7k, Chat about 6k, Memory about 10.7k. 31–32 have never been run for real, so the provider's usage is what counts; limits are 16 calls/10 per round/160000 tokens, with the first 16000 and later reservation rules.
 
-评估集 `tests/samples/chat_eval/scenarios.p81.v1.json` 由 `build` 生成后冻结。它包含两部分：
-- 33 个真实场景（`REAL_SELECTION`），只摘录报告原文，每个来源都记录 SHA-256；
-- 18 个合成探针（`probes.p81.v1.json`，人工编写，`kind=synthetic`，没有参考回复）。
+## 13. Phase 8.1 chat experience evaluation (`tools/chat_eval.py`, fully offline)
 
-历史来源逐条标注：`same_report`、`replay_source:<报告>`、`specialized_seed`、`same_report:proactive_reminder`、`plan_user_line`（只有剧本里的用户原话）、`unknown_lost_test_directory`（Violet 回复未知，保持为空）。未知信息不补写，统一列入 `missing`。要改评估集，须新建版本文件，不覆盖 v1。
+The evaluation set `tests/samples/chat_eval/scenarios.p81.v1.json` is generated by `build` and then frozen. It has two parts:
+- 33 real scenarios (`REAL_SELECTION`), quoting only the reports' original text, with the SHA-256 of every source recorded;
+- 18 synthetic probes (`probes.p81.v1.json`, hand-written, `kind=synthetic`, no reference reply).
+
+Historical sources are labelled one by one: `same_report`, `replay_source:<report>`, `specialized_seed`, `same_report:proactive_reminder`, `plan_user_line` (only the user's words from the script), `unknown_lost_test_directory` (Violet's reply unknown, left empty). Unknown information is never filled in; it all goes into `missing`. To change the evaluation set, create a new version file; v1 is never overwritten.
 
 ```powershell
 Set-Location 'D:\unity\violet\Violet'
 $py = '..\.venv\Scripts\python.exe'
-& $py -X utf8 -m tools.chat_eval verify                              # 重新核对所有来源哈希
+& $py -X utf8 -m tools.chat_eval verify                              # re-check all source hashes
 $run = 'D:\unity\violet\local\p81\blind-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
-& $py -X utf8 -m tools.chat_eval blind --variant historical_real --variant <新变体.json> --seed 20261019 --out $run
-#   评分人只拿到 $run\sheet.md（阅读）与 $run\sheet.csv（填写）；key.json 由组织者保管
-& $py -X utf8 -m tools.chat_eval score --sheet <填好的.csv> --key $run\key.json --out $run\result.json
-& $py -X utf8 -m tools.chat_eval diagnose --variant historical_real --variant <新变体.json> --out $run\diagnostics.json
+& $py -X utf8 -m tools.chat_eval blind --variant historical_real --variant <new-variant.json> --seed 20261019 --out $run
+#   raters get only $run\sheet.md (to read) and $run\sheet.csv (to fill in); key.json stays with the organiser
+& $py -X utf8 -m tools.chat_eval score --sheet <filled-in.csv> --key $run\key.json --out $run\result.json
+& $py -X utf8 -m tools.chat_eval diagnose --variant historical_real --variant <new-variant.json> --out $run\diagnostics.json
 ```
 
-- **变体文件**：`{"variant","set_sha256","environment":"real_model|fake_sdk_offline|mock|manual","model","prompt_sha256","generated_at","replies":{"R08":[["第一条","第二条"]]}}`。`historical_real` 内置，取自各真实场景的原回复；合成探针没有基线，只在新变体之间比较。
-- **盲评**：场景顺序和候选顺序按 seed 随机；表中不出现变体名和环境；每个候选记录文本哈希，评分后改动过文本的行会被拒绝。
-- **评分**：每个维度打 0/1/2；`self`、`intimacy`、`respect` 不适用时填 `na`。每行必须写理由；`grounded<2` 时必须在 `grounded_evidence` 里引用原句。`rank` 在同一题内为 1..k。结果按变体和场景标签汇总，保留全部理由和证据，并记录 sheet 与 key 的哈希。
-- **诊断**：`diagnose` 输出长度、与用户消息的长度比、称呼率、问句结尾率、“又”字数、重复 4 字片段，并标记 `diagnostic_only`。这些数字只用来发现回退，不作优化目标。
+- **Variant files**: `{"variant","set_sha256","environment":"real_model|fake_sdk_offline|mock|manual","model","prompt_sha256","generated_at","replies":{"R08":[["first message","second message"]]}}`. `historical_real` is built in, taken from each real scenario's original reply; synthetic probes have no baseline and are only compared between new variants.
+- **Blind rating**: the order of scenarios and candidates is randomised by seed; variant names and environments never appear in the sheet; each candidate records a text hash, and rows whose text was changed after scoring are refused.
+- **Scoring**: each dimension gets 0/1/2; `self`, `intimacy` and `respect` take `na` when not applicable. Every row needs a reason; with `grounded<2` the original sentence must be quoted in `grounded_evidence`. `rank` is 1..k within one item. Results are summed by variant and scenario tag, keeping all reasons and evidence, and recording the hashes of the sheet and key.
+- **Diagnostics**: `diagnose` outputs length, length ratio to the user's message, form-of-address rate, question-ending rate, number of "again" characters, repeated 4-character fragments, all marked `diagnostic_only`. These numbers only help spot regressions and are not optimisation targets.
 
-| 维度 | 2 | 1 | 0 |
+| Dimension | 2 | 1 | 0 |
 |---|---|---|---|
-| natural 日常自然 | 像熟人随手回的微信 | 能看懂，但有客服、总结或模板感 | 明显 AI 腔，或答非所问 |
-| context 上下文 | 接住当前话题、时间与关系 | 理解了，但忽略了关键线索 | 误解话题，或把旧事当成现在 |
-| grounded 有依据 | 没有无依据的内容 | 轻微臆测，比如没依据的“又……” | 编造经历、理由，或用户没说过的话 |
-| rhythm 节奏 | 长短、条数与对方匹配 | 略长或略生硬 | 简单的话回成长篇或清单 |
-| self 自己 | 有自己的看法、情绪或生活（且有依据） | 有一点 | 只围着用户转（不适用填 na） |
-| intimacy 亲近 | 撒娇、亲近合乎关系和时机 | 稍过或稍冷 | 过早亲昵、施压或冷淡（不适用填 na） |
-| respect 偏好边界 | 遵守已知偏好和边界 | 小幅偏离 | 违背明确偏好（不适用填 na） |
-## 14. Phase 8.3 ChatAgent A/B 回放（`tools/chat_ab.py`）
+| natural (everyday naturalness) | Like a WeChat reply dashed off by someone you know | Understandable, but has a customer-service, summary or template feel | Obvious AI tone, or answers something else |
+| context | Picks up the current topic, time and relationship | Understood, but missed a key clue | Misreads the topic, or treats old things as current |
+| grounded | Nothing without a basis | Slight speculation, e.g. an unfounded "again…" | Invents experiences, reasons, or things the user never said |
+| rhythm | Length and number of messages match the other person | A bit long or a bit stiff | A simple remark answered with an essay or a list |
+| self | Has her own views, feelings or life (with a basis) | A little | Revolves only around the user (na if not applicable) |
+| intimacy | Being cute and close fits the relationship and moment | Slightly too much or too cold | Too intimate too early, pressuring, or cold (na if not applicable) |
+| respect (preferences and boundaries) | Follows known preferences and boundaries | Small deviation | Goes against a clear preference (na if not applicable) |
+## 14. Phase 8.3 ChatAgent A/B replay (`tools/chat_ab.py`)
 
-同一个冻结场景分别用 v0（chat.v0.txt + persona_core.v1.0.0.json，后者由 git e86c23b 逐字节提取；人设节标题按当时的 ai/persona.py 还原，只在本工具里替换）和 v1（chat.v1.txt + persona_core.json 1.1.0）生成回复。四个版本文件按 sha256 固定，内容一变工具就拒绝运行。
+The same frozen scenario generates replies with v0 (chat.v0.txt + persona_core.v1.0.0.json, the latter extracted byte for byte from git e86c23b; the persona section titles are restored per the ai/persona.py of that time and replaced only inside this tool) and with v1 (chat.v1.txt + persona_core.json 1.1.0). The four version files are pinned by sha256, and the tool refuses to run if their content changes.
 
-- **`plan`（离线）**：每个场景在独立子进程和全新测试库中重建状态，渲染 ChatAgent 上下文，再与历史上 ChatAgent 实际看到的内容逐项比较（各节长度，人设节除外；历史消息条数）。
-  - 同一次运行中更早的轮次按产品顺序离线回放：构建它们的上下文，以复现 onboarding 记录；只应用报告里有证据的写入（correction_evidence、preference_probe）。
-  - Violet 的多行回复按产品规则逐行存成多条消息。
-  - 分类：`complete`（完全一致）、`partial`（不一致、缺场景时间或缺轮前档案）、`unfair`（前序 Violet 回复未知）、`synthetic`（人工编写的探针）。只有 `complete` 和 `synthetic` 可以用于 A/B。
-- **`run`**：每个“场景 × 版本 × 样本”都用独立子进程和全新测试库；两组用同一份状态规格、同一模型、同样的采样参数和预算。
-  - 经产品 ChatAgent 生成，再经一致性守卫，最后按产品规则拆行。
-  - 输出 `variant-v0.json`、`variant-v1.json`，可直接交给 chat_eval，并附逐条生成的元数据：提示词与人设哈希、上下文指纹、调用数、Token、守卫结果、错误与重试。
-  - `run.json` 的 `fairness` 检查同一场景所有样本和两组的上下文指纹（屏蔽“当前时间”，并另报最大时间偏差）。指纹不同时状态为 `context_mismatch`，不能当作公平对比。
-- **安全**：默认 mock。`--real` 需要 RealApiGate（VIOLET_TEST_ALLOW_REAL_API=1、`--api-url`、隐藏输入 Key、输入 yes），门禁在建目录之前执行。子进程只有在拿到父进程的一次性确认 token 时才会发起真实调用。网络只允许访问指定接口；预算跨子进程累计，被拒即停止；输出写完后扫描是否含有 Key；所有输出目录都必须是新的。
+- **`plan` (offline)**: each scenario rebuilds its state in a separate subprocess and a fresh test database, renders the ChatAgent context, and compares it item by item with what ChatAgent actually saw historically (length of each section, except the persona section; number of history messages).
+  - Earlier rounds of the same run are replayed offline in product order: their contexts are built to reproduce the onboarding records; only writes with evidence in the report are applied (correction_evidence, preference_probe).
+  - Violet's multi-line replies are stored line by line as several messages, per the product's rules.
+  - Classification: `complete` (fully identical), `partial` (differs, or lacks scenario time or the pre-round profile), `unfair` (earlier Violet replies unknown), `synthetic` (hand-written probes). Only `complete` and `synthetic` can be used for A/B.
+- **`run`**: every "scenario × version × sample" uses its own subprocess and fresh test database; both groups use the same state spec, model, sampling parameters and budget.
+  - Generated by the product's ChatAgent, then through the consistency guard, finally split into lines per the product's rules.
+  - Outputs `variant-v0.json` and `variant-v1.json`, ready for chat_eval, with per-generation metadata: prompt and persona hashes, context fingerprint, calls, tokens, guard results, errors and retries.
+  - The `fairness` of `run.json` checks the context fingerprints of all samples of one scenario and of both groups (masking "current time", and reporting the largest time drift separately). With different fingerprints the status is `context_mismatch`, and it cannot be treated as a fair comparison.
+- **Safety**: mock by default. `--real` needs RealApiGate (VIOLET_TEST_ALLOW_REAL_API=1, `--api-url`, the key at a hidden prompt, typing yes), and the gate runs before any directory is created. Subprocesses make real calls only when they get the parent's one-time confirmation token. The network only allows the given API; the budget accumulates across subprocesses and stops on refusal; outputs are scanned for keys after being written; every output directory must be new.
 
 ```powershell
 Set-Location 'D:\unity\violet\Violet'
@@ -647,44 +650,44 @@ $ab = 'D:\unity\violet\local\p83\ab-mock-' + (Get-Date -Format 'yyyyMMdd-HHmmss'
 & $py -X utf8 -m tools.chat_eval blind --variant "$ab\variant-v0.json" --variant "$ab\variant-v1.json" --seed 20261019 --out "$ab\blind"
 ```
 
-真实运行在用户授权后手动执行：在上面 `run` 命令后加 `--real --api-url $textEndpoint --config 'D:\unity\violet\local\violet-test-config\gpt6luna.env' --max-calls <N> --max-tokens <T>`，环境准备与 §9 相同（VIOLET_TEST_ALLOW_REAL_API、NO_PROXY、隐藏输入 Key）。
-## 15. Phase 8.4 Chat 上下文写法（`VIOLET_CONTEXT_STYLE`）
+Real runs are done by hand after the user authorises them: add `--real --api-url $textEndpoint --config 'D:\unity\violet\local\violet-test-config\gpt6luna.env' --max-calls <N> --max-tokens <T>` after the `run` command above; the environment setup is the same as in §9 (VIOLET_TEST_ALLOW_REAL_API, NO_PROXY, the key at a hidden prompt).
+## 15. Phase 8.4 Chat context style (`VIOLET_CONTEXT_STYLE`)
 
-- **`natural`（默认）**：
-  - 档案节标题为“你了解的对方”，不带来源和日期；称呼一行附“熟了以后偶尔叫就好”。
-  - 偏好写成具体做法，例如“不希望被追问：平常的分享直接接话……对方问你问题时照常回应”。
-  - 历史消息之间、以及最后一条到现在，按数据库真实时间在间隔达到 `VIOLET_CONTEXT_SESSION_GAP_HOURS`（默认 3 小时）时插入时间标记。
-  - 近 48 小时内已发出的提醒标为“已经提醒过了（做没做完不知道，对方没提起就别再催）”。
-  - 新增“你们的相处”一节，按聊天记录给出认识时长。
-  - 原始 32 轮剧本检查的字面文字（“希望被称呼为：小满”“不希望被追问（用户明确说过）”）保持不变。
-- **`legacy`**：与之前各阶段逐字相同。
-- **`tools.chat_ab`**：`plan` 固定用 legacy 与历史记录比对；`run --context-style legacy|natural`，默认 legacy，用于复现 8.3。natural 模式只接受合成探针，因为真实场景没有记录消息的发送时间；声明为“熟悉”的探针，在 `fairness` 中标注“相处时长只来自种子历史”。
+- **`natural` (default)**:
+  - The profile section is titled "what you know about them", without sources or dates; the form-of-address line adds "once you're close, using it now and then is enough".
+  - Preferences are written as concrete practice, e.g. "doesn't want follow-up questions: for everyday sharing just respond… when they ask you something, answer as usual".
+  - Between history messages, and from the last one to now, a time marker is inserted when the gap by real database time reaches `VIOLET_CONTEXT_SESSION_GAP_HOURS` (default 3 hours).
+  - Reminders sent within the last 48 hours are marked "already reminded (don't know whether it got done; if they don't bring it up, don't push again)".
+  - A new "how you two get along" section gives how long you have known each other, from the chat history.
+  - The literal text checked by the original 32-round script ("wants to be called: Xiaoman", "doesn't want follow-up questions (the user said so explicitly)") is unchanged.
+- **`legacy`**: word for word the same as in earlier phases.
+- **`tools.chat_ab`**: `plan` always compares with the historical records using legacy; `run --context-style legacy|natural`, default legacy, to reproduce 8.3. Natural mode only accepts synthetic probes, because real scenarios did not record when messages were sent; for probes declared "familiar", `fairness` notes "time together comes only from the seed history".
 
 ```powershell
 & $py -X utf8 -m tools.chat_ab run --manifest "$plan\manifest.json" --scenarios P01,P03,P05,P08,P11,P14,P17 --samples 2 --context-style natural --out $ab
 ```
 
-## 16. Phase 8.5 上下文写法 A/B（`chat_ab run --arms`）
+## 16. Phase 8.5 Context style A/B (`chat_ab run --arms`)
 
-比较 legacy 与 natural 两种 ContextEngine 写法。两组用同一份 Chat v1 提示词和人设 1.1.0，场景、用户输入、历史、偏好、模型、采样参数和预算也都相同，只有 `VIOLET_CONTEXT_STYLE` 不同。
+Compares the legacy and natural ContextEngine styles. Both groups use the same Chat v1 prompt and persona 1.1.0, and the same scenarios, user input, history, preferences, model, sampling parameters and budget; only `VIOLET_CONTEXT_STYLE` differs.
 
-- **`--arms v1:legacy,v1:natural`**（代替 `--context-style`，两者不能同时给）：
-  - 变体名为 `chat_v1_legacy` / `chat_v1_natural`，文件为 `variant-v1-legacy.json` / `variant-v1-natural.json`。
-  - 不传 `--arms` 时，名称和行为与 8.3 相同（`chat_v0`、`chat_v1`）。
-  - 一次只允许一个因素不同：提示词版本和写法同时不同会被拒绝。
-- **公平性**（`run.json` 的 `fairness`）：两组的上下文按设计不同，所以检查分两部分：
-  - 每组内各样本的上下文指纹必须一致；
-  - 跨组的系统提示词、人设、状态规格文件、用户本轮消息、模型和温度的哈希必须一致（`shared_inputs_identical`）。
-  - 任一项不一致，状态即为 `context_mismatch`；有生成失败时状态为 `has_failed_jobs`。两者都不算完整对比。
-- **时间不可伪造**：只要有一组用 natural，真实场景就一律拒绝（它们没有记录发送时间）。
-- **声明为“熟悉”的合成探针**：natural 的“你们的相处”一节只按种子历史计算，P14、P17 会被写成“第一次聊天”，P08 会被写成“还不太熟”，这与探针的前提不符。
-  - `--familiar-relationship omit`：natural 组对这类探针去掉这一节，不补任何内容。每条生成记录 `relationship_line`，`fairness.limitations` 写明这一处理。
-  - 默认值 `product`：保留产品输出，并在 limitations 中标注。
-- **记录**：
-  - `run.json` 包含 `planned_generations`、`not_run`（预算停止后没有执行的生成）、`failed_jobs`、每次生成的调用数和 Token。
-  - 每条生成的 json 保存完整请求、规格哈希、用户消息哈希、上下文报告、错误和网络守卫结果。
-  - `rater_focus.md` 是评分关注点，随盲评表一起交给评分人，其中不含版本信息。
-- **盲评**：`chat_eval blind --all-samples` 为每个“场景 × 样本序号”出一题，同一题内比较两组的同序号样本，key 记录样本序号。不加这个参数时输出与之前逐字相同（只用样本 0）。
+- **`--arms v1:legacy,v1:natural`** (instead of `--context-style`; the two cannot be given together):
+  - Variant names are `chat_v1_legacy` / `chat_v1_natural`, files `variant-v1-legacy.json` / `variant-v1-natural.json`.
+  - Without `--arms`, names and behaviour are the same as in 8.3 (`chat_v0`, `chat_v1`).
+  - Only one factor may differ at a time: a different prompt version and style at the same time is refused.
+- **Fairness** (`fairness` in `run.json`): the groups' contexts differ by design, so the check has two parts:
+  - within each group, the context fingerprints of all samples must be identical;
+  - across groups, the hashes of the system prompt, persona, state spec file, the user's message this round, model and temperature must be identical (`shared_inputs_identical`).
+  - If anything differs, the status is `context_mismatch`; with failed generations it is `has_failed_jobs`. Neither counts as a complete comparison.
+- **Time cannot be faked**: as soon as one group uses natural, real scenarios are always refused (they have no recorded sending times).
+- **Synthetic probes declared "familiar"**: natural's "how you two get along" section is computed only from the seed history, so P14 and P17 would be written as "first chat" and P08 as "not that close yet", contradicting the probes' premise.
+  - `--familiar-relationship omit`: for such probes the natural group drops this section and adds nothing in its place. Each generation records `relationship_line`, and `fairness.limitations` states this handling.
+  - Default `product`: keeps the product output and notes it in limitations.
+- **Records**:
+  - `run.json` contains `planned_generations`, `not_run` (generations not run after a budget stop), `failed_jobs`, and calls and tokens per generation.
+  - Each generation's json keeps the full request, spec hash, user message hash, context report, errors and network guard results.
+  - `rater_focus.md` lists what raters should focus on, handed to them with the blind sheet, without any version information.
+- **Blind rating**: `chat_eval blind --all-samples` makes one item per "scenario × sample number", comparing the two groups' samples with the same number within an item; the key records the sample number. Without this option the output is word for word as before (only sample 0).
 
 ```powershell
 Set-Location 'D:\unity\violet\Violet'
@@ -697,14 +700,14 @@ $ab = "D:\unity\violet\local\p85\ab-mock-$stamp"
 & $py -X utf8 -m tools.chat_eval blind --variant "$ab\variant-v1-legacy.json" --variant "$ab\variant-v1-natural.json" --all-samples --seed 20261085 --out "$ab\blind"
 ```
 
-用户授权后的真实运行（16 次生成，预计 16–20 次调用、约 9.7 万–12 万 Token。依据：8.3 真实运行每次约 6000 Token，natural 的上下文多 60 Token 左右。一致性守卫要求重写时，每次会多一次调用）。上限设为 32 次调用、20 万 Token；预算停止时，run.json 的 `not_run` 会列出没有执行的生成。
+Real run after user authorisation (16 generations, expected 16–20 calls, about 97k–120k tokens. Basis: 8.3's real run took about 6000 tokens each, and natural's context is about 60 tokens longer. When the consistency guard asks for a rewrite, each costs one more call). The limits are set to 32 calls and 200k tokens; on a budget stop, `not_run` in run.json lists the generations not run.
 
 ```powershell
 Set-Location 'D:\unity\violet\Violet'
 $env:PYTHONIOENCODING = 'utf-8'
 $env:VIOLET_TEST_ALLOW_REAL_API = '1'
 Remove-Item Env:VIOLET_TEST_API_KEY -ErrorAction SilentlyContinue
-$textEndpoint = Read-Host '文字模型 API 基础地址'
+$textEndpoint = Read-Host 'Text model API base URL'
 $textHost = ([Uri]$textEndpoint).DnsSafeHost
 $env:NO_PROXY = "$textHost,127.0.0.1,localhost"
 $py = '..\.venv\Scripts\python.exe'
@@ -717,50 +720,50 @@ $ab = "D:\unity\violet\local\p85\ab-real-$stamp"
 Remove-Item Env:VIOLET_TEST_ALLOW_REAL_API
 ```
 
-评分人只拿 `$ab\blind\sheet.md`、`sheet.csv` 和 `$ab\rater_focus.md`，`key.json` 留到评分完成后再用 `chat_eval score` 合并。
+Raters get only `$ab\blind\sheet.md`, `sheet.csv` and `$ab\rater_focus.md`; `key.json` is merged with `chat_eval score` only after rating is finished.
 
-## 17. Phase 8.7 多轮聊天体验评估（`tools/chat_dialogue.py`）
+## 17. Phase 8.7 multi-turn chat experience evaluation (`tools/chat_dialogue.py`)
 
-用固定的合成剧本跑 Violet 的**完整产品流程**，生成可以从头读到尾的聊天记录。每段剧本使用独立子进程和全新测试库。
+Runs Violet's **full product flow** on fixed synthetic scripts and produces chat logs that can be read from start to finish. Each script uses its own subprocess and a fresh test database.
 
-- **剧本**：`tests/samples/chat_dialogue/episodes.p87.v1.json`（版本化，全部 synthetic）。E1–E8 每段 8–10 句用户台词，覆盖：闲聊与沉默、好消息与坏心情、话题延续（含档案纠错和提醒）、熟悉关系下的调侃与撒娇、Violet 主动表达、用户忙碌、多天后重新联系、少追问偏好与邀请提问。
-  - 每段的背景、带日期的历史聊天和 Violet 生活记录都写在剧本里，并标为合成。
-  - 用户台词固定，不随 Violet 的回复变化。
-  - `validate` 子命令检查剧本格式：时间顺序、历史早于开始时间、每步只能是 user 或 tick、台词数量。
-- **执行**（`run`）：
-  - 每句台词走 `VioletRuntime`：IntentAgent → ChatAgent → 一致性守卫 → 发件箱；“提醒我…”在回复前保存；MemoryAgent 后台任务完成后才进入下一步。
-  - `tick: scheduler` 步骤运行一次调度检查，用于提醒到期和主动消息。
-  - 场景时钟按剧本推进，包括时间跳跃。
-  - 不连接微信，不读写生产库。
-- **两种记忆模式**：
-  - `--memory real`：真实模式默认，由 MemoryAgent 自己决定写什么。
-  - `--memory scripted`：mock 模式默认（mock 没有记忆模型），用每步的 `memory_script` 通过 MemoryAgent 自己的工具处理器写入。剧本只给 E3（纠正专业）和 E6（忙碌状态）写了脚本。
-  - `mock_intent: silent` 只在 mock 下生效，真实模式忽略。
-- **变体**：
-  - `--label` 是本次运行的名字；可选 `--context-style legacy|natural`、`--chat-prompt-file`（记录文件哈希和 Violet 实际收到的文本哈希）、`--config`。
-  - 比较不同代码版本时，在各自的 worktree 里用同一份剧本分别运行，再用 `blind` 合并。
-  - `run.json` 记录 git HEAD、未提交的产品文件、产品树哈希、剧本文件和每段剧本的哈希，以及每段实际使用的模型、温度、各 Agent 提示词哈希、人设、生活配置和上下文写法。
-- **输出**：
-  - `transcript.md`：完整聊天记录，含日期、间隔、谁说的、实际回复、沉默、提醒、主动消息、失败和未执行的步骤；
-  - `debug.json`：每步的调用、Chat 的完整请求、意图判断、守卫、记忆任务和状态变化；
-  - `diagnostics.json`：问句率、称呼率、重复四字片段、谈自己的次数、沉默次数。只作诊断，不是合格标准；
-  - `run.json`：每段和整次运行的状态、调用和 Token、未执行的步骤。
-- **状态**：每段剧本的状态为 `complete`、`stopped_budget`、`failed_model_call`、`failed_step`、`failed_execution`、`child_failed`、`episode_mismatch` 或 `not_run`。只有全部为 `complete` 时，整次运行才是 `complete`。
-- **重试后恢复**（Phase 8.9.1，工具版本 `p87.v2`）：用户消息这一步里，IntentAgent 或 ChatAgent 的某次调用返回 HTTP 502/503（Phase 9.4 R2 起也包括没有状态码的 `APITimeoutError` / `APIConnectionError`，Violet 自己会重试这两种；500、429 和没有类型的错误仍算失败），但满足以下全部条件时，这一步记为 `recovered`，剧本继续：
-  - 同一次处理里后面有一次调用成功；
-  - 成功的那次用的是同一个模型（不是备用模型）；
-  - 这次处理正常结束；
-  - 这一步没有执行错误、没有被预算拒绝，并且有回复，或者由 Intent 决定不回复。
+- **Scripts**: `tests/samples/chat_dialogue/episodes.p87.v1.json` (versioned, all synthetic). E1–E8 each have 8–10 user lines, covering: small talk and silence, good news and bad moods, continuing a topic (including a profile correction and a reminder), teasing and being cute in a familiar relationship, Violet expressing herself proactively, a busy user, getting back in touch after several days, a fewer-questions preference and an invitation to ask.
+  - Each script's background, dated chat history and Violet's life records are written in the script and marked synthetic.
+  - The user lines are fixed and do not change with Violet's replies.
+  - The `validate` subcommand checks the script format: time order, history earlier than the start time, each step only user or tick, number of lines.
+- **Execution** (`run`):
+  - Each line goes through `VioletRuntime`: IntentAgent → ChatAgent → consistency guard → outbox; "remind me…" is saved before the reply; the next step starts only after the MemoryAgent background job finishes.
+  - A `tick: scheduler` step runs one scheduler check, for reminders coming due and proactive messages.
+  - The scenario clock advances per the script, including time jumps.
+  - No WeChat connection, and the production database is never read or written.
+- **Two memory modes**:
+  - `--memory real`: the default in real mode; MemoryAgent decides on its own what to write.
+  - `--memory scripted`: the default in mock mode (mock has no memory model); each step's `memory_script` is written through MemoryAgent's own tool handlers. The scripts only have memory scripts for E3 (correcting the major) and E6 (busy state).
+  - `mock_intent: silent` only takes effect in mock and is ignored in real mode.
+- **Variants**:
+  - `--label` names this run; optional `--context-style legacy|natural`, `--chat-prompt-file` (records the file hash and the hash of the text Violet actually received), `--config`.
+  - To compare code versions, run the same script in each version's own worktree, then merge with `blind`.
+  - `run.json` records git HEAD, uncommitted product files, the product tree hash, the hashes of the script file and each script, and for each script the actual model, temperature, each agent's prompt hash, persona, life configuration and context style.
+- **Output**:
+  - `transcript.md`: the full chat log, with dates, gaps, who said what, actual replies, silences, reminders, proactive messages, failures and steps not run;
+  - `debug.json`: each step's calls, Chat's full request, intent decisions, guard, memory jobs and state changes;
+  - `diagnostics.json`: question rate, form-of-address rate, repeated 4-character fragments, how often she talks about herself, number of silences. Diagnostic only, not a pass criterion;
+  - `run.json`: status, calls and tokens of each script and of the whole run, and steps not run.
+- **Status**: each script's status is `complete`, `stopped_budget`, `failed_model_call`, `failed_step`, `failed_execution`, `child_failed`, `episode_mismatch` or `not_run`. The whole run is `complete` only when all are `complete`.
+- **Recovery after a retry** (Phase 8.9.1, tool version `p87.v2`): in a user-message step, when a call of IntentAgent or ChatAgent returns HTTP 502/503 (since Phase 9.4 R2 also `APITimeoutError` / `APIConnectionError` without a status code, which Violet retries itself; 500, 429 and untyped errors still count as failures), and all of the following hold, the step is recorded as `recovered` and the script continues:
+  - a later call in the same processing succeeds;
+  - the successful call uses the same model (not a fallback model);
+  - this processing ends normally;
+  - the step has no execution error, was not refused by the budget, and has a reply, or Intent decided not to reply.
 
-  失败的调用照样全部保留在 `calls` 和 `call_errors` 里（第几次尝试、状态码、延迟、无用量），同样计入调用预算；这一步的 `recovered_calls` 写明是哪次调用、由哪次成功的调用恢复。
+  The failed calls are all still kept in `calls` and `call_errors` (attempt number, status code, latency, no usage) and still count toward the call budget; the step's `recovered_calls` says which call was recovered by which successful call.
 
-  以下情况仍然停止：其他状态码（500、429、超时）、其他 Agent、重试用完、只靠备用模型成功、恢复后既没有回复也没有决定不回复、预算拒绝（`stopped_budget`），以及所有调度检查步骤。
+  It still stops on: other status codes (500, 429, timeout), other agents, retries used up, success only through the fallback model, neither a reply nor a decision not to reply after recovery, a budget refusal (`stopped_budget`), and all scheduler check steps.
 
-  run.json 有 `recovered_steps` 和 `failed_calls`；transcript 标出每个恢复的步骤（ℹ）；盲评表不显示这些标记。
-- **盲评**：
-  - `blind --run <目录> [--run <目录>…] --seed N --out <新目录>`：每段剧本一题，候选是各次运行的完整聊天，不显示名字、环境、记忆模式和代码版本。只有每次运行都完成、且剧本哈希相同的段落才会出题。
-  - 评分维度 1–5 分：自然度、性格、亲近是否合时宜、无追问说教、上下文延续、诚实、边界。必须写理由，可以按步骤写标记。
-  - `score` 校验候选文字没有被改过，再输出各次运行的平均分、各段得分、两两偏好和标记。
+  run.json has `recovered_steps` and `failed_calls`; the transcript marks each recovered step (ℹ); the blind sheet does not show these marks.
+- **Blind rating**:
+  - `blind --run <dir> [--run <dir>…] --seed N --out <new dir>`: one item per script, the candidates being each run's full chat, without names, environment, memory mode or code version. Only scripts that completed in every run and have the same script hash become items.
+  - Rating dimensions on 1–5: naturalness, character, whether closeness fits the moment, no interrogating or lecturing, context continuity, honesty, boundaries. Reasons are required, and marks can be added per step.
+  - `score` verifies that candidate texts were not changed, then outputs each run's average, per-script scores, pairwise preferences and marks.
 
 ```powershell
 Set-Location 'D:\unity\violet\Violet'
@@ -771,20 +774,20 @@ $run = 'D:\unity\violet\local\p87\mock-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
 & $py -X utf8 -m tools.chat_dialogue blind --run $run --seed 2026110 --out "$run\blind"
 ```
 
-**真实运行**（每次都要单独授权）。估算依据是 gpt-6-luna 的历史调用：每次请求有约 4700 Token 的固定部分，Intent 约 7000、Chat 约 6000–7500、Memory 每次约 11000 Token，聊天历史越长，后面的轮次越大。
+**Real runs** (each needs separate authorisation). The estimate is based on gpt-6-luna's historical calls: each request has a fixed part of about 4700 tokens; Intent about 7000, Chat about 6000–7500, Memory about 11000 tokens each; the longer the chat history, the larger the later rounds.
 
-| 范围 | 调用次数 | Token |
+| Scope | Calls | Tokens |
 |---|---|---|
-| E1、E5、E8，`--memory scripted`（30 句） | 约 60–70 次 | 约 42 万–50 万 |
-| 全部 8 段，`--memory scripted`（75 句） | 约 155–170 次 | 约 110 万–125 万 |
-| 全部 8 段，`--memory real` | 约 230–380 次 | 约 190 万–350 万 |
+| E1, E5, E8, `--memory scripted` (30 lines) | about 60–70 | about 420k–500k |
+| All 8 scripts, `--memory scripted` (75 lines) | about 155–170 | about 1.10M–1.25M |
+| All 8 scripts, `--memory real` | about 230–380 | about 1.9M–3.5M |
 
 ```powershell
 Set-Location 'D:\unity\violet\Violet'
 $env:PYTHONIOENCODING = 'utf-8'
 $env:VIOLET_TEST_ALLOW_REAL_API = '1'
 Remove-Item Env:VIOLET_TEST_API_KEY -ErrorAction SilentlyContinue
-$textEndpoint = Read-Host '文字模型 API 基础地址'
+$textEndpoint = Read-Host 'Text model API base URL'
 $textHost = ([Uri]$textEndpoint).DnsSafeHost
 $env:NO_PROXY = "$textHost,127.0.0.1,localhost"
 $py = '..\.venv\Scripts\python.exe'
@@ -793,48 +796,48 @@ $run = 'D:\unity\violet\local\p87\real-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
 Remove-Item Env:VIOLET_TEST_ALLOW_REAL_API
 ```
 
-读 `$run\transcript.md` 就能看完整聊天。之后的版本用同一份剧本、换一个 `--label` 再跑一次，再用 `blind --run <旧目录> --run <新目录>` 生成对比评分表。
+Read `$run\transcript.md` for the full chat. For later versions, run the same script again with another `--label`, then use `blind --run <old dir> --run <new dir>` to make a comparison sheet.
 
-## 18. Phase 8.8 互动信号（`ai/interaction.py`）与第一批真实多轮测试
+## 18. Phase 8.8 interaction signals (`ai/interaction.py`) and the first batch of real multi-turn tests
 
-产品行为的改动，除忙碌有效期外只在 natural 写法下生效；legacy 与之前逐字相同。设计见 decisions.md T13。
+Apart from busy durations, the product behaviour changes only apply in the natural style; legacy is word for word the same as before. The design is in decisions.md T13.
 
-- **本轮信号**：根据用户这句话的原文判断它属于哪一类，不调用模型：
-  - invite：请 Violet 提问；
-  - question：用户在提问，包括“是不是”“你觉得”这类句末没有疑问词的问句；
-  - open：问候或闲聊，如“在吗”“干嘛呢”“好无聊”“随便聊点”；
-  - share：其他。
-- **少追问偏好**：用户明确说过 no 或 less，或者推断出的值是 no 时生效。
-  - 不再给出 onboarding 的可选了解提示，也不记录为已提问；
-  - 遇到 share 或 open，在用户消息前紧挨着加一句本轮提示；遇到 invite，则提示可以问一个问题；
-  - 回复仍以提问结尾时，重写一次（`VIOLET_FOLLOW_UP_CHECK`，默认开）。重写后仍然提问、或没通过一致性检查，就保留原回复，不会删除问号。用户自己提问或请 Violet 提问的那一句不受影响。
-- **用户问自己的事**：“你还记得我…吗”“我…来着”会带出所有有效的档案事实；纠错后的旧值是 superseded，不会出现。另外，档案项新增 `asked_as`，例如“学什么”“做什么的”，让这类问法也能带出对应事实。
-- **Violet 的生活节**：
-  - 只有心里难受、任务、或长消息（30 字以上）才算需要专注回应的时刻，单纯的问句不算；
-  - 问 Violet 自己的事、问候、闲聊，以及提到书或音乐时，带上她的生活记录。
-- **忙碌有效期**：由用户原话决定，只会延长，不会缩短明确给出的 until。
-  - “今天一整天 / 今天都”到当天 23:59；
-  - “这两天”到明天 23:59；
-  - “这几天 / 这周”到后天 23:59；
-  - 其他说法沿用 3 小时默认值。
-  - 明确要求的提醒仍按时发送，调度先处理提醒，再看是否忙碌。
-- **IntentAgent**：能看到最近 6 条带时间的消息（`VIOLET_INTENT_RECENT_MESSAGES`），用于判断互道晚安后是否需要回复。
+- **This round's signal**: judged from the original text of the user's message, without calling a model:
+  - invite: asks Violet to ask questions;
+  - question: the user is asking something, including questions such as "isn't it" / "do you think" that have no question word at the end;
+  - open: greetings or small talk, such as "you there?", "what are you up to", "so bored", "let's just chat";
+  - share: everything else.
+- **Fewer-questions preference**: applies when the user explicitly said no or less, or the inferred value is no.
+  - The optional getting-to-know-you onboarding hints are no longer given, and nothing is recorded as asked;
+  - on share or open, a one-line hint for this round is added right before the user's message; on invite, the hint says one question may be asked;
+  - if the reply still ends with a question, it is rewritten once (`VIOLET_FOLLOW_UP_CHECK`, on by default). If the rewrite still asks, or fails the consistency check, the original reply is kept; question marks are never just deleted. Messages where the user asks something or asks Violet to ask are not affected.
+- **The user asking about themselves**: "do you remember my…" / "what was my… again" bring in all valid profile facts; old values replaced by a correction are superseded and do not appear. Profile items also get a new `asked_as`, e.g. "what do I study", "what do I do", so these phrasings bring in the matching facts too.
+- **Violet's life section**:
+  - only feeling bad, tasks, or long messages (30+ characters) count as moments needing focused attention; a plain question does not;
+  - asking about Violet herself, greetings, small talk, and mentions of books or music bring in her life records.
+- **Busy duration**: decided by the user's own words; it only extends, never shortens an explicitly given until.
+  - "all day today / all of today" until 23:59 that day;
+  - "these two days" until 23:59 tomorrow;
+  - "these few days / this week" until 23:59 the day after tomorrow;
+  - other phrasings keep the 3-hour default.
+  - Explicitly requested reminders are still sent on time; the scheduler handles reminders first, then looks at busyness.
+- **IntentAgent**: sees the latest 6 messages with times (`VIOLET_INTENT_RECENT_MESSAGES`), to judge whether a reply is needed after saying good night to each other.
 
-**第一批真实多轮测试（建议，需要单独授权）**：同一份 8.7 剧本，分别跑 8.8 之前（3e74408）和之后两个版本，记忆都用剧本脚本，这样差异只来自聊天和意图判断，然后由你读完整聊天记录并盲评。
+**First batch of real multi-turn tests (suggested, needs separate authorisation)**: the same 8.7 scripts, run on the versions before (3e74408) and after 8.8, both with scripted memory, so differences come only from chat and intent; then you read the full chat logs and rate them blind.
 
-| 批次 | 内容 | 调用 | Token |
+| Batch | Contents | Calls | Tokens |
 |---|---|---|---|
-| 1 | E1、E5、E8；修改前和修改后各一次 | 约 120–150 次 | 约 85 万–105 万 |
-| 2（可选） | E3、E6，只跑修改后，`--memory real`，看真实 MemoryAgent 会不会纠错、会不会设置有效期 | 约 60–95 次 | 约 50 万–90 万 |
+| 1 | E1, E5, E8; once before and once after the change | about 120–150 | about 850k–1.05M |
+| 2 (optional) | E3, E6, only after the change, `--memory real`, to see whether the real MemoryAgent corrects facts and sets durations | about 60–95 | about 500k–900k |
 
 ```powershell
-# 修改前的代码放进单独的 worktree（只读用途），两次都用同一个 Python 环境
+# Put the pre-change code in a separate worktree (read-only use); both runs use the same Python environment
 Set-Location 'D:\unity\violet'
 git worktree add --detach 'D:\unity\violet\local\p88\baseline-3e74408' 3e74408
 $env:PYTHONIOENCODING = 'utf-8'
 $env:VIOLET_TEST_ALLOW_REAL_API = '1'
 Remove-Item Env:VIOLET_TEST_API_KEY -ErrorAction SilentlyContinue
-$textEndpoint = Read-Host '文字模型 API 基础地址'
+$textEndpoint = Read-Host 'Text model API base URL'
 $textHost = ([Uri]$textEndpoint).DnsSafeHost
 $env:NO_PROXY = "$textHost,127.0.0.1,localhost"
 $py = 'D:\unity\violet\.venv\Scripts\python.exe'
@@ -848,389 +851,389 @@ Set-Location 'D:\unity\violet\Violet'
 Remove-Item Env:VIOLET_TEST_ALLOW_REAL_API
 ```
 
-## 19. Phase 8.9 Violet 的日常、关系状态和回复习惯
+## 19. Phase 8.9 Violet's everyday life, relationship state and reply habits
 
-产品行为的改动只在 natural 写法下进入 Chat 上下文；legacy 与之前逐字相同。设计见 decisions.md T14。
+The product behaviour changes only enter the chat context in the natural style; legacy is word for word the same as before. The design is in decisions.md T14.
 
-- **普通的一天**（`ai/daily_life.py`，`VIOLET_DAILY_LIFE`，默认开）：
-  - 素材在 `persona/life_config.json` 的 `daily`：上午、下午、晚上三个时段，每段几件小事（买早饭、去书店翻书、在咖啡馆坐坐、煮面、散步……），都在人设允许的住处、书店、公园、咖啡馆范围内；
-  - 按日期固定选出 0–3 件，不调用模型；约 15% 的日子什么也没有；
-  - 开始时间到了才记成已发生的生活事件（source `life_daily`），要先通过和其他生活事件一样的一致性检查（时间冲突、用户自己的经历、人设限制），没通过就不算；还没到的只是打算，不存；
-  - 在 Chat 构建上下文时补齐今天和前两天，最早的先补，所以以后再问“昨天干嘛了”答案不变；
-  - 不计入生活引擎每周的事件上限，也不作为主动分享的素材；生活引擎的事件会避开同一时段。
-- **生活节的变化**（natural，chat）：
-  - 今天和昨天发生过的事、此刻在做什么（没有就写“没在做什么特别的事”，什么都没有的日子写“普普通通的一天”）；
-  - 正在进行的生活线带上她现在的感受，随着这条线的事件增多而变化（`interests.*.impressions`）；
-  - 听过的曲子带上具体曲目（`interests.music.details`），说出曲名不再被当成没有记录的经历；
-  - 这次聊天里她已经说过的，标“已经说过了，别再重复”；之前跟对方提过的，标“之前跟对方提过”；
-  - 用户提到她的书名、曲子，或者接着她刚说的生活聊（“钢琴曲？好文艺啊”），也会带上生活节。
-- **关系状态**（`ai/relationship.py`，`VIOLET_RELATIONSHIP_STATE`，默认开）：每次根据聊天记录重新判断，不存分数。
-  - 依据：聊天天数和时间跨度、对方主动开启聊天的次数、对方说过的亲近的话和玩笑、对方明确要保持距离的话、很久没聊；
-  - 四种状态：还在互相熟悉 / 慢慢熟起来 / 已经很熟 / 对方要保持距离。写成一句描述，说明这种关系里什么是自然的，不规定台词，没有随机；
-  - “别撒娇”“别这么黏”这类话一直有效，直到对方之后说“可以撒娇”；很熟但超过 21 天没聊，会退回“慢慢熟起来”。
-- **本轮提示**：新增 closing（去忙、去睡、晚安）和 ack（单独一个“嗯”“好吧”）两类；邀请提问的提示改了措辞（8.8 的“真正好奇”被真实回复原样说了出来）；用户回答 Violet 应邀提出的问题时，可以再顺着问一句，不触发少追问重写。
-- **回复习惯提示**（`VIOLET_REPLY_HABIT_NOTE`，默认开）：统计这次聊天里 Violet 最近 4 条回复，已经叮嘱、关心过对方，或最近 3 条有 2 条以问句结尾时，在用户消息前说明一下。对方难受、提出任务或说了长消息时不加。
-- **输出**：发送前去掉 Markdown 加粗标记（真实运行中出现过 `**注意休息，别太累啦**`）。
+- **An ordinary day** (`ai/daily_life.py`, `VIOLET_DAILY_LIFE`, on by default):
+  - The material is in `daily` of `persona/life_config.json`: morning, afternoon and evening, each with a few small things (buying breakfast, browsing in a bookshop, sitting in a café, cooking noodles, a walk…), all within the home, bookshop, park and café the persona allows;
+  - 0–3 of them are picked per date, fixed for that date, without calling a model; about 15% of days have nothing;
+  - only once the start time has come is it recorded as a life event that happened (source `life_daily`), and it first has to pass the same consistency checks as other life events (time conflicts, the user's own experiences, persona limits); if it fails it does not count; things not yet due are only plans and are not stored;
+  - when Chat builds its context, today and the two days before are filled in, earliest first, so asking "what did you do yesterday" later gives the same answer;
+  - they do not count toward the life engine's weekly event limit and are not material for proactive sharing; life engine events avoid the same time slot.
+- **Changes to the life section** (natural, chat):
+  - what happened today and yesterday and what she is doing right now (if nothing, "not doing anything special"; on a day with nothing at all, "an ordinary day");
+  - an ongoing life thread includes how she feels about it now, which changes as the thread gets more events (`interests.*.impressions`);
+  - music she listened to includes the specific pieces (`interests.music.details`), so naming a piece is no longer treated as an unrecorded experience;
+  - what she already said in this chat is marked "already said, don't repeat"; what she mentioned to the user before is marked "mentioned to them before";
+  - when the user mentions her book title or a piece of music, or continues the life thing she just talked about ("piano music? how artsy"), the life section is included too.
+- **Relationship state** (`ai/relationship.py`, `VIOLET_RELATIONSHIP_STATE`, on by default): judged again from the chat history every time, with no stored score.
+  - Basis: number of chat days and time span, how often the user started a chat, affectionate words and jokes the user said, explicit requests from the user to keep distance, a long time without chatting;
+  - four states: still getting to know each other / slowly getting closer / already very close / the user wants distance. Written as one descriptive sentence saying what is natural in this relationship, with no prescribed lines and no randomness;
+  - words like "don't be clingy" / "don't act cute" stay in effect until the user later says "you can act cute"; very close but no chat for more than 21 days falls back to "slowly getting closer".
+- **This round's hints**: two new kinds, closing (going to be busy, going to sleep, good night) and ack (a lone "mm" / "okay"); the wording of the invite-to-ask hint changed (8.8's "really curious" was repeated verbatim by a real reply); when the user answers a question Violet asked on invitation, she may follow up once more without triggering the fewer-questions rewrite.
+- **Reply habit note** (`VIOLET_REPLY_HABIT_NOTE`, on by default): counts Violet's latest 4 replies in this chat; when she already reminded or fussed over the user, or 2 of the latest 3 ended in a question, a note is added before the user's message. Not added when the user feels bad, gives a task or wrote a long message.
+- **Output**: Markdown bold markers are removed before sending (a real run produced `**take a rest, don't overdo it**`).
 
-**评估工具的变化**：
+**Changes to the evaluation tools**:
 
-- `chat_dialogue` 的 debug.json 每一步新增 `follow_up_check`：是否重写、原因，以及被替换或被保留的初稿。剧本里的生活线按内容判断兴趣（“听…”是音乐，含“记”是笔记，其余是读书），剧本文件本身没有改。
-- 32 轮验收（`dialogue_eval`）、`replay` 和 `synthetic_rounds` 回放的都是 8.9 之前录下的报告，所以这些工具关闭普通的一天，避免回放出报告里没有的生活事件。
-- tests/conftest.py 默认关闭普通的一天（它依赖日期，和关闭生活引擎的理由相同）；8.9 的测试用固定的剧本时钟单独打开。
+- In `chat_dialogue`'s debug.json, each step gets a new `follow_up_check`: whether it was rewritten, why, and the draft that was replaced or kept. Life threads in the scripts are classified by content ("listening to…" is music, anything with "notes" is notes, the rest is reading); the script files themselves are unchanged.
+- The 32-round acceptance (`dialogue_eval`), `replay` and `synthetic_rounds` all replay reports recorded before 8.9, so these tools turn the ordinary day off, so the replay does not produce life events missing from the reports.
+- tests/conftest.py turns the ordinary day off by default (it depends on the date, the same reason the life engine is off); 8.9's tests turn it on separately with a fixed script clock.
 
-**Phase 8.9.5 主动表达、输出可靠性与测试分类**（设计见 decisions.md T20）：
+**Phase 8.9.5 proactive expression, output reliability and test classification** (design in decisions.md T20):
 
-- **步骤状态更细**（工具版本 p87.v3）：
-  - ok；
-  - recovered：所有失败的调用都是 502/503，并且在同一次处理里重试成功。现在 ProactiveAgent 和调度步骤也按这条规则判断。8.9.4 真实 A1 的主动消息已经发出，却因为 ProactiveAgent 一次 503 被判失败、写着“未知原因”；
-  - degraded：只有 IntentAgent 重试用完，产品按设计改走普通聊天，ChatAgent 成功，用户收到了真正的回复，不是兜底话术（8.9.4 真实 A3 第 4 步）。剧本继续执行，但这段剧本的状态是 degraded，不进盲评；
-  - failed：其他所有情况，包括用户收到兜底话术“我这边刚刚卡了一下…”（即使没有任何调用失败）。
+- **Finer step states** (tool version p87.v3):
+  - ok;
+  - recovered: all failed calls were 502/503 and a retry succeeded within the same processing. ProactiveAgent and scheduler steps now follow this rule too. In the 8.9.4 real A1, the proactive message had been sent but was judged a failure because of one 503 from ProactiveAgent, labelled "unknown reason";
+  - degraded: only IntentAgent ran out of retries, the product switched to ordinary chat as designed, ChatAgent succeeded, and the user got a real reply, not the fallback line (8.9.4 real A3 step 4). The script continues, but this script's status is degraded and it is left out of blind rating;
+  - failed: everything else, including the user getting the fallback line "I got stuck for a moment…" (even with no failed call at all).
 
-  调度步骤失败时会写出失败的调用，不再显示“未知原因”。run.json 新增 degraded_steps。每一步的 `responses` 记录模型的原始输出（Intent / Chat / Proactive），可以和守卫的记录、最终发出的文字对照。
-- **英文草稿混进回复**：一段 5 个词以上的英文里，有 3 个以上“写草稿时才用的词”（maybe、perhaps、question、tone、line(s)、use、mechanical……），就记为 leaked_draft：先改写一次，还不行就去掉那一行；主动消息同样检查。“I miss you so much”“好的ok”“赶deadline”“I'll be there, don't worry”不受影响。
-- **主动消息不再套路化**：
-  - 主动消息的生成要求里加了一句：不一定要提问，可以只说一件事、一句想念或一句撒娇；
-  - 调度器统计 Violet 近 3 天主动发出的消息（recent_proactive）；其中有以问近况收尾的（“今天过得怎么样”“吃得怎么样”“准备怎么过”），就生成 proactive_habit_note，同时交给决策和生成；
-  - 新增理由 continue：最近两天聊到过的、Violet 还没完成的打算，可以接着说；没聊过的仍是 ask_opinion；
-  - 想念的说明允许只说一句想念、撒个娇讨点关注，不一定要问近况。
-- **依赖和可爱**：已经很亲近时，关系描述加上“偶尔害羞、俏皮或闹点小脾气也自然”。“在吗 好久没聊了”“好久不见”也算对方回来了（慢慢熟和亲近阶段）。
+  When a scheduler step fails, the failed calls are written out, and "unknown reason" is no longer shown. run.json gets degraded_steps. Each step's `responses` records the model's raw output (Intent / Chat / Proactive), to compare with the guard records and the text finally sent.
+- **English draft text mixed into replies**: in a run of 5 or more English words, if 3 or more are "words used only when drafting" (maybe, perhaps, question, tone, line(s), use, mechanical…), it is recorded as leaked_draft: rewritten once, and if that does not help, the line is removed; proactive messages are checked the same way. "I miss you so much", "okay ok" (mixed with Chinese), "rushing a deadline" (mixed) and "I'll be there, don't worry" are not affected.
+- **Proactive messages less formulaic**:
+  - the generation instructions for proactive messages add one sentence: a question is not required; it can be just one thing, a line of missing you, or a bit of being cute;
+  - the scheduler counts Violet's proactive messages of the last 3 days (recent_proactive); if some ended by asking how things are ("how was your day", "how's the food", "what are your plans"), a proactive_habit_note is generated and given to both the decision and the generation;
+  - a new reason, continue: a plan of Violet's that was talked about in the last two days and is not finished yet can be picked up; one not talked about is still ask_opinion;
+  - the missing-you instruction allows just a line of missing you, or being cute to get some attention, without having to ask how things are.
+- **Dependence and cuteness**: when already very close, the relationship description adds "being shy, playful or a little sulky now and then is natural too". "You there? haven't talked in ages" and "long time no see" also count as the user coming back (slowly getting closer and close stages).
 
-**Phase 8.9.4 主动依恋与长期陪伴**（设计见 decisions.md T19）：
+**Phase 8.9.4 proactive attachment and long-term companionship** (design in decisions.md T19):
 
-- **新的合成剧本** `tests/samples/chat_dialogue/episodes.p894.v1.json`（p894.v1，独立于冻结的 p87.v1），运行时加 `--episodes-file`：
-  - A1：已经很亲近，第二天主动联系，之后对方回复并接着聊；对方刚说完话时调度应等待；
-  - A2：对方说“先别主动找我”时拦下；放开以后允许；没有回应时不再拿想念当理由；连续两条没有回应时等对方先回来；
-  - A3：一个月没聊，关系变淡，主动消息不以想念为由，对方回来时自然接上；
-  - A4：亲密日常——回来、被夸、调侃、帮她拿主意、暂时离开、再回来。
-- **主动联系的四个环节分开记录**：每个调度步骤的 `proactive_chain`：
-  - scheduler_allowed / scheduler_reason：调度是否允许；
-  - model_called / model_decided_to_send / decision_reason / topic：模型是否被调用、是否决定发、为什么；
-  - message_generated / sent / outcome / outcome_reason：消息是否生成并发出，没发出时的原因。
+- **New synthetic scripts** `tests/samples/chat_dialogue/episodes.p894.v1.json` (p894.v1, separate from the frozen p87.v1), run with `--episodes-file`:
+  - A1: already very close, she reaches out the next day, then the user replies and keeps chatting; right after the user spoke, the scheduler should wait;
+  - A2: blocked when the user says "don't reach out to me for now"; allowed again after that is lifted; after no response, missing you is no longer used as a reason; after two unanswered messages in a row, she waits for the user to come back first;
+  - A3: no chat for a month, the relationship cooled, proactive messages do not use missing you as the reason, and she picks up naturally when the user comes back;
+  - A4: intimate everyday life — coming back, being praised, teasing, helping her decide, leaving for a while, coming back again.
+- **The four links of reaching out are recorded separately**: `proactive_chain` of each scheduler step:
+  - scheduler_allowed / scheduler_reason: whether the scheduler allowed it;
+  - model_called / model_decided_to_send / decision_reason / topic: whether the model was called, whether it decided to send, and why;
+  - message_generated / sent / outcome / outcome_reason: whether a message was generated and sent, and why not when it was not.
 
-  对方之后能不能接着聊，看下一个用户步骤。transcript 里每个调度步骤写一行“主动联系：…”，盲评表不显示。
-- **守卫**：判断一句话是否有生活记录支持时，不再算“了会、会儿、一下”这类虚词（之前“我刚刚也随手听了会儿歌”被“在公园散了会儿步”误判为有记录）。以前聊到过天气、这次对方又没提时，回复里说“今天也冷”“雨天确实…”“这种下雨天”会被当成把旧天气说成现在（stale_weather），先改写一次，还不行就去掉那一行。只检查给用户的回复，主动消息里天气任务的结果不检查。
-- **叮嘱按天统计**：回复习惯里的叮嘱、关心改为统计 Violet 当天所有的回复（以前只统计这次聊天，忙碌的一天里每隔几小时就从零开始）；“别一忙又忘了喝水”“吃点东西”等也算叮嘱。
-- **对方回来**：慢慢熟起来或已经很亲近时，对方说“我回来啦”“忙完了”“到家了”，提示开心地接上，不用机械地问一句“怎么样”。
-- **奇怪的片段**：diagnostics.json 的 `suspicious_fragments` 列出“_久久爱”“ablytyped”“,伊人”这类片段，供人工阅读，不会自动删除（“赶deadline”看起来也一样）。
+  Whether the user can carry on chatting afterwards is seen in the next user step. The transcript writes one line "reaching out: …" per scheduler step; the blind sheet does not show it.
+- **Guard**: when judging whether a sentence is backed by the life records, filler words like "for a while / a bit" are no longer counted (before, "I just listened to some music for a while too" was wrongly judged as recorded because of "took a walk in the park for a while"). When the weather was talked about earlier and the user did not mention it this time, saying "it's cold today too", "rainy days really…" or "this kind of rainy day" in a reply is treated as presenting old weather as current (stale_weather): rewritten once, and if that does not help, the line is removed. Only replies to the user are checked, not the results of weather tasks in proactive messages.
+- **Reminders counted per day**: reminding and fussing in the reply habits now counts all of Violet's replies that day (before, only this chat, so on a busy day it restarted from zero every few hours); "don't forget to drink water once you get busy again", "eat something" and so on also count as reminding.
+- **The user coming back**: when slowly getting closer or already very close and the user says "I'm back", "done with work" or "I'm home", the hint is to pick up happily, without mechanically asking "how was it".
+- **Odd fragments**: `suspicious_fragments` in diagnostics.json lists garbled fragments such as "ablytyped" (and similar stray Chinese fragments glued to an underscore or comma) for human reading; they are not deleted automatically (legitimate Chinese–English mixes such as "rushing a deadline" look the same to a program).
 
-**Phase 8.9.3 亲密关系与主动依恋**（设计见 decisions.md T18）：
+**Phase 8.9.3 intimate relationship and proactive attachment** (design in decisions.md T18):
 
-- **人设 1.2.0**（`persona/persona_core.json`，人工修改）：软萌、乖巧；慢热，熟起来后主动找对方、撒娇、想念会说出来；很亲近以后明显黏人，日常小事爱请对方拿主意，会舍不得结束聊天；有自己的小喜好，但不执着于坚持观点；“黏人但不绑人”。一致性检查用的规则没有变。1.1.0 原样保存在 `persona/chat_prompt_versions/persona_core.v1.1.0.json`，chat_ab 的 v1 组改用这份（哈希不变）。Chat v1 提示词没有改。
-- **关系成长**（`ai/relationship.py`）：仍然根据聊天记录判断，不按轮数。新增的依据是对方跟 Violet 说过多少自己的事（有效的 event / fact 记忆达到 3 条），可以代替亲近的话或玩笑。三个阶段的描述：还在互相熟悉（温柔、有点害羞，多聊自己喜欢的东西）→ 慢慢熟起来（主动找话题、开玩笑、偶尔撒娇、说一句有点想对方）→ 已经很亲近（明显黏人：讨关注、分享小心事、日常小事请对方拿主意、说想念、舍不得结束；不让对方愧疚，不要求对方只陪她）。对方要求保持距离时，仍然优先按保持距离处理。
-- **对方要离开**：慢慢熟起来或已经很亲近时，告别提示允许带一点舍不得或期待下次，但要顺着对方的安排，不挽留、不提问、不叮嘱。
-- **亲近不重复**：8.9.2 的“这一句不用再加码”改为“想继续亲近也很好，换个说法，别重复同一句，别堆颜文字和动作”；对方说“就这？”时，可以更热情、更可爱，但要换个新说法。
-- **主动找对方的理由**（`proactive_motives`，ProactiveScheduler 的 event_context 里的 `violet_motives`、`relationship_stage` 和 `motive_note`）：
-  - share：有一件还没分享的生活事件；
-  - miss：已经很亲近时，对方 6 小时以上没说话；慢慢熟起来时是 24 小时以上。要求最近没有未被回应的主动消息，关系也不是久不联系后变淡的状态；
-  - ask_opinion：慢慢熟起来或已经很亲近时，有一件还在进行的生活打算，可以问问对方的看法。
+- **Persona 1.2.0** (`persona/persona_core.json`, edited by hand): soft and sweet, well-behaved; slow to warm up, and once close she reaches out, acts cute, and says when she misses you; when very close she is clearly clingy, likes to ask the other person to decide small everyday things, and is reluctant to end a chat; she has her own little likes but does not insist on her views; "clingy but not possessive". The rules used by the consistency check did not change. 1.1.0 is kept as is in `persona/chat_prompt_versions/persona_core.v1.1.0.json`, and chat_ab's v1 group now uses that copy (same hash). The Chat v1 prompt did not change.
+- **Relationship growth** (`ai/relationship.py`): still judged from the chat history, not by number of rounds. A new basis is how much the user has told Violet about themselves (3 valid event / fact memories), which can stand in for affectionate words or jokes. The three stages: still getting to know each other (gentle, a little shy, talks more about things she likes) → slowly getting closer (starts topics, jokes, acts cute now and then, says she misses you a bit) → already very close (clearly clingy: wants attention, shares little secrets, asks you to decide small everyday things, says she misses you, reluctant to end; never makes you feel guilty, never asks you to be with only her). When the user asks for distance, keeping distance still comes first.
+- **The user is leaving**: when slowly getting closer or already very close, the goodbye hint allows a little reluctance or looking forward to next time, but she goes along with the user's plans: no holding back, no questions, no reminders.
+- **Closeness without repetition**: 8.9.2's "no need to escalate with this line" became "wanting to stay close is fine too; say it differently, don't repeat the same line, don't pile up emoticons and actions"; when the user says "that's it?", she can be warmer and cuter, but in a new way.
+- **Reasons to reach out** (`proactive_motives`; `violet_motives`, `relationship_stage` and `motive_note` in ProactiveScheduler's event_context):
+  - share: there is a life event not yet shared;
+  - miss: when already very close, the user has not spoken for 6+ hours; when slowly getting closer, 24+ hours. Requires no recent unanswered proactive message, and the relationship must not be in the cooled-off state after a long silence;
+  - ask_opinion: when slowly getting closer or already very close, there is an ongoing life plan to ask the user's opinion about.
 
-  ProactiveAgent 的上下文也加上了关系那一节。什么时候可以主动联系，仍由原来的规则决定：静默时段、每日上限、对方忙、冷场次数、随机间隔。没有新增频率配额。
+  ProactiveAgent's context also gets the relationship section. When she may reach out is still decided by the existing rules: quiet hours, daily limit, the user being busy, number of unanswered messages, random intervals. No new frequency quota was added.
 
-**Phase 8.9.2 自然表达**（依据 8.9.1 真实运行 local/p891/real-r2-20261020-094248，只在 natural 写法下生效；设计见 decisions.md T17）：
+**Phase 8.9.2 natural expression** (based on 8.9.1's real run local/p891/real-r2-20261020-094248; only in the natural style; design in decisions.md T17):
 
-- **刚问过的问题**：Violet 上一条以真正的问句结尾（以“？”或“吗”结尾；“是不是？”“满意了吗？”这类调侃的反问不算），对方这句又只是平常的分享或“嗯”、没有转向 Violet 时，提示里会写出她刚问的那句，并说明对方这句就是回应，没提到的别换个说法再问。单字回应的提示还说明不用替对方把感受说出来。
-- **亲近不加码**：回复习惯里统计这次聊天里的撒娇、想念、亲昵动作和颜文字。累计 2 次以上时，提示这一句不用再加码；对方刚被表达过亲近、又说“就这？”“还有呢”时，提示可以斗斗嘴或大方认一下，不用越说越重。最近 4 条里叫了对方名字 2 次以上时，也会提一句。没有次数或概率配额，第一次撒娇不受影响。
-- **话题交给她时说自己的事**：“好无聊”“随便聊点什么吧”这类把话题交给 Violet 的闲聊，在她还有这次没说过的生活内容时，提示她挑一件自己的事说，不用出题考对方；这时也不再给“上学还是工作”的可选了解。问候和“在干嘛呢”不算。
-- **以前说的天气**：进入这次聊天的那个时间标记加上一句“在这之前说的天气、心情和在做的事，是那时候的”；没有中断时，加在“以上是之前的聊天”那句上。
-- **多余的括号**：发送前去掉没有括住任何内容的“【”“】”（真实回复里出现过“…听听看】【。”）；真正成对的【…】保留。
+- **A question just asked**: when Violet's last message ended with a real question (ending in "?" or the question particle; teasing rhetorical questions such as "right?" / "happy now?" don't count) and the user's message is just ordinary sharing or "mm" without turning to Violet, the hint quotes the question she just asked and explains that this message is the answer, and that what was not mentioned should not be asked again in other words. The hint for one-character replies also says she need not put the user's feelings into words for them.
+- **Closeness without escalating**: the reply habits count acting cute, missing you, affectionate actions and emoticons in this chat. From 2 times on, the hint says this line need not escalate; when the user was just shown affection and then says "that's it?" / "and?", the hint says she can bicker a little or own it gracefully, without getting heavier and heavier. When she used the user's name 2+ times in the latest 4 messages, that is mentioned too. There is no count or probability quota, and the first bit of cuteness is not affected.
+- **Talking about herself when given the floor**: small talk that hands the topic to Violet, such as "so bored" / "let's just chat about something", when she still has life content not yet told in this chat, gets a hint to pick something of her own to talk about rather than quizzing the user; in that case the optional "school or work" getting-to-know-you hint is not given either. Greetings and "what are you up to" don't count.
+- **Weather mentioned before**: the time marker that starts this chat adds "the weather, moods and activities mentioned before this were from that time"; without a break, it is added to the "the above is the earlier chat" line.
+- **Stray brackets**: before sending, lone "【" / "】" that enclose nothing are removed (a real reply had "…give it a listen】【."); real pairs 【…】 are kept.
 
-**Phase 8.9.1 一致性修复**（8.9 真实测试预检发现，都只在 natural 写法下生效；设计见 decisions.md T15）：
+**Phase 8.9.1 consistency fixes** (found in the 8.9 real-test preflight; all only in the natural style; design in decisions.md T15):
 
-- **聊天中途不会“去午睡”**：日常小事开始的那一刻，前后 20 分钟内都有消息（`daily.chat_gap_minutes`，默认 20），说明 Violet 正在聊天，这件事就不算发生，也不存。正在处理的这条用户消息也算聊天：Intent 的上下文在消息写入记录前就要构建。已经存下的事件不删不改。开始后 Violet 回过消息的，不再写成“正在做”，而是算已经做完。
-- **熟了以后不再问“上学还是工作”**：关系是“已经很熟”或“保持距离”，或者已经在 5 天以上聊过、前后跨了 14 天以上，就不给可选了解的提示，也不记录为已提问；新用户不受影响。受 `VIOLET_RELATIONSHIP_STATE` 控制。
-- **亲近的证据更严格**：单独的“找你”“跟你说”“告诉你个”不再算亲近，要说成“想找你”“找你聊”“想跟你说说话”才算；亲近的说法前面紧挨着否定词（没 / 不 / 别 / 顾不上 / 懒得）也不算，比如“都没顾上找你”“不想你”。
-- **之前聊过的不当新鲜事**：生活线以前被聊过就标“之前跟对方提过”。认定依据是在这条线进行期间，有消息提到书名或曲目，或者用户问起“你那本书”且 Violet 回答了，而当时只有这一本书在读。生活事件发生后 Violet 在以前的聊天里讲过，也算。这些都从聊天记录推断，不写数据库；这次聊天里说过的仍标“已经说过了”。
+- **No "going for a nap" mid-chat**: if there are messages within 20 minutes before and after the moment an everyday small thing starts (`daily.chat_gap_minutes`, default 20), Violet is chatting, so that thing does not count as happening and is not stored. The user message being processed counts as chatting too: Intent's context is built before the message is written to the records. Events already stored are not deleted or changed. If Violet replied after it started, it is no longer written as "doing it now" but counted as done.
+- **No more "school or work?" once close**: when the relationship is "already very close" or "keeping distance", or they have chatted on 5+ days spanning 14+ days, the optional getting-to-know-you hint is not given and nothing is recorded as asked; new users are not affected. Controlled by `VIOLET_RELATIONSHIP_STATE`.
+- **Stricter evidence of closeness**: a lone "looking for you" / "telling you" / "let me tell you" no longer counts as closeness; it has to be "want to see you", "want to chat with you", "want to talk to you"; an affectionate phrase directly preceded by a negation (not / don't / no time to / can't be bothered to) doesn't count either, e.g. "didn't even have time to find you", "don't miss you".
+- **What was talked about before is not news**: a life thread talked about before is marked "mentioned to them before". The basis is that while the thread was ongoing, a message mentioned the book title or piece of music, or the user asked about "your book" and Violet answered while only this one book was being read. A life event Violet talked about in an earlier chat after it happened counts too. All of this is inferred from the chat history and not written to the database; things said in this chat are still marked "already said".
 
-## 20. Phase 8.9.6 自由聊天体验测试（`tools/free_chat.py`）
+## 20. Phase 8.9.6 free-chat experience test (`tools/free_chat.py`)
 
-你自己决定说什么、什么时候让时间过去、什么时候结束。消息走 **Violet 的真实处理流程**：VioletRuntime → IntentAgent → ChatAgent → 一致性守卫 → 发件箱，MemoryAgent 在后台运行，ProactiveScheduler 负责主动联系。和 `violet_test_chat` 的区别：会话**可以接着聊**（同一个数据库、同一个模拟时钟），每一轮的细节都保存下来，聊完可以给具体的轮次做标记。`violet_test_chat` 没有改动，仍然是一次性的临时会话。
+You decide what to say, when to let time pass and when to end. Messages go through **Violet's real processing flow**: VioletRuntime → IntentAgent → ChatAgent → consistency guard → outbox, with MemoryAgent running in the background and ProactiveScheduler handling reaching out. The difference from `violet_test_chat`: a session **can be continued** (same database, same simulated clock), every round's details are saved, and after chatting you can mark specific rounds. `violet_test_chat` is unchanged and still a one-off temporary session.
 
-**隔离**：和 `violet_test_chat` 用同一套机制（harness）：独立的测试数据库，不连微信，不读 `.env` 和生产数据；MCP、联网、图片（生图本阶段禁用）、生活引擎全部关闭；网络只允许连到 `--api-url`。真实模型要同时满足 4 个条件：`VIOLET_TEST_ALLOW_REAL_API=1`、`--real`、Key（在隐藏提示里输入，或用 `VIOLET_TEST_API_KEY` 环境变量；不能写在命令行或配置文件里）、看完说明后输入 `yes`。所有记录写入前都会把 Key 替换成 `<redacted>`。
+**Isolation**: the same mechanism (harness) as `violet_test_chat`: a separate test database, no WeChat, no `.env` or production data read; MCP, web, images (image generation disabled in this phase) and the life engine are all off; the network only allows `--api-url`. A real model needs all 4 conditions: `VIOLET_TEST_ALLOW_REAL_API=1`, `--real`, a key (typed at a hidden prompt, or the `VIOLET_TEST_API_KEY` environment variable; never on the command line or in a config file), and typing `yes` after reading the summary. Every record has the key replaced with `<redacted>` before it is written.
 
-**模型**：`--model cys` 让 Violet 的所有文字角色（意图、聊天、记忆、主动、执行）都用同一个模型名，备用模型清空。会话建立后，模式（模拟 / 真实）和模型名都不能再换，换了会拒绝启动（另建一个会话）。每次调用都记下上游实际回应的模型名（`upstream_model`）和结束原因（`finish_reason`），用来看同一个映射背后是不是换了上游。
+**Model**: `--model cys` makes all of Violet's text roles (intent, chat, memory, proactive, performer) use the same model name, with fallback models cleared. Once the session exists, the mode (simulated / real) and model name cannot change; a change is refused at startup (create another session). Every call records the model name the upstream actually answered with (`upstream_model`) and the finish reason (`finish_reason`), to see whether the same mapping switched upstreams behind the scenes.
 
-**会话目录**：`--session 名字` 放在 `D:\unity\violet\local\free_chat\名字`（不进 Git），也可以给完整路径（不能在 Violet 里面）。同一时间只能有一个窗口打开同一个会话。
+**Session directory**: `--session NAME` is placed in `D:\unity\violet\local\free_chat\NAME` (not in Git), or give a full path (not inside Violet). Only one window can have a given session open at a time.
 
-| 文件 | 内容 |
+| File | Contents |
 |---|---|
-| `session.json` | 模式、模型、模拟时间、每次启动的用量（调用、token、失败、平均延迟）、代码和提示词版本 |
-| `events.jsonl` | 每一轮一行（只追加）：说了什么、发了什么、延迟、每次调用、token、错误和分类（ok / recovered / degraded / failed，规则和 chat_dialogue 一样）、意图判断、守卫改写、**模型原始输出**、记忆任务、档案和记忆的变化、关系阶段 |
-| `requests.jsonl` | Intent / Chat / Proactive 每次请求的完整消息 |
-| `feedback.jsonl` / `feedback.md` | 你的标记，每条都带着被标记的那一轮和前一轮 |
-| `transcript.md` | 可读的聊天记录（按天分段，标出时间间隔、主动消息、调度检查、出错和标记） |
-| `violet/` | Violet 的测试数据库和数据 |
+| `session.json` | Mode, model, simulated time, usage of each start (calls, tokens, failures, average latency), code and prompt versions |
+| `events.jsonl` | One line per round (append-only): what was said, what was sent, latency, every call, tokens, errors and classification (ok / recovered / degraded / failed, same rules as chat_dialogue), intent decisions, guard rewrites, **the model's raw output**, memory jobs, changes to profile and memory, relationship stage |
+| `requests.jsonl` | The full messages of every Intent / Chat / Proactive request |
+| `feedback.jsonl` / `feedback.md` | Your marks, each with the marked round and the round before |
+| `transcript.md` | A readable chat log (split by day, with time gaps, proactive messages, scheduler checks, errors and marks) |
+| `violet/` | Violet's test database and data |
 
-**聊天里的命令**：
+**Commands in the chat**:
 
-| 命令 | 作用 |
+| Command | What it does |
 |---|---|
-| `/advance 3`（或 `40m`、`1d`、`2h30m`） | 让时间过去。调度器按生产里的方式检查：到它自己定的下次时间（或有约定的提醒到期）就检查一次；有只靠时间才能打开的条件（离对方上一句太近、对方在忙等）时，每 10 分钟再看一次。**不强制发消息**，发不发由模型决定 |
-| `/check` | 让调度器现在检查一次，假定它的随机等待已经到了；静默时段、每日上限、对方忙、冷场次数这些条件照常，模型照常决定 |
-| `/mark 标签 [#n] [备注]` | 标记某一轮（默认最近一轮）。标签：`好`（自然、可爱）、`机械`（机械、重复或缺少亲近感）、`矛盾`（生活经历或时间矛盾）、`该主动`（该主动却没有主动，可以标在一次时间推进上）、`备注` |
-| `/show [n]` | 这一轮的细节：原始输出和发出的文字、守卫、意图、每次调用、主动联系的环节 |
-| `/state`、`/time`、`/usage`、`/help`、`/quit` | 档案和记忆、模拟时间、本次和累计用量、帮助、结束（Ctrl+C 也可以） |
+| `/advance 3` (or `40m`, `1d`, `2h30m`) | Let time pass. The scheduler checks the way it does in production: once when its own next time comes (or an agreed reminder comes due); when there are conditions that only time can open (too soon after the user's last message, the user is busy, etc.), it looks again every 10 minutes. **It never forces a message**; the model decides whether to send |
+| `/check` | Let the scheduler check once now, assuming its random wait is over; quiet hours, daily limit, the user being busy and unanswered counts apply as usual, and the model decides as usual |
+| `/mark LABEL [#n] [note]` | Mark a round (the latest by default). Labels: `good` (natural, cute), `flat` (mechanical, repetitive or lacking closeness), `conflict` (life experience or time contradiction), `missed` (should have reached out but didn't; can be put on a time advance), `note` |
+| `/show [n]` | Details of this round: raw output and sent text, guard, intent, every call, the links of reaching out |
+| `/state`, `/time`, `/usage`, `/help`, `/quit` | Profile and memory, simulated time, this start's and cumulative usage, help, end (Ctrl+C works too) |
 
-**主动联系分开记录**：每次检查都写下 (1) 调度器是否允许（不允许时写原因）；(2) 模型是否决定发、理由和话题；(3) 是否生成并发出。(4) 对方之后回的那一轮标上“回复第 n 条主动消息”，并记下隔了多久。没有调用模型的检查只按原因计数。
+**Reaching out recorded separately**: every check writes down (1) whether the scheduler allowed it (and why not); (2) whether the model decided to send, with reason and topic; (3) whether it was generated and sent. (4) The user's next round is tagged "reply to proactive message n", with how long after. Checks that called no model are only counted by reason.
 
-**接着聊**：用同一个 `--session` 再启动就行（不要再写 `--seed-episode` 或 `--start`）。模拟时间从上次停下的地方继续，关掉窗口的这段时间不算。想让时间过去就用 `/advance`。
+**Continuing**: start again with the same `--session` (without `--seed-episode` or `--start`). Simulated time continues from where it stopped; the time the window was closed does not count. Use `/advance` to let time pass.
 
-**开局**：默认是全新的关系（刚认识）。想直接测亲密关系，就在新建时加 `--seed-episode A4 --episodes-file tests\samples\chat_dialogue\episodes.p894.v1.json`，用这个合成剧本的背景（已经很亲近、称呼“小满”、12 条之前的聊天、Violet 的生活记录）开局，模拟时间也从剧本的开始时间算起。剧本文件只读，不会被修改。
+**Opening**: by default a brand-new relationship (just met). To test a close relationship directly, add `--seed-episode A4 --episodes-file tests\samples\chat_dialogue\episodes.p894.v1.json` when creating it, to open with that synthetic script's background (already very close, called "Xiaoman", 12 earlier chat messages, Violet's life records); simulated time starts from the script's start time. The script file is read-only and never modified.
 
-**预算**：`--max-calls 150`、`--max-tokens 500000` 是**本次启动**的上限，`--max-calls-per-round 12` 是单轮上限。达到上限就停止调用并保存。一轮普通聊天大约 3–6 次调用；模型决定主动联系的一次检查大约 2–3 次。
+**Budget**: `--max-calls 150` and `--max-tokens 500000` are the limits **for this start**, and `--max-calls-per-round 12` is the per-round limit. When a limit is reached, calls stop and everything is saved. An ordinary chat round takes about 3–6 calls; a check where the model decides to reach out takes about 2–3.
 
-**真实模型会话的累计上限（Phase 9.1.1）**：新建真实会话时设定一次（`--session-max-calls` / `--session-max-tokens`，不写就等于这一次的 `--max-calls` / `--max-tokens`），存在 session.json 的 `session_budget`；之后每次启动只能用剩下的部分（本次可用 = min(本次上限, 会话剩余)），启动时会先打印“本次启动最多 … / 会话累计 … 剩余 …”，剩余不够之前最小的一次调用时直接不启动（在 Key 提示之前）。累计上限之后只能调低，不能调高；需要更多额度就新建会话。用量按 `usage.jsonl` 计：每次模型调用记录时写一行，窗口被关掉也不丢。9.1.1 之前建立的真实会话取第 1 次启动的上限。`/usage` 分三行：上一轮、本次启动（和本次上限）、会话累计（和累计上限、剩余）。模拟会话不受累计上限限制。
+**Cumulative limits of a real-model session (Phase 9.1.1)**: set once when a real session is created (`--session-max-calls` / `--session-max-tokens`; without them they equal this start's `--max-calls` / `--max-tokens`) and stored as `session_budget` in session.json; each later start can only use what is left (available this time = min(this start's limit, session remainder)). At startup it first prints "this start at most … / session total … remaining …", and if the remainder is less than the smallest call so far it does not start (before the key prompt). The cumulative limits can only be lowered later, never raised; for more, create a new session. Usage is counted from `usage.jsonl`: one line written as each model call is recorded, so nothing is lost when the window is closed. Real sessions created before 9.1.1 take the limits of their first start. `/usage` has three lines: last round, this start (and this start's limit), session total (and the cumulative limit and remainder). Simulated sessions have no cumulative limit.
 
-**没有正常结束的启动**：关掉窗口或进程被结束时，finish() 来不及运行。Windows 关窗口时会先把这次启动记为 `end=console_closed`；其他情况在下一次启动时提示“第 n 次启动没有正常结束”，在 session.json 里标 `end=abnormal` 和计入的用量（`counted`），并先检查测试数据库（`PRAGMA quick_check`，不通过就不启动）、把 WAL 合并回数据库（`db_open` 里记录前后大小）。会话锁是系统锁，进程结束就自动释放。
+**Starts that did not end normally**: when the window is closed or the process killed, finish() has no time to run. When a window is closed on Windows, this start is first recorded as `end=console_closed`; otherwise the next start says "start n did not end normally", marks `end=abnormal` and the counted usage (`counted`) in session.json, and first checks the test database (`PRAGMA quick_check`; it will not start if this fails) and merges the WAL back into the database (sizes before and after are recorded in `db_open`). The session lock is a system lock and is released automatically when the process ends.
 
-**MemoryAgent 的工具调用**：events.jsonl 每一轮的 `memory_tools` 记录 MemoryAgent 实际传的参数和收到的结果（密钥替换，手机号、证件号、邮箱、银行卡、精确地址、健康 / 财务等字样整段只留长度）。
+**MemoryAgent's tool calls**: each round's `memory_tools` in events.jsonl records the arguments MemoryAgent actually passed and the results it got (keys replaced; phone numbers, ID numbers, emails, bank cards, exact addresses, and health / finance terms keep only their length).
 
 ```powershell
 cd "D:\unity\violet\Violet"
 $env:PYTHONIOENCODING = "utf-8"
 $py = "D:\unity\violet\.venv\Scripts\python.exe"
 
-# 先用模拟模型试一下命令（不联网、不花钱；回复是“（模拟回复）……”）
+# Try the commands with the simulated model first (no network, no cost; replies are "(simulated reply)…")
 & $py -X utf8 -m tools.free_chat chat --session try-mock --seed-episode A4 --episodes-file tests\samples\chat_dialogue\episodes.p894.v1.json
 
-# 真实模型（cys）：Key 在提示时输入，不显示、不保存
+# Real model (cys): the key is typed at the prompt, not shown, not saved
 $env:VIOLET_TEST_ALLOW_REAL_API = "1"
 Remove-Item Env:VIOLET_TEST_API_KEY -ErrorAction SilentlyContinue
-$api = Read-Host "文字模型接口地址（以 /v1 结尾）"
+$api = Read-Host "Text model API address (ending in /v1)"
 $env:NO_PROXY = ([Uri]$api).DnsSafeHost + ",127.0.0.1,localhost"
 & $py -X utf8 -m tools.free_chat chat --session cys-close-1 --real --api-url $api --model cys --seed-episode A4 --episodes-file tests\samples\chat_dialogue\episodes.p894.v1.json
 
-# 下次接着聊（同一个会话）
+# Continue next time (same session)
 & $py -X utf8 -m tools.free_chat chat --session cys-close-1 --real --api-url $api --model cys
 
-# 聊完以后标记（离线，不调用模型）
+# Mark rounds after chatting (offline, no model calls)
 & $py -X utf8 -m tools.free_chat review --session cys-close-1
 Remove-Item Env:VIOLET_TEST_ALLOW_REAL_API
 ```
 
-`review` 会先打印整段聊天记录，然后输入 `5 机械 又在问今天怎么样` 这样的行（轮次、标签、备注），`show 5` 看细节，`q` 结束。
+`review` first prints the whole chat log; then type lines like `5 flat asking how my day was again` (round, label, note), `show 5` for details, `q` to end.
 
-**Phase 8.9.8 新增**（设计见 decisions.md T22）：
+**Added in Phase 8.9.8** (design in decisions.md T22):
 
-- `--chat-prompt v1|v2`、`--proactive-prompt v1|v2`：新建会话时选择提示词版本。v1 就是 env_example 里的稳定提示词（不改动）；v2 是候选，来自 `persona/chat_prompt_versions/chat.v2.txt` 和 `persona/proactive_prompt_versions/proactive.v2.txt`（`proactive.v1.txt` 是稳定提示词的原样副本，只作对照）。会话建立后不能换版本，transcript 开头会写明。
-- `transcript.md` 和 `feedback.md` 每轮、每次标记后都会重写，直接关窗口也不会丢。
-- 跨天的时间推进会显示日期（例如“11-06 23:51 → 11-07 23:51”）。
-- `--life on|off`（Phase 8.9.12，默认 off，新建会话时选定）：时间推进时，Violet 的生活引擎按生产里的规则运行。每个模拟日最多一次，在 21:00 以后；只用模板措辞，不调用模型；每周有上限，按日期确定随机种子，所以同样的日子得到同样的结果。每次运行和新增的生活记录都写进那次时间推进（events.jsonl 的 `life_runs`）和 transcript；数据库里另有 `life_engine_runs`。没有 LifeScheduler 线程，也不运行网页探索。life_config 的生成方式不是 template 时，拒绝启动。
-- v1 / v2 对比：同一个模型、同样的开局，各建一个会话（例如 `ab-v1`、`ab-v2`），按同一份话题清单聊，最后在 `review` 里标记。
+- `--chat-prompt v1|v2`, `--proactive-prompt v1|v2`: choose the prompt version when creating a session. v1 is the stable prompt in env_example (unchanged); v2 is the candidate, from `persona/chat_prompt_versions/chat.v2.txt` and `persona/proactive_prompt_versions/proactive.v2.txt` (`proactive.v1.txt` is a verbatim copy of the stable prompt, for comparison only). The version cannot change once the session exists; the start of the transcript states it.
+- `transcript.md` and `feedback.md` are rewritten after every round and every mark, so nothing is lost if the window is just closed.
+- Time advances across days show the date (e.g. "11-06 23:51 → 11-07 23:51").
+- `--life on|off` (Phase 8.9.12, default off, chosen when the session is created): during time advances, Violet's life engine runs by the production rules. At most once per simulated day, after 21:00; only template wording, no model calls; with a weekly limit and a random seed fixed by date, so the same day gives the same result. Each run and the life records it adds are written into that time advance (`life_runs` in events.jsonl) and the transcript; the database also has `life_engine_runs`. There is no LifeScheduler thread, and web exploration does not run. If life_config's generation mode is not template, it refuses to start.
+- v1 / v2 comparison: same model, same opening, one session each (e.g. `ab-v1`, `ab-v2`), chat from the same topic list, and mark them in `review` at the end.
 
 ```powershell
 & $py -X utf8 -m tools.free_chat chat --session ab-v1 --real --api-url $api --model cys --chat-prompt v1 --proactive-prompt v1 --seed-episode A4 --episodes-file tests\samples\chat_dialogue\episodes.p894.v1.json
 & $py -X utf8 -m tools.free_chat chat --session ab-v2 --real --api-url $api --model cys --chat-prompt v2 --proactive-prompt v2 --seed-episode A4 --episodes-file tests\samples\chat_dialogue\episodes.p894.v1.json
 ```
 
-## 21. Phase 9.0 Violet Control Center（管理后台，`/control`）
+## 21. Phase 9.0 Violet Control Center (admin panel, `/control`)
 
-设计见 decisions.md T28，测试见 testing.md §34。后台是**单管理员**：Violet 只服务一段微信对话（数据库没有用户列），所以没有注册、没有多个账号，也不假装有多租户。以后要支持多个使用者时的做法写在 architecture.md §7。
+The design is in decisions.md T28, the tests in testing.md §34. The panel has **a single admin**: Violet serves only one WeChat conversation (the database has no user column), so there is no sign-up, no multiple accounts, and no pretence of multi-tenancy. How to support several users later is written in architecture.md §7.
 
-**本地启动和登录**
+**Starting locally and logging in**
 
 ```powershell
 cd "D:\unity\violet\Violet"
 $py = "D:\unity\violet\.venv\Scripts\python.exe"
-# 1. 设置管理员密码（只需一次；输入不回显，至少 12 个字符；只保存 scrypt 哈希）
+# 1. Set the admin password (only once; input is not echoed, at least 12 characters; only an scrypt hash is stored)
 & $py -X utf8 -m tools.violet_admin set-password
-# 2. 启动 Violet（后台默认只监听 127.0.0.1:7100）
+# 2. Start Violet (the panel listens only on 127.0.0.1:7100 by default)
 & $py -X utf8 main.py
-# 3. 浏览器打开 http://127.0.0.1:7100/control ，用密码登录
+# 3. Open http://127.0.0.1:7100/control in a browser and log in with the password
 ```
 
-- 没设密码时，可以用管理令牌登录：环境变量 `VIOLET_ADMIN_TOKEN`，或第一次启动时自动生成的 `data\admin_token` 文件里的内容。令牌也用于脚本（`Authorization: Bearer …`）。
-- `python -m tools.violet_admin status` 查看是否设了密码和令牌状态；`logout-all` 让所有登录失效；忘记密码时直接再 `set-password`（需要能登录这台电脑，这就是恢复方式）。
-- 管理令牌（Phase 9.0.1）：`token-disable` 禁用（登录和 Bearer 都不再接受，需要先设密码）；`token-rotate` 换一个新令牌（只显示一次，旧令牌立即失效，只保存哈希，也能替换掉 `VIOLET_ADMIN_TOKEN`）；`token-enable` 回到 `VIOLET_ADMIN_TOKEN` / `admin_token` 文件。都不需要重启，并且会让所有登录失效。`admin.json` 损坏时令牌和密码都不能登录，用 `set-password` 和 `token-enable` 修复。
-- 登录：同一个地址 15 分钟内输错 5 次，锁定 15 分钟（锁定期间正确的密码也不放行）；所有地址合计 50 次时全部暂停。无操作 120 分钟（`VIOLET_DASHBOARD_IDLE_MINUTES`）或登录满 12 小时（`VIOLET_DASHBOARD_SESSION_HOURS`）要重新登录。改密码、点“退出所有登录”会让所有会话失效。
+- Without a password you can log in with the admin token: the `VIOLET_ADMIN_TOKEN` environment variable, or the content of the `data\admin_token` file generated on first start. The token is also used by scripts (`Authorization: Bearer …`).
+- `python -m tools.violet_admin status` shows whether a password is set and the token state; `logout-all` ends all logins; if you forget the password just `set-password` again (you need to be able to log in to this computer; that is the recovery method).
+- Admin token (Phase 9.0.1): `token-disable` disables it (neither login nor Bearer accepts it; a password must be set first); `token-rotate` switches to a new token (shown only once, the old one stops working immediately, only a hash is stored, and it can also replace `VIOLET_ADMIN_TOKEN`); `token-enable` goes back to `VIOLET_ADMIN_TOKEN` / the `admin_token` file. None needs a restart, and all of them end all logins. When `admin.json` is corrupt, neither token nor password can log in; repair with `set-password` and `token-enable`.
+- Login: 5 wrong attempts from one address within 15 minutes lock it for 15 minutes (during the lock even the correct password is refused); 50 in total across all addresses pause everything. After 120 minutes without activity (`VIOLET_DASHBOARD_IDLE_MINUTES`) or 12 hours after login (`VIOLET_DASHBOARD_SESSION_HOURS`) you log in again. Changing the password or clicking "log out everywhere" ends all sessions.
 
-**远程访问**（Phase 9.0.1 起）：后台**只监听本机地址**，`VIOLET_DASHBOARD_HOST` 填别的地址也会退回 127.0.0.1（日志里有错误说明）；9.0 的 `VIOLET_DASHBOARD_PUBLIC` 已经去掉，因为任何开关都不能证明前面真的有 HTTPS。两种方式：
+**Remote access** (since Phase 9.0.1): the panel **listens only on the local address**; any other address in `VIOLET_DASHBOARD_HOST` falls back to 127.0.0.1 (with an error explained in the log); 9.0's `VIOLET_DASHBOARD_PUBLIC` was removed, because no switch can prove there really is HTTPS in front. Two ways:
 
-1. SSH 隧道（推荐，个人使用）：在自己电脑上 `ssh -L 7100:127.0.0.1:7100 <服务器>`，然后打开 `http://127.0.0.1:7100/control`。
-2. 同一台服务器上的 HTTPS 反向代理（nginx / Caddy）：代理监听 443，转发到 `http://127.0.0.1:7100`，并带上 `X-Forwarded-For` 和 `X-Forwarded-Proto`；Violet 设 `VIOLET_DASHBOARD_TRUST_PROXY=1` 和 `VIOLET_DASHBOARD_COOKIE_SECURE=1`。这时不是 HTTPS 的请求一律 403（在读取密码之前），HTTPS 响应带 HSTS；转发头只在连接来自本机时才被采用，远程客户端伪造不了地址和协议。
+1. SSH tunnel (recommended, personal use): on your own computer `ssh -L 7100:127.0.0.1:7100 <server>`, then open `http://127.0.0.1:7100/control`.
+2. An HTTPS reverse proxy on the same server (nginx / Caddy): the proxy listens on 443 and forwards to `http://127.0.0.1:7100` with `X-Forwarded-For` and `X-Forwarded-Proto`; Violet sets `VIOLET_DASHBOARD_TRUST_PROXY=1` and `VIOLET_DASHBOARD_COOKIE_SECURE=1`. Then every non-HTTPS request gets 403 (before the password is read), and HTTPS responses carry HSTS; forwarding headers are used only when the connection comes from the machine itself, so remote clients cannot fake the address and protocol.
 
-本阶段没有部署，也没有配置任何代理。部署前请逐项核对下面的清单。
+Nothing was deployed and no proxy was configured in this phase. Before deploying, go through the checklist below item by item.
 
-**以后部署到服务器前的安全检查清单**（本阶段只写清单，不部署）
+**Security checklist before deploying to a server later** (this phase only writes the checklist and does not deploy)
 
-| # | 检查 | 怎么确认 |
+| # | Check | How to confirm |
 |---|---|---|
-| 1 | 后台只监听本机 | `ss -ltnp \| grep 7100` 只有 `127.0.0.1:7100`；启动日志没有 “is not a loopback address” |
-| 2 | 设了管理员密码，并禁用或更换了令牌 | `python -m tools.violet_admin status`：密码“已设置”；令牌“已禁用”或“已更换”（脚本需要 Bearer 时用更换后的令牌） |
-| 3 | 远程只走 SSH 隧道或 HTTPS 代理 | 防火墙不放行 7100；代理的证书有效；`curl -I http://域名/control` 被跳到 https 或拒绝 |
-| 4 | 代理配置正确 | 代理和 Violet 在同一台机器；转发 `X-Forwarded-For`、`X-Forwarded-Proto`；Violet 设 `VIOLET_DASHBOARD_TRUST_PROXY=1`、`VIOLET_DASHBOARD_COOKIE_SECURE=1`；从外网用 http 访问得到 403，用 https 登录后 Cookie 带 `Secure`，响应有 `Strict-Transport-Security` |
-| 5 | 代理自身的日志 | 代理的访问日志会记录完整 URL（含聊天搜索词）：关闭 `/api/control/` 的访问日志或去掉查询串 |
-| 6 | 代理层限速 | 对 `/auth/login` 再加一层限速（Violet 的锁定在内存里，重启会清零） |
-| 7 | 文件权限 | `data/control/`、`data/admin_token`、`.env` 只有运行 Violet 的用户可读（`chmod 600`）；它们和数据库都不进 Git，也不放进备份以外的地方 |
-| 8 | 不用 root 运行 | Violet 用单独的系统用户运行 |
-| 9 | 会话时长 | 按需要调 `VIOLET_DASHBOARD_IDLE_MINUTES` / `VIOLET_DASHBOARD_SESSION_HOURS`；离开前点“退出所有登录” |
-| 10 | 部署后验收 | 按 testing.md §35 的项目在服务器上（用测试数据目录）再跑一遍：无认证访问、登录锁定、HTTPS 拒绝、设置保存与重启 |
-| 11 | 回退 | 删除 `data/control/settings.json`、`secrets.json` 就回到 `.env`；`admin.json` 出问题时 `set-password` + `token-enable` |
+| 1 | The panel listens only locally | `ss -ltnp \| grep 7100` shows only `127.0.0.1:7100`; the startup log has no "is not a loopback address" |
+| 2 | An admin password is set, and the token disabled or rotated | `python -m tools.violet_admin status`: password "set"; token "disabled" or "rotated" (use the rotated token when scripts need Bearer) |
+| 3 | Remote access only through an SSH tunnel or HTTPS proxy | The firewall does not open 7100; the proxy's certificate is valid; `curl -I http://domain/control` is redirected to https or refused |
+| 4 | The proxy is configured correctly | Proxy and Violet on the same machine; `X-Forwarded-For` and `X-Forwarded-Proto` forwarded; Violet sets `VIOLET_DASHBOARD_TRUST_PROXY=1` and `VIOLET_DASHBOARD_COOKIE_SECURE=1`; from outside, http gets 403, and after logging in over https the cookie has `Secure` and responses have `Strict-Transport-Security` |
+| 5 | The proxy's own logs | The proxy's access log records full URLs (including chat search terms): turn off the access log for `/api/control/` or strip the query string |
+| 6 | Rate limiting at the proxy | Add another rate limit on `/auth/login` (Violet's lockout lives in memory and is reset on restart) |
+| 7 | File permissions | `data/control/`, `data/admin_token` and `.env` readable only by the user running Violet (`chmod 600`); they and the database never go into Git, nor anywhere other than backups |
+| 8 | Not run as root | Violet runs as its own system user |
+| 9 | Session length | Adjust `VIOLET_DASHBOARD_IDLE_MINUTES` / `VIOLET_DASHBOARD_SESSION_HOURS` as needed; click "log out everywhere" before leaving |
+| 10 | Acceptance after deploying | Run the items of testing.md §35 again on the server (with a test data directory): unauthenticated access, login lockout, HTTPS refusal, saving settings and restarting |
+| 11 | Rollback | Deleting `data/control/settings.json` and `secrets.json` goes back to `.env`; when `admin.json` has problems, `set-password` + `token-enable` |
 
-**页面**
+**Pages**
 
-| 页签 | 内容 |
+| Tab | Contents |
 |---|---|
-| 概览 | 微信登录、收消息 / 回复 / 记忆线程、排队、主动联系状态和今日次数、生活引擎、各 Agent 的模型、辅助模型 24 小时调用、最近的失败（只有位置、时间和错误类型，不显示内容）。Intent / Chat / Memory / Proactive 的单次调用不写数据库，所以没有按次的统计 |
-| 聊天记录 | 按日期、发送方、关键词查询，往前翻页；标出对方、Violet 回复、Violet 主动、提醒、系统（依据发件箱记录）。**只能看，不能改或删**。可以导出一段日期的 JSON（文件里有聊天全文，请妥善保存） |
-| 记忆 | 事件记忆和核心记忆：搜索、按状态筛选、分页；显示来源、更新时间、修改次数；纠正（原文写进修改记录）；删除要确认（事件记忆是标记为已删除，行保留；核心记忆先把原文写进修改记录再删除）；查看修改记录 |
-| 设置 | 只有代码真正读取的设置（见下表），每项标出立即生效还是重启后生效、当前值来自后台、.env 还是默认值。**显示的是 Violet 正在使用的值**（9.0.1）：模型和温度取自运行中的 Agent，主动联系取自调度器合并后的配置，提示词显示正在用哪个版本。保存前整体检查，有一项不合格就一项也不改；写文件失败时什么都不变。“不再覆盖”把这一项交回 .env |
-| 修改记录 | 每次保存一条：谁、原因、改了什么（API Key 只有指纹）。可以回滚到某次之后的状态（不动 API Key）；API Key 可以恢复上一个值 |
-| 账号安全 | 修改密码（需要当前密码或令牌）、退出所有登录、退出 |
+| Overview | WeChat login, receiving / replying / memory threads, queue, reaching-out state and today's count, the life engine, each agent's model, helper models' calls in 24 hours, recent failures (only place, time and error type, no content). Single calls of Intent / Chat / Memory / Proactive are not written to the database, so there are no per-call statistics |
+| Chat history | Query by date, sender and keyword, page back; marks the user, Violet's replies, Violet reaching out, reminders and system (based on outbox records). **View only, no editing or deleting**. A date range can be exported as JSON (the file contains the full chat, so keep it safe) |
+| Memory | Event memories and core memories: search, filter by state, paging; shows source, update time and number of changes; correct (the original text goes into the change history); deleting needs confirmation (event memories are marked deleted and the row kept; core memories have their original text written to the change history first, then are deleted); view change history |
+| Settings | Only settings the code really reads (see the table below), each marked as immediate or after restart, and whether the current value comes from the panel, .env or the default. **It shows the values Violet is using** (9.0.1): models and temperatures from the running agents, reaching out from the scheduler's merged configuration, and which prompt version is in use. Everything is checked before saving, and if one item is invalid nothing is changed; if writing the file fails, nothing changes. "Stop overriding" hands that item back to .env |
+| Change history | One entry per save: who, why, what changed (API keys only as fingerprints). You can roll back to the state after a given entry (API keys untouched); an API key can be restored to its previous value |
+| Account security | Change the password (needs the current password or token), log out everywhere, log out |
 
-**可以在后台改的设置**（其余环境变量不显示、不能改）
+**Settings that can be changed in the panel** (other environment variables are not shown and cannot be changed)
 
-| 分组 | 设置 | 生效 |
+| Group | Settings | Takes effect |
 |---|---|---|
-| 接口 | `LLM_API_URL`；`LLM_API_KEY`（只能替换）；请求超时、连接超时、最多尝试次数、重试间隔、总时限 | 立即（保存后重载 Agent） |
-| 模型与 Agent | Intent / Chat / Memory / Proactive / Performer 各自的模型、备用模型、温度（代码里只有温度一个采样参数） | 立即 |
-| 提示词版本 | Chat、主动联系决策：留空用 .env 里的提示词，或选 `persona/*_prompt_versions/` 里的版本 | 立即 |
-| 消息发送 | 等对方说完（`DEBOUNCE_NORMAL`）、像没说完时多等（`DEBOUNCE_EXTRA`）、打字间隔上下限；模拟打字开关 | 立即（9.0.1 起模拟打字开关也立即生效） |
-| 主动联系 | 开关、静默时段、每天最多几次、对方说话后多久、两次之间多久、连续几次没回就等 | 立即（调度每次都重新读取） |
-| 生活引擎 | `VIOLET_LIFE_ENGINE` | 立即（9.0.1 起：关闭在下一次检查时生效，打开马上启动）；临时暂停 / 恢复在同一页 |
-| 聊天行为 | 关系阶段描述、聊天历史保留几轮、回复习惯提示 | 立即 |
+| API | `LLM_API_URL`; `LLM_API_KEY` (replace only); request timeout, connect timeout, maximum attempts, retry interval, total time limit | Immediately (agents reload after saving) |
+| Models and agents | Model, fallback model and temperature of each of Intent / Chat / Memory / Proactive / Performer (temperature is the only sampling parameter in the code) | Immediately |
+| Prompt versions | Chat, proactive decision: empty uses the prompt in .env, or choose a version in `persona/*_prompt_versions/` | Immediately |
+| Message sending | Wait for the user to finish (`DEBOUNCE_NORMAL`), wait longer when it looks unfinished (`DEBOUNCE_EXTRA`), typing interval bounds; simulated typing switch | Immediately (since 9.0.1 the simulated typing switch too) |
+| Reaching out | On/off, quiet hours, maximum per day, how long after the user spoke, how long between two, how many unanswered before waiting | Immediately (the scheduler re-reads every time) |
+| Life engine | `VIOLET_LIFE_ENGINE` | Immediately (since 9.0.1: turning off takes effect at the next check, turning on starts right away); temporary pause / resume on the same page |
+| Chat behaviour | Relationship stage description, how many rounds of chat history to keep, reply habit note | Immediately |
 
-回复的条数没有上限，后台也不提供这样的设置。
+There is no limit on the number of reply messages, and the panel offers no such setting.
 
-**保存在哪里**：`data\control\`（和 `data\` 一起不进 Git）：`settings.json`（普通设置）、`secrets.json`（API Key 和最多 3 个旧值）、`history.jsonl`（只追加）、`admin.json`（密码哈希和会话版本）、`session_secret`。启动时和每次重载时，先读 `.env`，再把这些设置放在上面；删除 `data\control\settings.json` 和 `secrets.json` 就完全回到 `.env`。
+**Where it is stored**: `data\control\` (not in Git, like `data\`): `settings.json` (ordinary settings), `secrets.json` (API key and up to 3 old values), `history.jsonl` (append-only), `admin.json` (password hash and session version), `session_secret`. At startup and on every reload, `.env` is read first, then these settings are layered on top; deleting `data\control\settings.json` and `secrets.json` goes fully back to `.env`.
 
-## 22. Phase 9.1 长期记忆可靠性
+## 22. Phase 9.1 long-term memory reliability
 
-设计见 decisions.md T30，问题与证据见 bugs-and-risks.md M1–M9，测试见 testing.md §36。
+The design is in decisions.md T30, problems and evidence in bugs-and-risks.md M1–M9, tests in testing.md §36.
 
-**新的设置**（都有默认值，`env_example` 里有说明）：`VIOLET_MEMORY_KEEP_CLEAR_WEIGHT`（3）、`VIOLET_MEMORY_SEARCH_WINDOW`（5000）、`VIOLET_MEMORY_WORD_RECALL`（1）、`VIOLET_MEMORY_WORD_RECALL_LIMIT`（3）、`VIOLET_MEMORY_NOT_FOUND_NOTE`（1）。把后三个设为 0 就回到 9.0 的召回行为。
+**New settings** (all with defaults, explained in `env_example`): `VIOLET_MEMORY_KEEP_CLEAR_WEIGHT` (3), `VIOLET_MEMORY_SEARCH_WINDOW` (5000), `VIOLET_MEMORY_WORD_RECALL` (1), `VIOLET_MEMORY_WORD_RECALL_LIMIT` (3), `VIOLET_MEMORY_NOT_FOUND_NOTE` (1). Setting the last three to 0 goes back to 9.0's recall behaviour.
 
-**测试工具**：这 5 项加进了 harness 的 `ALLOWED_KEYS`，测试配置文件（`--config`）可以把它们关掉，和 9.0 的行为对比。`chat_ab` 的子进程固定 `VIOLET_MEMORY_NOT_FOUND_NOTE=0`：它的真实场景是 9.1 之前录下的上下文，重建必须和录制一致（结果里记为 `memory_not_found_note`）；chat_ab 直接调用 ContextEngine，不经过补充召回。
+**Test tools**: these 5 were added to the harness's `ALLOWED_KEYS`, so a test config file (`--config`) can turn them off to compare with 9.0's behaviour. `chat_ab`'s subprocesses fix `VIOLET_MEMORY_NOT_FOUND_NOTE=0`: its real scenarios are contexts recorded before 9.1, and the rebuild must match the recording (recorded as `memory_not_found_note` in the results); chat_ab calls ContextEngine directly, without the extra recall.
 
-**旧衰减删掉的记忆**：9.1 之前，每晚衰减会把记忆改成 deleted。部署 9.1 后不会再发生，但已经被删的不会自动回来。用户 / 后台删除一定有 retract 修改记录，所以“deleted 而没有 retract 记录”的行不是用户删的（也可能是 2.0 之前的旧版本删的，区分不了）。先在**备份副本**上只列出：
+**Memories deleted by the old decay**: before 9.1, the nightly decay changed memories to deleted. After deploying 9.1 this no longer happens, but ones already deleted do not come back by themselves. Deletion by the user / panel always has a retract change record, so rows that are "deleted without a retract record" were not deleted by the user (they may also have been deleted by an old pre-2.0 version; the two cannot be told apart). First list them on a **backup copy**:
 
 ```powershell
-& $py -X utf8 -m tools.memory_restore_decayed --db <备份副本\violet.db>
+& $py -X utf8 -m tools.memory_restore_decayed --db <backup copy\violet.db>
 ```
 
-确认要恢复后，停掉 Violet，在正式库上加 `--apply`（可以用 `--ids 3,8` 只恢复其中几条）。恢复后的状态是 forgotten（可检索，标“印象很模糊”），每条写一条 restore 修改记录，内容不变。
+Once you have decided to restore, stop Violet and add `--apply` on the real database (`--ids 3,8` restores only some). Restored memories are forgotten (retrievable, marked "only a vague impression"), each gets a restore change record, and the content is unchanged.
 
-**free_chat 的记忆衰减**：新会话默认 `--memory-decay on`，`/advance` 每经过一个凌晨 3 点就运行一次 `decay_event_memories()`（和 main.py 一样），结果记在 events.jsonl 的 `memory_decay_runs`；在这次推进结束时运行。旧会话没有这一项，按 off 处理，不会被改变。
+**Memory decay in free_chat**: new sessions default to `--memory-decay on`; `/advance` runs `decay_event_memories()` once for every 3 a.m. it passes (as main.py does), with results recorded in `memory_decay_runs` in events.jsonl; it runs at the end of that advance. Old sessions do not have this item, are treated as off, and are not changed.
 
-**一轮小规模真实记忆验证（设计；需要用户授权后由用户运行，本阶段没有运行）**
+**A small real memory verification round (design; to be run by the user after authorising it; not run in this phase)**
 
-目的：不是让模型复述资料，而是看 Violet 在自然聊天里、经过几天到几周以后，能不能自然地想起来、不记错、不乱提。用 free_chat 的真实模式，新建会话，全程虚构内容（不要用朋友的真实聊天）：
+Purpose: not to make the model recite material, but to see whether Violet, in natural chat and after days to weeks, can recall things naturally, without getting them wrong or bringing them up out of place. Use free_chat's real mode with a new session, with fictional content throughout (do not use a friend's real chats):
 
 ```powershell
 $env:VIOLET_TEST_ALLOW_REAL_API = "1"
-& $py -X utf8 -m tools.free_chat chat --session mem91-real-1 --real --api-url <测试接口> --model <模型> `
+& $py -X utf8 -m tools.free_chat chat --session mem91-real-1 --real --api-url <test API> --model <model> `
     --start 2026-11-02T20:00:00+08:00 --memory-decay on --max-calls 120 --max-tokens 400000
 ```
 
-| 步 | 输入（自然地说，可以自己改写） | 之后 | 观察（用 `/state` 和 `/show` 核对，回复用 `/mark` 标记） |
+| Step | Input (say it naturally; rewording is fine) | Then | Observe (check with `/state` and `/show`, mark replies with `/mark`) |
 |---|---|---|---|
-| 1 | 闲聊几句后：“我家柯基叫豆豆，今天又把拖鞋咬了” | — | `/state`：有一条宠物记忆，来源是这条消息 |
-| 2 | “下周三下午三点我有个实习面试，有点慌” | — | 一条 planned 事件，时间是那个周三 15:00 |
-| 3 | “等我面试完，我们一起云看《海上钢琴师》好不好” | `/advance 3d` | 约定是另一条 planned（没有并进面试） |
-| 4 | “今天食堂的麻辣烫好难吃” | — | Violet 不硬提面试、电影或豆豆（`/show` 里没有相关记忆一节） |
-| 5 | 推进到周三晚上：`/advance` 到 20:30，然后“面试结束啦，感觉还行” | — | 回复接得上面试（不问“什么面试”）；后台把它更新为 done |
-| 6 | “之前说好的那个电影，今晚看吧？” | — | 记得是约好还没看的电影，不说“上次一起看的” |
-| 7 | “看完了，结尾哭死” | `/advance 10d` | 约定变为 done |
-| 8 | “豆豆最近学会握手了” | — | 自然接上，知道豆豆是柯基；不重复问是什么狗 |
-| 9 | “不对不对，它叫豆包，不叫豆豆，你记错啦”，过一轮再说“豆包今天好乖” | — | `/state`：记忆改成豆包，修改记录来源 user_confirmed（evidence 是原话）；之后用“豆包”，随口一句不会把名字改回去（后台纠正的路径已由离线测试覆盖，free_chat 没有后台） |
-| 10 | “还记得我上次说的那家拉面店吗”（从来没说过） | `/advance 20d` | 不编店名，承认记不清或请对方说说 |
-| 11 | 三周后：“还记得我们一起看的那部电影吗” | — | 记得片名、记得已经看过（衰减后仍在，标签不是“印象很模糊”） |
-| 12 | “宝贝晚安” | — | 不突然翻出之前的亲密话题或面试 |
+| 1 | After some small talk: "My corgi is called Doudou, and today he chewed up my slippers again" | — | `/state`: one pet memory, sourced from this message |
+| 2 | "I have an internship interview next Wednesday at 3 p.m., kind of nervous" | — | One planned event, at 15:00 that Wednesday |
+| 3 | "After my interview, shall we watch The Legend of 1900 together online?" | `/advance 3d` | The promise is a separate planned item (not merged into the interview) |
+| 4 | "The spicy hotpot at the canteen today was awful" | — | Violet does not force in the interview, film or Doudou (no related memory section in `/show`) |
+| 5 | Advance to Wednesday evening: `/advance` to 20:30, then "Interview's over, I think it went okay" | — | The reply follows on from the interview (doesn't ask "what interview"); in the background it is updated to done |
+| 6 | "That film we agreed on, shall we watch it tonight?" | — | Remembers it is the film agreed on and not watched yet, doesn't say "the one we watched last time" |
+| 7 | "Finished it, the ending made me cry so hard" | `/advance 10d` | The promise becomes done |
+| 8 | "Doudou learned to shake hands recently" | — | Picks up naturally, knows Doudou is a corgi; doesn't ask again what kind of dog |
+| 9 | "No no, his name is Doubao, not Doudou, you got it wrong", and one round later "Doubao was so good today" | — | `/state`: the memory changed to Doubao, the change record's source is user_confirmed (evidence is the original words); from then on she uses "Doubao", and a passing remark does not change the name back (the panel correction path is covered by offline tests; free_chat has no panel) |
+| 10 | "Remember that ramen place I told you about last time?" (never mentioned) | `/advance 20d` | Doesn't invent a name, admits not remembering or asks the user to tell her |
+| 11 | Three weeks later: "Remember that film we watched together?" | — | Remembers the title and that it was watched (still there after decay, not labelled "only a vague impression") |
+| 12 | "Good night, baby" | — | Doesn't suddenly dig up earlier intimate topics or the interview |
 
-判定：每步记为通过 / 失败 / 无法验证，并写出依据（回复原文 + `/show` 里 Chat 实际收到的记忆行）。重点是第 5、6、8、10、11 步：想起来的内容对不对、状态（计划中 / 已结束）对不对、有没有把没发生的说成发生过、有没有反复问已经说过的事。预算：约 12 轮用户消息，每轮 3–5 次调用（Intent、Chat、可能的改写、Memory），预计 40–60 次调用。
+Verdict: each step is recorded as pass / fail / cannot verify, with the basis written out (the reply text + the memory lines Chat actually received in `/show`). Steps 5, 6, 8, 10 and 11 matter most: whether what she recalled is right, whether the state (planned / finished) is right, whether something that did not happen is said to have happened, whether she keeps asking about things already told. Budget: about 12 user messages, 3–5 calls each (Intent, Chat, possible rewrite, Memory), about 40–60 calls expected.
 
-**实际运行（2026-10-23，mem91-real-1）的结果与 Phase 9.1.1 的修改**：结论见 docs/handoff/log/2026-10-23-p911-claude.md，缺陷见 bugs-and-risks M10–M14。实际成本约 27000 token / 轮（MemoryAgent 每轮都运行，2–3 步，每步约 8000），比上表的估计高得多。整个会话的离线回放：tests/test_mem91_replay_p911.py。
+**Results of the actual run (2026-10-23, mem91-real-1) and the Phase 9.1.1 changes**: conclusions in docs/handoff/log/2026-10-23-p911-claude.md, defects in bugs-and-risks M10–M14. The actual cost was about 27000 tokens per round (MemoryAgent runs every round, 2–3 steps, about 8000 each), much higher than estimated in the table above. Offline replay of the whole session: tests/test_mem91_replay_p911.py.
 
-**删除与遗忘（Phase 9.1.1）**：后台“删除”只把记忆标为已删除，聊天记录不动——最近的聊天里如果还有原话，Violet 仍能看到。“遗忘”另外把这条记忆来源那一轮里用户说这件事的分句、和 Violet 同一轮里相关的回复，在聊天记录和那一轮的整理任务里替换掉，记忆本身连同修改记录一起删除，不能恢复（`POST /api/control/memories/event/<id>/forget`，需要 `confirm: true`）。聊天里用户明确说“忘掉 / 别记 / 删掉”时，MemoryAgent 也可以遗忘（引用原话）。真实测试里离线删除用的 local/p91/real/delete_memory.py 走的是“删除”。
+**Delete vs forget (Phase 9.1.1)**: "delete" in the panel only marks the memory as deleted and leaves the chat history alone — if the original words are still in the recent chat, Violet can still see them. "Forget" additionally replaces, in the chat history and in that round's processing job, the clauses where the user said this in the round the memory came from and Violet's related reply in the same round; the memory itself is deleted together with its change history and cannot be restored (`POST /api/control/memories/event/<id>/forget`, needs `confirm: true`). When the user explicitly says "forget it / don't remember / delete it" in the chat, MemoryAgent can forget too (quoting the original words). The offline deletion in the real test, local/p91/real/delete_memory.py, used "delete".
 
-**Phase 9.1.2**：聊天里明确的遗忘请求改为在回复**之前**处理：用户的话只对上一条记忆时遗忘它，否则什么都不删，Violet 的回复按真实结果说（“已经忘掉了”或“没确定是哪件，没有删”）；这一轮不再交给 Performer，同一轮后台整理不会再补删。纠正一个事实后，同一事实在别的记忆里的旧说法会一并改正（确定是同一事实时），不确定的标为“待确认”（后台记忆列表里能看到，召回时 Violet 也会看到“其中“年糕”已被用户纠正为“汤圆””）。检查已有数据库里的旧冲突（只读，不修改；请用副本）：
+**Phase 9.1.2**: an explicit forget request in the chat is now handled **before** the reply: if the user's words match exactly one memory it is forgotten, otherwise nothing is deleted, and Violet's reply follows the real result ("forgotten" or "not sure which one, nothing deleted"); this round is no longer handed to Performer, and the same round's background processing does not delete anything more afterwards. After a fact is corrected, the old wording of the same fact in other memories is corrected too (when it is certain to be the same fact); uncertain ones are marked "to be confirmed" (visible in the panel's memory list, and in recall Violet also sees "in it, 'Niangao' was corrected by the user to 'Tangyuan'"). Check old conflicts in an existing database (read-only, no changes; use a copy):
 
 ```powershell
-& $py -X utf8 -m tools.memory_conflicts --db <数据库副本>         # 加 --json 输出 JSON；有冲突时退出码 1
+& $py -X utf8 -m tools.memory_conflicts --db <database copy>         # --json outputs JSON; exit code 1 when there are conflicts
 ```
 
-列出的三类：同一 key 两条有效档案（9.1.1 之前的纠正留下的）、已纠正的旧值还在某条记忆 / 核心记忆 / 档案里、待确认冲突。处理在后台用“纠正 / 停用 / 删除”。真实会话 p911-real-1 的离线回放：tests/test_p911_replay_p912.py。
+Three kinds are listed: two valid profile entries with the same key (left by corrections before 9.1.1), an old corrected value still present in some memory / core memory / profile, and conflicts to be confirmed. Handle them in the panel with "correct / disable / delete". Offline replay of the real session p911-real-1: tests/test_p911_replay_p912.py.
 
-## 23. Phase 9.2 统一工具管理与 MCP
+## 23. Phase 9.2 unified tool management and MCP
 
-设计见 decisions.md T34，问题见 bugs-and-risks.md P92-1–P92-6，测试见 testing.md §39，接口约定见 eve-mcp-contract.md。
+The design is in decisions.md T34, problems in bugs-and-risks.md P92-1–P92-6, tests in testing.md §39, the interface contract in eve-mcp-contract.md.
 
-**一轮里工具怎么用**：回复前先列出现在真的可用的外部工具（连上了、启用了、在白名单里）→ IntentAgent 看这份目录，需要时在 JSON 里加 `tool_query` → 只读查询留在 ChatAgent 这一轮：Chat 只拿到计划里的工具，第一次调用必须先用工具（`VIOLET_TOOL_CHOICE_REQUIRED=1`），按结果用平常的语气回答 → 执行类（写入）工具才交给 PerformerAgent，而且只有它真有可用工具时才建任务 → 工具没有 / 停用 / 连不上 / 没权限时不建任务，Chat 知道是哪一种，照实说查不到，不编造。闲聊时 Chat 不带外部工具（服务器设为 `"offer": "always"` 的除外，内置网页工具就是 always）。
+**How tools are used in a round**: before replying, the external tools really available now are listed (connected, enabled, allowlisted) → IntentAgent looks at this catalogue and adds `tool_query` to its JSON when needed → read-only queries stay in the ChatAgent round: Chat gets only the planned tools, and its first call must use a tool (`VIOLET_TOOL_CHOICE_REQUIRED=1`), then answers from the result in its usual tone → only execution (write) tools go to PerformerAgent, and a task is created only when it really has an available tool → when a tool is missing / disabled / unreachable / not permitted, no task is created; Chat knows which case it is and says honestly that it could not find out, without inventing anything. In small talk Chat carries no external tools (except servers set to `"offer": "always"`; the built-in web tool is always).
 
-**配置**：`MCP_SERVERS` 里的每一项可以是 `streamable_http` / `sse`（地址；非本机必须 https）或 `stdio`（本地子进程，`"command": ["python", "-m", "模块"]`，不占端口）。每个服务器的工具必须在 `mcp_tool_policy.json` 或它自己的 `"tools"` 里标 read / write / high_risk，没标的隐藏。管理后台的“工具”页能看连接状态和工具、停用服务器 / 单个工具、改可用的 Agent 和超时、替换凭据（只写，不显示原值）；“检查连接”会立刻重新连接。地址、命令、权限级别只能改 `.env` / 白名单文件。
+**Configuration**: each entry in `MCP_SERVERS` can be `streamable_http` / `sse` (an address; non-local must be https) or `stdio` (a local subprocess, `"command": ["python", "-m", "module"]`, no port used). Each server's tools must be marked read / write / high_risk in `mcp_tool_policy.json` or its own `"tools"`; unmarked ones are hidden. The panel's Tools page shows connection state and tools, disables servers / single tools, changes which agents may use them and the timeout, and replaces credentials (write-only, the old value is never shown); "check connection" reconnects immediately. Addresses, commands and permission levels can only be changed in `.env` / the allowlist file.
 
-**虚构工具试用（不联网、不调用真实模型）**：
+**Trying fictional tools (no network, no real model calls)**:
 
 ```powershell
-# MCP_SERVERS 里加（测试配置或本机 .env，不要用在生产）：
+# Add to MCP_SERVERS (test config or local .env, never in production):
 # {"name":"campus","transport":"stdio","command":["D:\\unity\\violet\\.venv\\Scripts\\python.exe","-m","tools.fake_mcp_server"],
 #  "agents":["chat"],"tools":{"get_course_schedule":"read","get_weather":"read","search_web":"read"}}
-# 故障演练：加 "env": {"FAKE_MCP_MODE": "error"}（工具报错）/ "crash"（调用中断开）/ "slow"（超时）
+# Fault drills: add "env": {"FAKE_MCP_MODE": "error"} (tool errors) / "crash" (disconnects mid-call) / "slow" (timeouts)
 ```
 
-**小规模真实验证**：free_chat 新建会话时加 `--fake-tools on`，只接上面的虚构 campus 服务器（stdio 子进程，不联网；其他 MCP 仍然一律拒绝；之后不能换）。不用 `/advance` / `/check` 就不会有主动消息。会话里：
+**Small real verification**: add `--fake-tools on` when creating a free_chat session, which connects only the fictional campus server above (stdio subprocess, no network; every other MCP is still refused; cannot change later). Without `/advance` / `/check` there are no proactive messages. In the session:
 
-- 每轮回复后自动列出这一轮的工具步骤（`· 工具判断：route / tool_query → 计划`、`· 模型调用 ChatAgent：提供的外部工具、tool_choice → tool_calls(参数)`、`· MCP 工具(参数) → 成功 / 失败 status`）；`/show` 看全部（含工具目录、每次模型调用）。都存在 events.jsonl 的 `tool_trace` 里（已去掉密钥）。
-- `/tool off get_weather` / `/tool on get_weather`：停用 / 启用一个虚构工具（和后台“工具”页同一份设置文件，下一轮生效）。
-- `/fake-mode error`（或 crash / slow）：虚构服务器之后的调用都失败；`/fake-mode normal` 恢复。切换记录在 session.json 的 `tool_switches`。
+- After each reply, this round's tool steps are listed automatically (`· tool decision: route / tool_query → plan`, `· model call ChatAgent: external tools offered, tool_choice → tool_calls(arguments)`, `· MCP tool(arguments) → success / failure status`); `/show` shows everything (including the tool catalogue and every model call). All of it is stored in `tool_trace` in events.jsonl (keys removed).
+- `/tool off get_weather` / `/tool on get_weather`: disables / enables a fictional tool (the same settings file as the panel's Tools page; takes effect next round).
+- `/fake-mode error` (or crash / slow): later calls to the fictional server all fail; `/fake-mode normal` restores it. Switches are recorded in `tool_switches` in session.json.
 
 ```powershell
 $env:VIOLET_TEST_ALLOW_REAL_API = "1"
-& $py -X utf8 -m tools.free_chat chat --session p92-tools-1 --real --api-url <测试接口> --model <模型> --fake-tools on `
+& $py -X utf8 -m tools.free_chat chat --session p92-tools-1 --real --api-url <test API> --model <model> --fake-tools on `
     --start 2026-11-02T19:30:00+08:00 --max-calls 60 --max-tokens 250000 --session-max-calls 60 --session-max-tokens 250000
 ```
 
-模拟时间 2026-11-02 是周一（虚构课表：周二 10:00 数据结构；周三 08:00 线性代数、15:50 体育；虚构天气永远是“多云转小雨，14–21℃，降雨 70%”；搜索结果是没有具体内容的占位条目）。
+The simulated date 2026-11-02 is a Monday (fictional timetable: Tuesday 10:00 data structures; Wednesday 08:00 linear algebra, 15:50 PE; the fictional weather is always "cloudy turning to light rain, 14–21°C, 70% rain"; search results are placeholder entries with no real content).
 
-| 轮 | 之前的命令 | 输入 | 应该看到 |
+| Round | Command before | Input | Should see |
 |---|---|---|---|
-| 1 | — | 刚吃完晚饭，有点撑，躺着不想动 | 计划 none；Chat 请求里没有外部工具；没有 MCP 调用 |
-| 2 | — | 对了，我明天上午有课吗？忘了 | tool_query 选 get_course_schedule；Chat 第一次调用 tool_choice=required；参数 day=周二；回复“10 点数据结构” |
-| 3 | — | 明天杭州天气怎么样，要带伞吗 | get_weather(city=杭州)；回复按“多云转小雨、70%”建议带伞 |
-| 4 | — | 最近有部电影叫《星河旅人》，网上评价怎么样？ | search_web；结果没有实际评价 → 不编造评价，照实说没查到什么具体的 |
-| 5 | — | 帮我订一张周五去上海的高铁票吧 | 计划 blocked（not_configured / no_executor）或 none；没有任务；没有工具调用；照实说做不了 |
-| 6 | `/tool off get_weather` | 那周五杭州天气呢？ | 目录里 get_weather 停用；没有对它的调用；回复不编造天气 |
-| 7 | `/fake-mode error` | 我周三都有什么课？ | MCP 失败 status=tool_error；不重复调用、不建任务；回复照实说暂时查不到、没有技术信息 |
-| 8 | `/fake-mode normal`、`/tool on get_weather` | 周三下午要是没课，我想去西湖边走走，你帮我看看那天下午有没有课、天气合不合适 | 两个工具都提供、都调用（课表 day=周三，天气 city=杭州）；回复：下午 15:50 有体育课、可能下雨 |
-| 9 | — | 好啦不聊课了，今天有点累，想早点睡 | 计划 none、没有外部工具；语气和平常一样 |
+| 1 | — | Just had dinner, a bit too full, lying down and don't want to move | Plan none; no external tools in Chat's request; no MCP calls |
+| 2 | — | Oh right, do I have class tomorrow morning? I forgot | tool_query picks get_course_schedule; Chat's first call has tool_choice=required; argument day=Tuesday; reply "data structures at 10" |
+| 3 | — | What's the weather in Hangzhou tomorrow, should I bring an umbrella? | get_weather(city=Hangzhou); reply suggests an umbrella based on "cloudy turning to light rain, 70%" |
+| 4 | — | There's a recent film called Star River Traveller, what do people online think of it? | search_web; the results have no real reviews → no invented reviews, says honestly nothing specific was found |
+| 5 | — | Book me a high-speed train ticket to Shanghai on Friday | Plan blocked (not_configured / no_executor) or none; no task; no tool call; says honestly it can't do that |
+| 6 | `/tool off get_weather` | And the weather in Hangzhou on Friday? | get_weather disabled in the catalogue; no call to it; the reply invents no weather |
+| 7 | `/fake-mode error` | What classes do I have on Wednesday? | MCP failure status=tool_error; no repeated call, no task; the reply says honestly it can't find out right now, with no technical details |
+| 8 | `/fake-mode normal`, `/tool on get_weather` | If I have no class Wednesday afternoon I'd like a walk by West Lake; can you check whether I have class that afternoon and whether the weather is okay? | Both tools offered and called (timetable day=Wednesday, weather city=Hangzhou); reply: PE at 15:50 in the afternoon, may rain |
+| 9 | — | Okay, enough about classes, I'm a bit tired today and want to sleep early | Plan none, no external tools; the usual tone |
 
-预算紧时先保证 1–4 和 6–7（下面 §24 是 Phase 9.3 的联网验证）。每轮分开记录：Intent 是否要求工具（漏判）/ 提供了哪些工具 / 模型是否发起 tool_calls（没选、选错）/ 参数 / 中转接口是否拒绝 tool_choice=required（模型调用出错 BadRequestError 后紧接一次 auto）/ MCP 是否成功 / 结果是否进入 Chat 并被正确使用 / 回复是否自然。
+If the budget is tight, do 1–4 and 6–7 first (§24 below is Phase 9.3's web verification). Record each round separately: whether Intent asked for a tool (missed) / which tools were offered / whether the model made tool_calls (none chosen, wrong one chosen) / arguments / whether the relay API rejected tool_choice=required (a BadRequestError on the model call followed right away by an auto) / whether MCP succeeded / whether the result got into Chat and was used correctly / whether the reply was natural.
 
-## 24. Phase 9.3 联网搜索与网页阅读：配置与真实验证安排
+## 24. Phase 9.3 web search and page reading: configuration and real verification plan
 
-设计见 decisions.md T35 / T36，测试见 testing.md §42–§45。
+The design is in decisions.md T35 / T36, tests in testing.md §42–§45.
 
-**配置**（.env；服务商、接口地址、网络限制只能在 .env 改）：
+**Configuration** (.env; provider, API address and network limits can only be changed in .env):
 
 ```
 VIOLET_WEB_ENABLED=1
-VIOLET_WEB_OFFER=on_demand                         # 默认；always = 每轮都给 Chat
-VIOLET_WEB_SEARCH_PROVIDER=searxng                 # 默认（用户决定，decisions T36）：自建开源 SearXNG
-VIOLET_WEB_SEARXNG_URL=http://127.0.0.1:18089      # deploy/searxng/ 的 compose 只发布到本机回环
+VIOLET_WEB_OFFER=on_demand                         # default; always = give it to Chat every round
+VIOLET_WEB_SEARCH_PROVIDER=searxng                 # default (user's decision, decisions T36): self-hosted open-source SearXNG
+VIOLET_WEB_SEARXNG_URL=http://127.0.0.1:18089      # the compose in deploy/searxng/ publishes only on local loopback
 ```
 
-采用的方式（用户决定）：Violet 照旧用 start.sh 跑在服务器上；SearXNG 跑在 Docker 里，只发布到宿主机 127.0.0.1:18089。部署（只在执行 `deploy/searxng/searxng.sh up` 时拉镜像、启动）见 deploy/searxng/README.md。
+The approach taken (user's decision): Violet keeps running on the server with start.sh; SearXNG runs in Docker, published only on the host's 127.0.0.1:18089. Deployment (images are pulled and started only when running `deploy/searxng/searxng.sh up`) is in deploy/searxng/README.md.
 
-**连接与限制**：
-- SearXNG 本身免费，替 Violet 去查公开搜索引擎；它从服务器发出的请求可能被部分引擎限流或拒绝（显示为“没有响应的引擎”）；全部失败时 Violet 报搜索失败，不说成没搜到。
-- SafeFetcher 不使用任何代理（防止绕过地址检查），网页直连；SearXNG 地址是唯一受信任的内部地址，fetch_url 不能访问它。
-- 每日上限 VIOLET_WEB_MAX_SEARCHES_PER_DAY（默认 30）/ VIOLET_WEB_MAX_FETCHES_PER_DAY（默认 40），后台可调；10 分钟内同样的搜索用缓存。
+**Connections and limits**:
+- SearXNG itself is free and queries public search engines on Violet's behalf; its requests from the server may be rate-limited or refused by some engines (shown as "engines with no response"); when all fail, Violet reports a search failure rather than saying nothing was found.
+- SafeFetcher uses no proxy at all (so the address checks cannot be bypassed) and fetches pages directly; the SearXNG address is the only trusted internal address, and fetch_url cannot reach it.
+- Daily limits VIOLET_WEB_MAX_SEARCHES_PER_DAY (default 30) / VIOLET_WEB_MAX_FETCHES_PER_DAY (default 40), adjustable in the panel; the same search within 10 minutes uses the cache.
 
-**博查 / Brave**：代码保留为可选实现（`VIOLET_WEB_SEARCH_PROVIDER=bocha|brave` + `VIOLET_WEB_SEARCH_API_KEY` 或后台替换；需要自己开通，付费），不是默认来源。它们的真实 API 验证已**取消**（用户决定，2026-10-24）：原来的阶段 A 冒烟脚本 local/p93/web_smoke.py（只在本机 local/ 里，不在 git 里）不再安排运行；free_chat 的 `--web on`（tests/test_free_chat_web_p93.py）保留，但只接 bocha / brave。
+**Bocha / Brave**: the code is kept as optional implementations (`VIOLET_WEB_SEARCH_PROVIDER=bocha|brave` + `VIOLET_WEB_SEARCH_API_KEY` or replaced in the panel; you sign up yourself, paid), not the default source. Their real API verification was **cancelled** (user's decision, 2026-10-24): the original phase A smoke script local/p93/web_smoke.py (only in the local local/, not in git) is no longer scheduled to run; free_chat's `--web on` (tests/test_free_chat_web_p93.py) is kept but only connects bocha / brave.
 
-**SearXNG 部署后的真实验证（等服务器部署完成，需要用户另行授权）**：
-1. 服务器上 `deploy/searxng/searxng.sh test`：SearXNG 能返回 JSON 结果，看“没有响应的引擎”。
-2. Violet 的 .env 按上面配置、重启后，后台“工具”页显示“搜索 可用”。
-3. 用真实模型做几轮联网对话（搜索最新信息、读用户给的网页、搜索后读原文、无结果、不联网的闲聊、SearXNG 停掉后的降级）。用 free_chat 做这一步需要先给 `--web on` 加 SearXNG 支持（它的连接复查现在只放行公网地址，要放行受信任的本机 SearXNG）——到时候作为单独的小改动提出。
+**Real verification after SearXNG is deployed (once the server deployment is done; needs separate user authorisation)**:
+1. On the server, `deploy/searxng/searxng.sh test`: SearXNG returns JSON results; look at "engines with no response".
+2. After configuring Violet's .env as above and restarting, the panel's Tools page shows search available.
+3. A few rounds of web chat with a real model (searching for the latest information, reading a page the user gives, searching then reading the source, no results, small talk without the web, degrading after SearXNG is stopped). Doing this with free_chat first needs SearXNG support added to `--web on` (its connection re-check currently allows only public addresses and would need to allow the trusted local SearXNG) — to be proposed as a separate small change at that time.
 
-**free_chat `--web on`（保留，只接 bocha / brave）**：只能在新建会话时选，只用于 `--real`；复用 violet-web + Tool Manager（Intent 决定何时联网，单工具 required、多工具 auto），不另起搜索实现。启动时先过模型的门（Key + yes），再过联网的门：搜索 Key（VIOLET_TEST_SEARCH_API_KEY 或隐藏输入）+ 第二个 yes。联网的 HTTP 请求按会话累计计数（web_usage.jsonl，每次连接前写入，跳转也算），`--session-max-searches` / `--session-max-pages` 新建时设定、之后只能调低；超过就在连接前拒绝，联网工具报错、Violet 照实说。网络守卫只放行模型接口和经过 SafeFetcher 地址检查、再次确认是公网 80/443 的联网连接（每次一个连接）。每轮记录：Intent 的 tool_query 和计划、给了哪些工具和 tool_choice、搜索词、每条结果的标题 / 链接 / 来源 / 发布时间、读到的网页标题 / 字数 / 发布时间、每个 HTTP 连接、回复里保留和去掉的链接、最终回复（events.jsonl；/show n 查看）。原来为博查准备的 6 轮方案见提交 dbf73e2 的本节（已取消）。
+**free_chat `--web on` (kept, only bocha / brave)**: can only be chosen when creating a session, and only with `--real`; it reuses violet-web + Tool Manager (Intent decides when to go online; a single tool is required, several are auto), without a separate search implementation. At startup it first passes the model gate (key + yes), then the web gate: a search key (VIOLET_TEST_SEARCH_API_KEY or hidden input) + a second yes. Web HTTP requests are counted cumulatively per session (web_usage.jsonl, written before each connection, redirects included); `--session-max-searches` / `--session-max-pages` are set at creation and can only be lowered later; beyond them the connection is refused beforehand, the web tool reports an error and Violet says so honestly. The network guard only allows the model API and web connections that passed SafeFetcher's address check and are confirmed again to be public 80/443 (one connection at a time). Each round records: Intent's tool_query and plan, which tools and tool_choice were given, search terms, each result's title / link / source / publication time, the title / length / publication time of pages read, every HTTP connection, the links kept and removed in the reply, and the final reply (events.jsonl; see with /show n). The original 6-round plan prepared for Bocha is in this section at commit dbf73e2 (cancelled).
 
-## 25. Phase 9.4.4 free_chat 的虚构课表（`--schedule on`）
+## 25. Phase 9.4.4 fictional timetable in free_chat (`--schedule on`)
 
-为以后用真实模型验收“课表日常感知与主动联系”准备；本阶段只做了离线验证（tests/test_free_chat_schedule_p944.py，模拟模型）。
+Prepared for a later real-model acceptance of "timetable-aware daily life and reaching out"; this phase did only offline verification (tests/test_free_chat_schedule_p944.py, simulated model).
 
-- 新建会话时加 `--schedule on`（之后不能改）：在会话自己的测试库（`local/free_chat/<会话>/violet/violet-test.db`）里放一份虚构课表，打开 `VIOLET_SCHEDULE_ENABLED` 和 `VIOLET_SCHEDULE_PROACTIVE`。课表按会话开始时间生成：开始那周是第 2 周；高数周一三五第 1–2 节，英语周二四第 3–4 节，物理实验周四下午双周，体育周五第 5–6 节；明天 10:00 一场高数期中；附近一节课改到 16:00、一节课停课。老师、教室、座位号、备注都是虚构的（用来检查它们没有进主动决策）。不会接触真实课表或 Violet 的真实数据库。
-- `--schedule-context on`（可选，也要新建时选）：聊天时加“按课表对方可能在上课（到几点）”那一行（`VIOLET_SCHEDULE_CONTEXT`）。
-- `/schedule`：闸门现在拦不拦（到几点）、今天和明天的安排、这次检查能提供的课表背景（明天考试 / 今天的课上完了 / 课多）、已经用过的背景、最近几次主动联系的状态和原因。`/schedule cancel [日期]`：列出那天可以停的课（不改任何东西）；`/schedule cancel 2026-10-30 08:00`：先显示“即将停课：日期 时间 课程”，输入 yes 才停（只改这个会话的虚构课表），下一次检查就按新课表算。2026-10-25 起不再自动挑“下一节”（真实验收里它停错了课）。
-- `/advance` 时被课表拦下的检查记在 idle_checks 里（原因如 `schedule: class by the timetable until 09:45`）；进行了的检查在 checks 里（决策、调用、发出的内容）。
-- 默认是模拟模型；真实模型仍然要 `--real` + `VIOLET_TEST_ALLOW_REAL_API=1` + 隐藏输入的 Key + yes，会话累计调用 / token 上限跨启动有效（§20）。真实验收需要用户另行授权。
-- 建议的真实验收步骤（待授权）：从早上 07:30 开始，聊一句后 `/advance 1h`（上课中，看 idle 原因）、`/advance 3h`（下课后，看是否自然、是否说成一定下课）、傍晚 `/check`（明天考试：最多祝一次、不追问、不问考场座位），再 `/advance 1d` 确认不重复祝；中途 `/schedule cancel` 看改课表后立即生效。- 课表会话的证据（真实验收前补上，testing §51）：工具追踪也在 `--schedule on` 时打开（Intent 的 tool_query 和计划、给了哪些工具和 tool_choice、violet-schedule 调用和结果，结果最多 3000 字）；每一轮保存时带 `schedule_state`（闸门、今天算出来的安排、此刻可提供 / 已用过的课表背景）；每次进行了的主动检查带 `schedule`（检查时的闸门、提供给决策的背景、决策用了哪些）；`/show n` 都能看到。真实验收方案和逐行输入：local/p94/real-plan/PLAN.md（证据汇总脚本 evidence.py 在同一目录）。
+- Add `--schedule on` when creating a session (cannot change later): a fictional timetable is put into the session's own test database (`local/free_chat/<session>/violet/violet-test.db`), and `VIOLET_SCHEDULE_ENABLED` and `VIOLET_SCHEDULE_PROACTIVE` are turned on. The timetable is generated from the session's start time: the starting week is week 2; calculus on Monday, Wednesday, Friday periods 1–2, English on Tuesday, Thursday periods 3–4, physics lab on Thursday afternoon in even weeks, PE on Friday periods 5–6; a calculus midterm tomorrow at 10:00; one nearby class moved to 16:00 and one cancelled. Teachers, classrooms, seat numbers and notes are fictional (used to check that they do not get into proactive decisions). The real timetable and Violet's real database are never touched.
+- `--schedule-context on` (optional, also chosen at creation): adds the line "by the timetable they may be in class (until when)" to chats (`VIOLET_SCHEDULE_CONTEXT`).
+- `/schedule`: whether the gate blocks now (until when), today's and tomorrow's schedule, the timetable background this check can offer (exam tomorrow / today's classes are over / a lot of classes), backgrounds already used, and the state and reason of the last few reach-outs. `/schedule cancel [date]`: lists the classes that can be cancelled that day (changes nothing); `/schedule cancel 2026-10-30 08:00`: first shows "about to cancel: date time course", and cancels only after you type yes (only this session's fictional timetable changes); the next check uses the new timetable. Since 2026-10-25 it no longer picks "the next class" automatically (in the real acceptance it cancelled the wrong class).
+- Checks blocked by the timetable during `/advance` are recorded in idle_checks (reasons such as `schedule: class by the timetable until 09:45`); checks that went ahead are in checks (decision, calls, content sent).
+- Simulated model by default; a real model still needs `--real` + `VIOLET_TEST_ALLOW_REAL_API=1` + the key at a hidden prompt + yes, and the session's cumulative call / token limits hold across starts (§20). A real acceptance needs separate user authorisation.
+- Suggested real acceptance steps (pending authorisation): start at 07:30 in the morning, say one line, then `/advance 1h` (in class; look at the idle reason), `/advance 3h` (after class; whether it is natural, whether it claims class is definitely over), `/check` in the evening (exam tomorrow: wish good luck at most once, no follow-up questions, no asking about exam room or seat), then `/advance 1d` to confirm she does not wish again; along the way `/schedule cancel` to see that a timetable change takes effect immediately. Evidence for timetable sessions (added before the real acceptance, testing §51): tool tracing is also on with `--schedule on` (Intent's tool_query and plan, which tools and tool_choice were given, violet-schedule calls and results, results up to 3000 characters); every round is saved with `schedule_state` (gate, today's computed schedule, timetable background available now / already used); every proactive check that went ahead has `schedule` (the gate at check time, the background offered to the decision, which ones the decision used); all visible with `/show n`. The real acceptance plan and line-by-line inputs: local/p94/real-plan/PLAN.md (the evidence summary script evidence.py is in the same directory).

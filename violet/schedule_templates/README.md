@@ -1,70 +1,72 @@
-# 课表导入：模板和填写说明
+# Timetable import: templates and how to fill them in
 
-Control Center →「课表」→「导入 / 导出」。支持两种文件：**CSV**（只有课程和每周上课时间，导入到页面上选中的学期）和 **JSON**（学期、节次、课程、调课停课、考试、假期都能放）。Excel 文件请先“另存为 CSV（UTF-8）”。
+**English** | [简体中文](README.zh-CN.md)
 
-导入分五步：选择文件 → 预览（逐行列出格式错误、要新增 / 修改 / 删除的内容、时间冲突、手动改过而不会被覆盖的记录）→ 确认 → 在一个数据库事务里写入。**预览不改动课表**；确认时只要有一项失败，就整体不改。预览之后如果课表又被改过（例如另一个页面里改了），确认会被拒绝，需要重新预览。
+In the control panel: Timetable → Import / Export. Two file types are supported: **CSV** (only courses and their weekly class times, imported into the term selected on the page) and **JSON** (terms, periods, courses, rescheduled and cancelled classes, exams and holidays can all go in). Save Excel files as "CSV (UTF-8)" first.
 
-## CSV（`schedule_template.csv`）
+An import has five steps: choose the file → preview (lists format errors row by row, what will be added / changed / deleted, time conflicts, and records you changed by hand that will not be overwritten) → confirm → written in one database transaction. **The preview does not change the timetable**; at confirmation, if any single item fails, nothing is changed. If the timetable was changed after the preview (for example on another page), the confirmation is refused and you need to preview again.
 
-- 编码 UTF-8，第一行是列名，每行是**一门课的一个每周上课时间**。同一门课有几个上课时间就写几行。
-- 列名可以用中文或英文：
+## CSV (`schedule_template.csv`)
 
-| 列 | 英文 | 必填 | 写法 |
-|---|---|---|---|
-| 课程 | course | 是 | 课名，最多 60 字 |
-| 课程代码 | code | | 最多 40 字 |
-| 类型 | kind | | 理论 / 实验 / 研讨 / 体育 / 其他（默认理论） |
-| 老师 | teacher | | 最多 40 字 |
-| 星期 | weekday | 是 | 1–7，或 周一…周日 |
-| 节次 | periods | 二选一 | `1-2`、`3`；用节次要先在「节次」里设好每节的时间 |
-| 开始 / 结束 | start / end | 二选一 | `08:00` / `09:40`，同一天内，结束晚于开始 |
-| 周次 | weeks | 是 | `1-16`、`1-16单`、`2-16双`、`1-8,10-16`（跳过第 9 周）、`1,3,5`；含逗号时整格加英文引号 |
-| 地点 | location | | 最多 60 字 |
-| 备注 | notes | | 最多 500 字 |
-| 课程编号 | course_key | | 可选：自己给课程定一个固定编号 |
-| 编号 | key | | 可选：自己给这个上课时间定一个固定编号 |
+- UTF-8 encoding, column names in the first row, and each row is **one weekly class time of one course**. A course with several class times has several rows.
+- Column names (Chinese column names are accepted too):
 
-同一门课的各行里，课程代码、老师、备注要么一样，要么留空，不一致会报错。
+| Column | Required | How to write it |
+|---|---|---|
+| course | yes | Course name, up to 60 characters |
+| code | | Up to 40 characters |
+| kind | | lecture / lab / seminar / pe / other (default lecture) |
+| teacher | | Up to 40 characters |
+| weekday | yes | 1–7, or mon…sun |
+| periods | one of the two | `1-2`, `3`; to use periods, first set the time of each period under Periods |
+| start / end | one of the two | `08:00` / `09:40`, on the same day, end later than start |
+| weeks | yes | `1-16`, `1-16 odd`, `2-16 even`, `1-8,10-16` (skips week 9), `1,3,5`; when it contains a comma, wrap the whole cell in double quotes |
+| location | | Up to 60 characters |
+| notes | | Up to 500 characters |
+| course_key | | Optional: a fixed ID you give the course |
+| key | | Optional: a fixed ID you give this class time |
 
-## JSON（`schedule_template.json`）
+In the rows of one course, code, teacher and notes must either be the same or left empty; differences are reported as errors.
 
-最外层是一个对象：`format`（`violet-schedule`）、`version`（1）、`term`、`periods`、`courses`、`exceptions`、`exams`、`holidays`。
+## JSON (`schedule_template.json`)
 
-- `term`：`name`、`start_date`、`end_date`、`week1_monday`（可省略 = 开学那周的周一）、`timezone`（IANA 名称，如 `Asia/Shanghai`）。学期名已存在时导入到那个学期（日期可以不写）；页面上选了学期时，文件里的学期名必须和它相同，或者不写 `term`。
-- `periods`：`{"no": 1, "start": "08:00", "end": "08:45"}`，最多 20 节。写了就整体替换这个学期的节次表；不写就不动。
-- `courses[].slots[]`：`weekday`、`weeks`、`periods` 或 `start` / `end`、`location`、可选 `valid_from` / `valid_until`。
-- `exceptions[]`：`course`（课名或课程 key）、`kind`（停课 / 调课 / 改时间 / 换教室 / 加课）、`date`（原来上课那天；加课写加课那天）、按类型写 `new_date`、`new_start` / `new_end` 或 `new_periods`、`new_location`，可选 `reason`。那天这门课不止一次时，用 `slot` 写明是哪个上课时间（预览会列出可选的编号）。**不写 `exceptions` 就不动已有的调课停课**；写了（哪怕是空列表），以前导入的、文件里没有的会被撤销。
-- `exams[]`：`name`、`date`、`kind`（期末 / 期中 / 小测 / 其他）、可选 `start` / `end`、`course`（课名、课程代码或 key）、`location`、`seat`、`notes`。不写 `course` 就不改考试和课程的关联；写 `"course": null` 才取消关联。
-- `holidays[]`：`kind`（放假 / 停课日 / 补课）、`name`、`start_date`、`end_date`（可省略 = 一天）；补课日写 `follows_date`（这天按哪一天的课表上）。
+The top level is an object: `format` (`violet-schedule`), `version` (1), `term`, `periods`, `courses`, `exceptions`, `exams`, `holidays`.
 
-## 怎样认出“同一门课”（重复导入不会重复）
+- `term`: `name`, `start_date`, `end_date`, `week1_monday` (may be omitted = the Monday of the week the term starts), `timezone` (an IANA name such as `Asia/Shanghai`). If the term name already exists, the import goes into that term (dates can be left out); if a term is selected on the page, the term name in the file must be the same, or `term` must be left out.
+- `periods`: `{"no": 1, "start": "08:00", "end": "08:45"}`, up to 20 periods. When given, it replaces the term's whole period table; when left out, the table is not touched.
+- `courses[].slots[]`: `weekday`, `weeks`, `periods` or `start` / `end`, `location`, optional `valid_from` / `valid_until`.
+- `exceptions[]`: `course` (course name or course key), `kind` (cancel / move / time / room / extra), `date` (the original class day; for an extra class, the day of the extra class), then depending on the kind `new_date`, `new_start` / `new_end` or `new_periods`, `new_location`, and optionally `reason`. When the course meets more than once that day, name the class time with `slot` (the preview lists the IDs to choose from). **Without `exceptions`, existing rescheduled and cancelled classes are not touched**; with it (even an empty list), ones imported earlier that are not in the file are undone.
+- `exams[]`: `name`, `date`, `kind` (final / midterm / quiz / other), optional `start` / `end`, `course` (course name, code or key), `location`, `seat`, `notes`. Without `course` the link between exam and course is not changed; only `"course": null` removes it.
+- `holidays[]`: `kind` (holiday / no_class / makeup), `name`, `start_date`, `end_date` (may be omitted = one day); a make-up day takes `follows_date` (which day's timetable it follows).
 
-- 学期：学期名称。
-- 课程：有“课程编号”就用它；否则有课程代码就用代码；否则用课名（忽略空格、全角半角、大小写）。**同一门课在不同文件里要用同一种写法**（都写代码，或都不写）。
-- 上课时间：有“编号”就用它；否则是 星期 + 节次（或时刻）+ 周次。只改了地点 / 老师算“修改”；改了星期、时间或周次算另一个上课时间（旧的删除、新的新增）。
-- 考试：名称 + 日期；假期：类型 + 开始日期；调课停课：类型 + 课程 + 上课时间 + 日期。
+## How "the same course" is recognised (importing again creates no duplicates)
 
-同一个文件再导入一次，预览里应该全是“不变”。
+- Term: the term name.
+- Course: the course key if there is one; otherwise the course code if there is one; otherwise the course name (ignoring spaces, full-width / half-width and case). **Write the same course the same way in different files** (always with the code, or always without).
+- Class time: the key if there is one; otherwise weekday + periods (or times) + weeks. Changing only the location / teacher counts as a "change"; changing the weekday, time or weeks makes it a different class time (the old one is deleted and a new one added).
+- Exam: name + date; holiday: kind + start date; rescheduled / cancelled class: kind + course + class time + date.
 
-## CSV 的两种导入方式
+Importing the same file again should show "unchanged" for everything in the preview.
 
-- **追加 / 更新（默认，推荐）**：文件里的课程新增或更新，这个学期的其他课程**保持不变**。所以可以分几个文件导入（比如先导数学和英语，再导物理）。文件里写到的那门课，以文件为准：它的上课时间里文件中没有的会被删除（例如把星期一改成星期三，是旧的删除、新的新增，不会多出一个）。
-- **整学期替换（要自己选）**：这个学期以前导入的课程里，文件中没有的会被删除。预览会单独列出“将删除 N 门课程”和课名，确认框里也会再写一遍；取消就什么都不改。只影响导入到的那个学期。
+## The two ways to import a CSV
 
-两种方式都不会覆盖、删除手动录入或手动改过的课程。确认时按预览时选的方式执行：预览之后换了方式，要重新预览；结果和预览不一样会被拒绝，课表不改。
+- **Add / update (default, recommended)**: courses in the file are added or updated, and the term's other courses **stay as they are**. So you can import in several files (for example maths and English first, then physics). For a course that is in the file, the file wins: its class times that are not in the file are deleted (for example, changing Monday to Wednesday deletes the old one and adds the new one, rather than leaving an extra one).
+- **Replace the whole term (you have to choose it)**: courses imported earlier into this term that are not in the file are deleted. The preview lists "N courses will be deleted" with their names separately, and the confirmation dialog repeats it; cancel and nothing changes. Only the term being imported into is affected.
 
-JSON 不用选：文件里写了哪一部分（courses、exams、holidays、exceptions），那一部分就整体替换——以前导入、这一部分里没有的会被标为删除（预览里能看到）；没写的部分不动。
+Neither way overwrites or deletes courses entered or changed by hand. Confirmation runs the way chosen at preview time: if you switch the way after previewing, preview again; if the result differs from the preview, it is refused and the timetable is not changed.
 
-## 手动修改优先
+JSON has no choice: each part the file contains (courses, exams, holidays, exceptions) replaces that part as a whole — items imported earlier that are not in that part are marked for deletion (visible in the preview); parts that are not in the file are not touched.
 
-- 在页面上手动改过的导入记录，以后再导入**不会被覆盖、恢复或删除**，预览里标“手动改过”。
-- 已经手动录入了同名课程时，导入**不会另建一门**，也不改它（连同它的上课时间和调课停课），预览里标出来。
-- 已经手动录入了同名、同日期的考试，或同类型、同开始日期的假期 / 补课日时，同样保留手动的，不另建。
+## Changes by hand come first
 
-## 限制
+- Imported records you changed on the page are **never overwritten, restored or deleted** by later imports; the preview marks them "changed by hand".
+- When a course with the same name was entered by hand, the import **does not create another one** and does not change it (nor its class times and rescheduled / cancelled classes); the preview marks it.
+- The same goes for a hand-entered exam with the same name and date, or a holiday / make-up day with the same kind and start date: the hand-entered one is kept and no new one is created.
 
-文件最大 256 KB；CSV 最多 1000 行；每格最多 500 字；JSON 最多嵌套 6 层；最多 200 门课、每门 30 个上课时间、500 条调课停课、200 场考试、100 个假期。不支持 Excel、ICS 或其他课表 App 的格式。
+## Limits
 
-## 导出
+Files up to 256 KB; CSV up to 1000 rows; up to 500 characters per cell; JSON nested up to 6 levels; up to 200 courses, 30 class times per course, 500 rescheduled / cancelled classes, 200 exams and 100 holidays. Excel, ICS and other timetable apps' formats are not supported.
 
-「导入 / 导出」里可以把一个学期导出成 CSV 或 JSON（格式和导入相同，导出后再导入不会产生变化）。可以选择不含老师、地点、座位号、备注。CSV 里以 `=`、`+`、`-`、`@` 开头的内容前面会加一个 `'`，防止表格软件把它当公式执行；再导入时会自动去掉。导出文件里有个人信息，请妥善保存。
+## Export
+
+Under Import / Export a term can be exported as CSV or JSON (same format as the import; importing an export again changes nothing). You can choose to leave out teachers, locations, seat numbers and notes. In CSV, content starting with `=`, `+`, `-` or `@` gets a `'` in front, so spreadsheet software does not run it as a formula; it is removed again on import. Export files contain personal information, so keep them safe.

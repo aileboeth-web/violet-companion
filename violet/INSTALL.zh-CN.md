@@ -1,0 +1,125 @@
+# 安装 Violet
+
+[English](INSTALL.md) | **简体中文**
+
+## 一条命令安装
+
+在一台全新的 Linux 服务器上（不需要先下载源码、装 git 或配置 Python）：
+
+```bash
+curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash
+```
+
+各种 Linux 都用这一条：以 root 登录的（例如 Debian 最小安装，没有 sudo）直接安装；普通用户会自动通过 sudo 重新运行（输入你的密码）；普通用户而且没有 sudo 的，会提示先执行 `su -` 切换到 root。下面的 `/opt/violet/violet …` 命令也是一样，不需要自己加 sudo。
+
+装的是 GitHub Releases 上最新发布的版本。选项放在 `-s --` 后面，例如 `| bash -s -- --access public`。自己发布到别的地址时：`tools/make_release.py --base <发布地址>` 生成发布文件，`release.json` 里的 `install_command` 就是对应的命令。
+
+安装程序会依次：找到或自动安装 Python 3.11+（root 时用系统包管理器；系统自带的版本太旧时，例如 Ubuntu 22.04，再装 python3.11）→ 下载程序并核对 SHA-256 → 检查系统（venv、磁盘、内存、目录权限）→ 复制程序到 `/opt/violet/app` → 创建虚拟环境并安装依赖 → 生成配置 `config/violet.env` 和数据目录 → 选择端口（新装时在 10000–29999 里随机选一个空闲端口，重装 / 升级沿用原来的端口；`--port` 可以指定）→ 生成随机的安全入口、用户名和一次性的初始密码 → 创建系统用户 `violet`、注册 systemd 服务（崩溃自动重启、开机自启）→ 启动并做健康检查 → 输出后台地址、用户名、初始密码和网络检查结果。
+
+安装完成时会显示类似这样的信息（和 1Panel 一样，地址最后一段是安全入口）：
+
+```
+管理后台地址：
+  https://203.0.113.10:21473/k3x9q2m7wz8a
+  安全入口：/k3x9q2m7wz8a（地址里必须带上它，否则所有页面都显示 404）
+用户名：violet_q7m2kx
+密码：Xb7…（随机生成的 20 位密码，只显示这一次；可以一直用，也可以在后台“账号安全”里改）
+```
+
+已经有程序目录时也可以在目录里运行：`bash install.sh`。不想用 root：加 `--user-install`，装到 `~/.local/share/violet`，用 systemd 用户服务（没有 systemd 时用 Violet 自带的守护进程；这种方式没有自动更新）。Windows / macOS：`python tools/violet_installer.py install`。
+
+同一份数据只能运行一个 Violet：已经有 Violet 在运行时，再启动一个会直接退出并说明原因（避免同一条消息被回复两次）。
+
+## 安装完以后
+
+1. 打开输出里的后台地址（带安全入口），用用户名和密码登录。密码是随机生成的 20 位，可以一直用，也可以在“账号安全”页改；用户名和安全入口也在那里改。
+2. “开始”页列出还没完成的事，点哪一项就直接跳到要填的地方。
+3. “模型服务”页：第 1 步填 API 地址和 Key，点“保存并测试连接”（只取一次模型列表，不调用模型）；第 2 步从列表里选模型（“全部 Agent 都用”一次填好），点“保存模型并测试对话”。
+4. “聊天渠道”页：微信、QQ、Telegram 三张卡片并列，用哪个点哪个——微信扫码；QQ 点“使用 QQ”，按步骤去 [q.qq.com](https://q.qq.com/#/) 建机器人、填 AppID 和 AppSecret；Telegram 点“使用 Telegram”，找 [@BotFather](https://t.me/BotFather) 要 Token。QQ / Telegram 连上后在卡片里生成绑定码，用你自己的账号发给机器人。QQ 小号（SnowLuma）在 QQ 卡片里一键安装，扫 QQ 窗口里的二维码登录（安装要下载约 740 MB 的镜像，页面会显示已下多少 MB 和来自哪个镜像站，一个站太慢会自动换下一个）。
+   - “人设与生活”页（可选）：选她是谁（几种自带人设，也可以自己写）和你们是什么关系；不同的聊天渠道可以用不同的人设，每个人设有自己的聊天记录和记忆。
+   - 从 Project Eve 搬过来（可选）：“聊天记录”页底部“导入聊天记录和记忆”，复制打包命令到 Eve 的服务器上运行，把生成的文件上传，选好导入到哪个渠道、用哪个人设和关系，先预览再确认。
+5. “工具与手机”页（可选）：
+   - 手机 MCP（可选，一行安装命令不会装它）：点“一键安装中继”，弹窗里有进度条（下载、校验、注册服务、放行端口）；装好后页面会列出手机 App 要填的中继地址、设备密钥和证书指纹（都有复制按钮）；再把手机“安全”页的访问令牌粘贴回来就连上了。中继的手机端口是安装时随机选的（20000–29999，页面上显示实际端口），云服务器要在安全组放行它。手机连不上时点“换一个端口”（同样有进度条），设备密钥和证书指纹不变，手机上只改中继地址。网页上的这两个按钮由 root 的 `violet-task` 服务执行，只有 root + systemd 的安装才有；其他安装方式页面上给出命令（`/opt/violet/violet mcp-relay install`、`mcp-relay set-port [端口号]`）。重装 / 升级 Violet 会保留已经装好的中继；彻底卸载会把它一起删掉。
+   - 联网搜索的“测试联网”：真实搜索一次、打开一个网页，显示结果和没有响应的搜索引擎。服务器在国内时，SearXNG 默认的谷歌、DuckDuckGo、Brave、维基百科通常连不上：安装时搜不到结果会自动改用必应、百度、搜狗、360（还不行再试“只用 IPv4”）。也可以点“选择搜索引擎”自己勾选要用的引擎、打开“只用 IPv4”（服务器 IPv6 配了但不通时，所有引擎都会超时），或点里面的“自动选择”。“测试联网”会显示每个引擎有几条结果、没有响应的引擎为什么失败（超时、被拒绝访问、要求人机验证……）。
+   - 联网搜索（可选）：在“联网工具”里点“一键安装联网搜索”，弹窗显示进度：从 GitHub 下载 SearXNG 开源搜索的源码，装进它自己的 Python 环境，注册成系统服务 `violet-searxng`（只在本机 127.0.0.1 监听，不对外开放，不放行任何防火墙端口，不需要 Docker），测试一次搜索，然后自动打开联网搜索。点“卸载联网搜索”会删掉服务、程序、缓存并关闭联网搜索；彻底卸载 Violet 时也会一起删掉。服务器上的命令：`/opt/violet/violet searxng install | uninstall | status`。依赖从和 Violet 相同的 pip 源安装（服务器设置了 `PIP_INDEX_URL` 或 pip.conf 的镜像也会用上）。想用 Docker 部署的，仍可按 `deploy/searxng/README.md` 手动部署。
+   - 其他 MCP 服务器：添加后给工具分类（只读 / 写入 / 高风险 / 拒绝）、授权给 Agent、点“测试”。
+6. “图片”页（可选）：打开图片功能；“看图”选识图模型（要支持图片输入）并点“测试识图”；“画图”选画图模型、接口方式和每天最多画几张，点“测试画图”（真实画一张，可能收费）——测试通过后 Violet 才会在聊天里画图。地址和 Key 默认和“模型服务”一样，也可以单独填。最近的图片可以在这里查看和删除。
+7. “诊断”页：哪里不正常、为什么、怎么处理；能安全自动修复的有按钮。
+8. 排查问题时：在“设置 → 日志与排查”打开“排查日志”（默认关闭），每一轮对话的每一步（收到什么、意图判断、给了哪些工具、模型和工具调用、联网搜索、回复、发送）都会写进日志；在“日志”页勾“只看排查日志”，点对话编号只看那一轮。排查完记得关掉。
+
+其余（人设、记忆、主动消息、虚拟生活、联网搜索、图片、回复检查、时区、日志、更新方式……）都可以以后在后台“设置”页调整，不需要编辑任何文件。标着“重启后生效”的设置，保存后点“重启 Violet”即可。只有安装器管理的项目（目录、端口、HTTPS 证书）用服务器上的命令改。
+
+## 访问方式
+
+| 安装参数 | 后台在哪里能打开 |
+|---|---|
+| `--access public`（root 安装的默认） | 公网和局域网都能打开：`https://服务器公网IP:端口/安全入口`，强制 HTTPS（自签名证书，浏览器会提示“不安全”，核对安装输出里的证书指纹后继续访问）。安装时自动装 openssl、查询公网 IP（和 1Panel 一样问外部服务）、在本机所有防火墙里放行端口（加 `--keep-firewall` 不动防火墙，见下文）。云服务器还要在控制台安全组里放行这个端口 |
+| `--access lan` | 只给局域网用，同样是 HTTPS；本机防火墙只给出放行命令 |
+| `--access local`（普通用户 `--user-install` 的默认） | 只有服务器本机。远程管理：`ssh -L 端口:127.0.0.1:端口 用户@服务器`，再在自己电脑打开 `http://127.0.0.1:端口/安全入口` |
+| `--access proxy` | 你自己的 HTTPS 反向代理（Caddy / Nginx，同一台机器）转发到 127.0.0.1 |
+
+**本机防火墙**（公网访问时自动处理）：
+
+| 检测到 | 怎么放行 | 重启后 |
+|---|---|---|
+| ufw（Ubuntu / Debian；宝塔、aaPanel 常用） | `ufw allow 端口/tcp` | ufw 自己保存 |
+| firewalld（Rocky / CentOS / Alma；宝塔常用） | `firewall-cmd --permanent --add-port` | firewalld 自己保存 |
+| iptables 里有拦截规则（1Panel、CSF、手写规则、默认 DROP） | 在 INPUT 最前面加一条标记为 `violet` 的放行规则（IPv4 / IPv6） | Violet 每次启动前自动补回 |
+| nftables 自己的拦截链 | 在那条链最前面加一条标记为 `violet` 的放行规则 | 同上 |
+
+1Panel、宝塔这类面板的防火墙页面不一定显示这条规则，想在面板里看到也可以再手动加一条。卸载（`--purge`）只删带 `violet` 标记的、和安装时记录下来的规则。云服务商的安全组在服务器外面，只能在控制台里放行。
+
+已经装好的随时可以切换：重新运行安装命令并加上 `-s -- --access public`（或 local / lan / proxy），数据、账号、端口都保留，只改监听地址和证书。
+
+**安全入口**：没有从安全入口进来的浏览器，访问任何页面（包括登录页）都只得到 404，扫描器看不出这里是 Violet。从入口进来一次后，这个浏览器就可以打开登录页（退出登录后也一样）。例外只有：`/healthz`（只回答“这里运行着 Violet”，安装和升级的健康检查要用）、聊天平台的签名回调地址，以及带正确管理令牌的脚本请求。
+
+安装程序分别检查：端口在监听、本机能访问、局域网能访问、公网能访问。**公网是否可达从服务器内部无法确认**（云厂商安全组、NAT、运营商封端口都要从外面测），所以默认显示“未验证”；用手机流量打开地址确认，或者安装时加 `--public-url https://你的域名` 让安装程序试一次。
+
+## 更新
+
+后台“设置 → 版本更新”选择更新方式：
+
+| 方式 | 效果 |
+|---|---|
+| 自动更新（默认） | 每 6 小时检查一次 GitHub Releases，有新版本就在服务器上自动升级：先备份，新版本起不来自动退回旧版本。同一个版本升级失败后 24 小时内不再自动重试 |
+| 自动检查，只提醒 | “开始”页的“版本与更新”显示有新版本，点“立即更新”才升级 |
+| 手动检查 | 只在你点“检查更新”时才查询 |
+
+升级（以及重新运行安装做修复）前做的备份：成功并通过健康检查后**自动删除**，不占硬盘；失败时保留在 `backups/`，用来恢复。自己用 `violet backup` 做的备份不会被自动删除。想在升级后还能退回旧数据，升级前先执行一次 `/opt/violet/violet backup`。
+
+自动更新靠安装时注册的 root 定时任务（`violet-update.timer`），只有 root + systemd 的安装才有（一行命令安装就是这种）。Violet 自己以普通用户 `violet` 运行，它只能“请求更新到官方最新版”，不能指定下载地址。在后台点“立即更新”会弹出进度条（检查、下载校验、备份、安装依赖、重启、健康检查）；升级期间 Violet 会重启一次，弹窗等它回来后显示结果。其他安装方式在页面上给出命令：`/opt/violet/violet update`。
+
+改用自己的分支发布：安装时加 `--update-repo 你的用户名/仓库名`。
+
+发布新版本（维护者）：改 `violet/VERSION`，提交后推送标签 `v<版本>`（例如 `git tag v0.1.1 && git push origin v0.1.1`），GitHub Actions 会自动打包并发布到 Releases。
+
+## 日常维护
+
+安装目录里的 `violet`（Windows 是 `violet.cmd`）：
+
+```bash
+/opt/violet/violet status        # 服务状态和网络检查
+/opt/violet/violet stop | start | restart
+/opt/violet/violet backup        # 配置 + 数据（数据库在线一致备份）到 backups/
+/opt/violet/violet restore backups/violet-backup-....tar.gz   # 恢复前会先备份当前状态
+/opt/violet/violet update   # 升级到 GitHub 上的最新版本：先备份，失败自动退回旧版本（加 --check 只查询）
+bash install.sh upgrade       # 或者：在新版本的程序目录里执行
+/opt/violet/violet rollback      # 退回上一个版本的程序（数据不动）
+/opt/violet/violet uninstall     # 删除服务和程序，保留配置、数据和备份
+/opt/violet/violet uninstall --purge --yes   # 全部删除（不可恢复）：数据、备份、/opt/violet、手机中继、所有 violet 服务、violet 系统账号、带 violet 标记的防火墙规则
+# 或者不依赖已安装的文件（例如装坏了、安装记录丢了）——这一条就够了，不需要再执行别的：
+# curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
+/opt/violet/violet info             # 后台地址（带安全入口）和用户名；密码不能查看
+/opt/violet/violet reset-password   # 生成新密码（只显示一次），所有登录失效
+/opt/violet/violet reset-entrance   # 换一个随机的安全入口（--entrance 自己指定；--no-entrance 取消）
+/opt/violet/violet set-port 7300    # 换后台端口：检查端口空闲、重启、健康检查，失败自动改回（加 --open-firewall 放行防火墙）
+/opt/violet/violet mcp-relay install    # 手机 MCP 的中继：从 Violet MCP 的 GitHub 发布下载并校验，注册服务，放行手机端口
+/opt/violet/violet mcp-relay status     # 中继是否运行、手机是否连着
+/opt/violet/violet mcp-relay uninstall  # 删除由 Violet 安装的中继（手工部署的不动）
+```
+
+手机 MCP 的中继：已经按 Violet MCP 的 `DEPLOY_RELAY.md` 手工装过 `violet-mcp-relay` 服务的，`mcp-relay install` 直接使用它，不重新安装；手机端口在 20000–29999 里随机选（`mcp-relay install 端口号` 可以指定），给 Violet 用的本机端口是 8787（被占用时换下一个），后台页面显示的就是实际端口；`mcp-relay set-port [端口号]` 只能改 Violet 装的中继。设备密钥只保存在中继自己的目录和 Violet 的 `data/control/mcp-relay.json`（只有 violet 账号能读），后台“工具与手机”页可以查看和复制。
+
+重新运行 `install.sh` 就是修复：配置、数据、密钥、端口、用户名、安全入口和密码都保留。忘记地址或用户名：`/opt/violet/violet info`；忘记密码：`/opt/violet/violet reset-password`。
+
+从 0.1.0 升级上来的安装没有用户名和安全入口（升级不会自动加，免得你不知道新地址）：在后台“账号安全”页设置，或执行 `/opt/violet/violet reset-entrance`。

@@ -323,7 +323,7 @@ def install(layout: Any, state: dict[str, Any], *, python: Path, port_free: Call
     """Returns the result; updates `state` (install.json) -- the caller saves it. A reinstall replaces the program and
     keeps the port and secret."""
     if not shutil.which("systemctl") and run is subprocess.run:
-        raise SearxngError("这台服务器没有 systemd，联网搜索需要手动部署（见 deploy/searxng/README.md）")
+        raise SearxngError("这台服务器没有 systemd，联网搜索需要手动部署（见 deploy/searxng/README.zh-CN.md）")
     if unit_path.exists() and MARK not in unit_path.read_text(encoding="utf-8", errors="replace"):
         raise SearxngError("这台服务器上已经有一个不是 Violet 装的 violet-searxng 服务，没有改动")
     base = folder(layout)

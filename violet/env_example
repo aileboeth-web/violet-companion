@@ -234,7 +234,7 @@ VIOLET_WEB_ENABLED=0
 # Phase 9.3：on_demand（默认）= IntentAgent 判断这一轮需要联网时才把工具给 Chat（一个工具 required，多个 auto）；
 # always = 每轮都给 Chat（第五阶段 B 的做法，由模型自己决定）。后台“工具”页也能改。
 VIOLET_WEB_OFFER=on_demand
-# 搜索后端：searxng（默认，自建开源 SearXNG，部署见 deploy/searxng/README.md）| none（不搜索）
+# 搜索后端：searxng（默认，自建开源 SearXNG，部署见 deploy/searxng/README.zh-CN.md）| none（不搜索）
 # | mock（离线虚构结果，仅开发）| bocha / brave（可选的付费搜索 API，Phase 9.3）
 VIOLET_WEB_SEARCH_PROVIDER=searxng
 # 0.7.4：bing = 必应直连（必应自己的 RSS 搜索结果，不用 Key、不用安装，国内服务器也能用）；用哪个地址：

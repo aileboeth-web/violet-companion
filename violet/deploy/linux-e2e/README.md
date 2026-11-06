@@ -1,5 +1,7 @@
 # Linux install acceptance (automated)
 
+**English** | [简体中文](README.zh-CN.md)
+
 Before a release, the one-line install must pass this set of checks on real Linux. Use only throwaway machines / VMs / containers. **Do not run it on a server with a real Violet on it.**
 
 | Way | Command | Covers |

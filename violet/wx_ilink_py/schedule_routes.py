@@ -383,7 +383,7 @@ def register_schedule_routes(app: Flask, violetdb) -> None:
         from pathlib import Path
         files = {"csv": ("schedule_template.csv", "text/csv; charset=utf-8"),
                  "json": ("schedule_template.json", "application/json; charset=utf-8"),
-                 "readme": ("README.md", "text/markdown; charset=utf-8")}
+                 "readme": ("README.zh-CN.md", "text/markdown; charset=utf-8")}   # the panel is Chinese
         if kind not in files:
             return bad("not found", 404)
         name, mime = files[kind]

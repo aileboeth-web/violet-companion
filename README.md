@@ -1,10 +1,12 @@
 # Violet
 
+**English** | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Español](README.es.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [Русский](README.ru.md) | [Português](README.pt-BR.md)
+
 Violet is an AI companion that runs on your own server. She has a steady personality and a daily life of her own, remembers what you tell her, reaches out to you when the moment is right, and you can chat with her on WeChat, QQ and Telegram. Everything is set up in a web control panel; there are no config files to edit.
 
 > Inspired by [Lynnette177/Project-Eve](https://github.com/Lynnette177/Project-Eve) (by [Lynnette177](https://github.com/Lynnette177)). Violet rewrote and extended most of it and is now an independent project. Thanks to the original author for the idea.
 
-The control panel and Violet's replies are in Chinese. In this README, panel labels are given in English with the Chinese label in brackets, e.g. **Memory** (记忆).
+The control panel's interface is currently in Chinese.
 
 ## What she can do
 
@@ -18,12 +20,12 @@ The control panel and Violet's replies are in Chinese. In this README, panel lab
 **Memory**
 
 - She keeps separate notes on your long-term situation, recent events, how you like her to talk, and the promises you made each other. Old things slowly fade, and an unfinished remark is not turned into a task she keeps asking about.
-- On the **Memory** (记忆) page you can search (keywords highlighted), view, correct and delete memories, or stop her from using one.
+- On the Memory page of the panel you can search (keywords highlighted), view, correct and delete memories, or stop her from using one.
 - "Remind me to hand in my homework at eight tomorrow" really gets written down, and she reminds you on time.
 
 **Personas and relationships**
 
-- Built-in personas: Violet (default), gentle companion, cheerful classmate, calm and reliable, one who knows she is an AI, Big Fat Fish (大肥鱼), the original Eve persona, and a blank one. You can also write your own.
+- Built-in personas: Violet (default), gentle companion, cheerful classmate, calm and reliable, one who knows she is an AI, Big Fat Fish, the original Eve persona, and a blank one. You can also write your own.
 - Relationship options: close, friend, partner, daughter, developer.
 - Each chat channel can use a different persona. Every persona has its own chat history, memory, life and mood, so switching back and forth loses nothing and nothing gets mixed up.
 - She has a virtual daily life and moods of her own: her days move on quietly, and several days may pass with nothing happening; if you are harsh with her she gets a little upset. She never makes up experiences that are not in her life record.
@@ -40,7 +42,7 @@ The control panel and Violet's replies are in Chinese. In this README, panel lab
 - Web search and page reading: one-click install of a private SearXNG that listens only on the server itself. No Docker needed.
 - Timetable: she does not disturb you during class and cheers you on before exams. Import from CSV / JSON.
 - Seeing and drawing images: her drawings are casual "phone snapshot" life photos, and she never claims they are real photos.
-- MCP tools: read-only tools are used directly; tools that change anything ask you first every time and only run after you reply "同意" (agree) in the chat.
+- MCP tools: read-only tools are used directly; tools that change anything ask you first every time and only run after you approve that request in the chat.
 
 **Web control panel**
 
@@ -50,7 +52,7 @@ The control panel and Violet's replies are in Chinese. In this README, panel lab
 
 **Moving over from Project Eve**
 
-**Chat history → Import chat history and memory** (聊天记录 → 导入聊天记录和记忆) gives you a packing command. Run it on your Eve server, then upload the file it creates to the panel. When importing you choose the chat channel (one you have not added yet works too), the persona and the relationship; both chat history and memory come along.
+Under Chat history → Import chat history and memory, the panel gives you a packing command. Run it on your Eve server, then upload the file it creates to the panel. When importing you choose the chat channel (one you have not added yet works too), the persona and the relationship; both chat history and memory come along.
 
 ## Install
 
@@ -65,8 +67,8 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
   - The certificate is self-signed. When the browser says the page is not secure, choose to continue.
   - On a cloud server, also open this port in the provider's security group / firewall.
 - After installing:
-  1. Open the panel and fill in your model service address and key on the **Start** (开始) page.
-  2. Connect any chat platform on the **Chat channels** (聊天渠道) page and start chatting.
+  1. Open the panel and fill in your model service address and key on the Start page.
+  2. Connect any chat platform on the Chat channels page and start chatting.
 - Forgot the address or username: `/opt/violet/violet info`. Forgot the password: `/opt/violet/violet reset-password`.
 
 **Requirements**:
@@ -83,13 +85,13 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- --access local
 ```
 
-More details (access modes, firewall, maintenance commands) are in [violet/INSTALL.md](violet/INSTALL.md) (Chinese).
+More details (access modes, firewall, maintenance commands) are in [violet/INSTALL.md](violet/INSTALL.md).
 
 ## Updates
 
 - Automatic by default: when a new version is out, the server upgrades itself. It makes a backup first and rolls back to the old version if the upgrade fails.
-- You can switch to "notify only" or "check manually" under **Settings → Version updates** (设置 → 版本更新).
-- Clicking **Update now** (立即更新) on the **Start** page shows the progress.
+- You can switch to "notify only" or "check manually" under Settings → Version updates.
+- Clicking Update now on the Start page shows the progress.
 - Or upgrade by hand on the server:
 
 ```bash

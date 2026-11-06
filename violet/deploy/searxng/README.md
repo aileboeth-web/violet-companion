@@ -1,6 +1,8 @@
 # Deploying SearXNG with Docker (alternative way)
 
-> **You usually don't need this page.** If you installed Violet with the one-line command, click **Install web search** (一键安装联网搜索) under **Tools & phone → Web tools** (工具与手机 → 联网工具) in the control panel (or run `/opt/violet/violet searxng install` on the server). That way needs no Docker, registers a system service `violet-searxng`, and listens only on 127.0.0.1. This page is only for people without systemd, or who prefer Docker.
+**English** | [简体中文](README.zh-CN.md)
+
+> **You usually don't need this page.** If you installed Violet with the one-line command, click **Install web search** under **Tools & phone → Web tools** in the control panel (or run `/opt/violet/violet searxng install` on the server). That way needs no Docker, registers a system service `violet-searxng`, and listens only on 127.0.0.1. This page is only for people without systemd, or who prefer Docker.
 
 Violet's `web_search` uses a self-hosted, open-source SearXNG by default (`VIOLET_WEB_SEARCH_PROVIDER=searxng`) and does not rely on paid search APIs (the Bocha / Brave code is kept as an optional implementation, not the default source). This directory is a Docker Compose deployment of SearXNG. It pulls images and starts containers **only when you explicitly run `./searxng.sh up`**. Violet itself never runs it and never installs Docker.
 
@@ -65,7 +67,7 @@ VIOLET_WEB_SEARCH_PROVIDER=searxng
 VIOLET_WEB_SEARXNG_URL=http://127.0.0.1:18089
 ```
 
-Restart Violet (`start.sh`). The **Tools** (工具) page of `/control` should show "搜索服务 searxng · 搜索 可用" (search service searxng · search available).
+Restart Violet (`start.sh`). The **Tools** page of `/control` should show the search service searxng with search available.
 
 ## Day to day
 
@@ -84,5 +86,5 @@ Restart Violet (`start.sh`). The **Tools** (工具) page of `/control` should sh
 
 - `./searxng.sh logs`: when running as 977, the entrypoint says it is not root and will not change owners (expected); there should be no write failures for `cache/`.
 - `./searxng.sh status` shows healthy; `./searxng.sh test` gets JSON results.
-- Which default engines are reachable from a server in mainland China; unreachable ones show up under "engines with no response" (没有响应的引擎) in `test`, and you can keep only the working ones as described at the end of `settings.yml`.
+- Which default engines are reachable from a server in mainland China; unreachable ones show up in the list of engines with no response printed by `test`, and you can keep only the working ones as described at the end of `settings.yml`.
 - The `latest` image follows official updates. If the official variable names or entrypoint change in the future, trust `logs`, and pin a version by digest when needed (see Roll back).

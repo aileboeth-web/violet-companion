@@ -29,12 +29,12 @@ compose() {
   elif command -v docker-compose >/dev/null 2>&1; then
     docker-compose "$@"
   else
-    die "没有 docker compose（v2 插件或 docker-compose）。本脚本不会安装它，见 README.md"
+    die "没有 docker compose（v2 插件或 docker-compose）。本脚本不会安装它，见 README.zh-CN.md"
   fi
 }
 
 need_docker() {
-  command -v docker >/dev/null 2>&1 || die "没有安装 Docker。本脚本不会安装 Docker，见 README.md"
+  command -v docker >/dev/null 2>&1 || die "没有安装 Docker。本脚本不会安装 Docker，见 README.zh-CN.md"
   docker info >/dev/null 2>&1 || die "连不上 Docker（服务没有启动，或当前用户没有权限）"
 }
 

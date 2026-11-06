@@ -1,5 +1,7 @@
 # Offline automated tests
 
+**English** | [简体中文](README.zh-CN.md)
+
 How to run:
 
 ```powershell
