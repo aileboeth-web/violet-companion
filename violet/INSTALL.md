@@ -7,7 +7,7 @@
 On a fresh Linux server (no need to download the source, install git or set up Python first):
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash
 ```
 
 The same command works on every Linux: logged in as root (for example a minimal Debian without sudo) it installs directly; as a normal user it re-runs itself through sudo (enter your password); a normal user without sudo is told to run `su -` first to switch to root. The same goes for the `/opt/violet/violet …` commands below: you never need to add sudo yourself.
@@ -110,7 +110,7 @@ bash install.sh upgrade       # or: run this in the program directory of the new
 /opt/violet/violet uninstall     # remove the service and program, keep configuration, data and backups
 /opt/violet/violet uninstall --purge --yes   # remove everything (cannot be undone): data, backups, /opt/violet, phone relay, all violet services, the violet system account, firewall rules tagged violet
 # or, without relying on the installed files (e.g. a broken install or a lost install record) -- this one is enough, nothing else needed:
-# curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
+# curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
 /opt/violet/violet info             # panel address (with the security entrance) and username; the password cannot be shown
 /opt/violet/violet reset-password   # generate a new password (shown only once); all logins are ended
 /opt/violet/violet reset-entrance   # switch to a new random security entrance (--entrance sets your own; --no-entrance removes it)

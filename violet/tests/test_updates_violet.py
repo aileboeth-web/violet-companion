@@ -81,7 +81,7 @@ def test_the_repository_can_be_overridden(monkeypatch):
     monkeypatch.setenv("VIOLET_UPDATE_REPO", "someone/fork")
     assert inst.update_repo() == "someone/fork"
     monkeypatch.delenv("VIOLET_UPDATE_REPO")
-    assert inst.update_repo() == inst.UPDATE_REPO == "aileboeth-web/violet-companion"
+    assert inst.update_repo() == inst.UPDATE_REPO == "aileboeth/violet-companion"
 
 
 # ---------------------------------------------------------------------------------------------- violet update
@@ -218,6 +218,6 @@ def test_the_release_workflow_publishes_what_make_release_builds():
 
 
 def test_the_readme_and_install_guide_give_the_github_one_liner():
-    line = "curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash"
+    line = "curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash"
     assert line in (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     assert line in (PROJECT / "INSTALL.md").read_text(encoding="utf-8")

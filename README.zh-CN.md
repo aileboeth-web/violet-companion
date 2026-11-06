@@ -57,7 +57,7 @@ Violet 是一个装在你自己服务器上的 AI 陪伴。她有稳定的性格
 在一台 Linux 服务器上，一行命令：
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash
 ```
 
 - Debian、Ubuntu、Rocky 等都用这一条。root 直接装（Debian 最小安装没有 sudo 也可以）；普通用户会自动通过 sudo 运行；没有 sudo 的普通用户先 `su -` 切换到 root。
@@ -80,7 +80,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 - 已经装好的：重新运行一次安装命令，带上要的访问方式（`local` / `lan` / `public` / `proxy`）。数据、账号和端口都会保留。
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- --access local
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash -s -- --access local
 ```
 
 更多说明（访问方式、防火墙、日常维护命令）见 [violet/INSTALL.md](violet/INSTALL.zh-CN.md)。
@@ -106,7 +106,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 - `violet` 系统账号、`/opt/violet` 目录，以及 Violet 放行的所有防火墙规则。
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
 ```
 
 只装了一半、安装记录丢了，或者之前只卸载了程序，这条命令也能把剩下的东西清理干净。安装时用系统包管理器装的 Python、openssl 不会删除，因为其他程序可能也在用。
@@ -136,7 +136,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 
 ## 相关项目
 
-[Violet MCP](https://github.com/aileboeth-web/violet-mcp) 是可选的安卓 App。装在手机上以后，Violet 可以在你允许的范围内知道手机的状态，比如亮屏、正在用的 App、电量、步数、日程、正在放的音乐。每一项都可以在手机上单独开关。
+[Violet MCP](https://github.com/aileboeth/violet-mcp) 是可选的安卓 App。装在手机上以后，Violet 可以在你允许的范围内知道手机的状态，比如亮屏、正在用的 App、电量、步数、日程、正在放的音乐。每一项都可以在手机上单独开关。
 
 ## 许可证
 

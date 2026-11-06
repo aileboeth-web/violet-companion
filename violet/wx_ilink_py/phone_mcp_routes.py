@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 from flask import Flask, Response, jsonify, request
 
 SERVER_NAME = "android-phone"
-APP_URL = "https://github.com/aileboeth-web/violet-mcp/releases/latest"
+APP_URL = "https://github.com/aileboeth/violet-mcp/releases/latest"
 TOKEN_RE = re.compile(r"^[A-Za-z0-9._~+/=-]{16,512}$")
 
 

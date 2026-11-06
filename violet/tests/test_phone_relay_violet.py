@@ -97,7 +97,7 @@ def test_install_downloads_checks_registers_opens_the_port_and_exports(tmp_path,
                            open_port=lambda p: (opened.append(p) or [{"tool": "iptables", "port": p}], "已放行"),
                            unit_path=unit, machine="x86_64", wait=0, rng=Rng())
     binary = layout.root / "mcp-relay" / "violet-mcp-relay"
-    assert binary.read_bytes() == b"\x7fELF relay" and asked[0].startswith("https://github.com/aileboeth-web/violet-mcp/")
+    assert binary.read_bytes() == b"\x7fELF relay" and asked[0].startswith("https://github.com/aileboeth/violet-mcp/")
     info = relay.parse_unit(unit.read_text(encoding="utf-8"))
     assert info["managed"] and info["device_port"] == 24567 and info["client_port"] == 8787
     assert ["systemctl", "enable", "--now", "violet-mcp-relay.service"] in runs.calls
@@ -302,7 +302,7 @@ def test_phone_card_without_and_with_a_relay(made, env_guard):
     d = admin.get("/api/control/phone-mcp").get_json()["data"]
     assert d["installed"] and d["relay"]["device_secret"] == "s3cret-device-key" and d["relay"]["pin"] == "sha256/PIN="
     assert d["health"] == {"checked": True, "reachable": False, "device_connected": False}
-    assert d["app_url"].startswith("https://github.com/aileboeth-web/violet-mcp/")
+    assert d["app_url"].startswith("https://github.com/aileboeth/violet-mcp/")
 
 
 def test_pasting_the_phone_token_adds_the_android_phone_server(made, env_guard, monkeypatch):

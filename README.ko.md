@@ -59,7 +59,7 @@ Violet은 내 서버에서 직접 운영하는 AI 동반자입니다. 한결같�
 Linux 서버에서 명령 한 줄이면 됩니다:
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash
 ```
 
 - Debian, Ubuntu, Rocky 등 모두 이 한 줄이면 됩니다. root라면 바로 설치합니다(sudo가 없는 최소 설치 Debian도 가능). 일반 사용자라면 자동으로 sudo를 통해 다시 실행합니다. sudo가 없는 일반 사용자는 먼저 `su -`로 root로 전환하세요.
@@ -82,7 +82,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 - 이미 설치함: 원하는 접근 방식(`local` / `lan` / `public` / `proxy`)을 붙여 설치 명령을 다시 실행합니다. 데이터, 계정, 포트는 유지됩니다.
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- --access local
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash -s -- --access local
 ```
 
 자세한 설명(접근 방식, 방화벽, 일상 유지 관리 명령)은 [violet/INSTALL.md](violet/INSTALL.md)(영어)를 참고하세요.
@@ -108,7 +108,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 - `violet` 시스템 계정, `/opt/violet` 디렉터리, Violet이 연 모든 방화벽 규칙
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
 ```
 
 설치가 중간에 멈췄거나, 설치 기록을 잃어버렸거나, 예전에 프로그램만 제거한 경우에도 이 명령으로 남은 것을 깨끗이 정리할 수 있습니다. 시스템 패키지 관리자로 설치한 Python과 openssl은 다른 프로그램도 쓸 수 있으므로 삭제하지 않습니다.
@@ -138,7 +138,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 
 ## 관련 프로젝트
 
-[Violet MCP](https://github.com/aileboeth-web/violet-mcp)는 선택 사항인 Android 앱입니다. 휴대폰에 설치하면 당신이 허락한 범위 안에서 화면이 켜져 있는지, 쓰고 있는 앱, 배터리, 걸음 수, 캘린더, 재생 중인 음악 같은 휴대폰 상태를 Violet이 알 수 있습니다. 항목마다 휴대폰에서 따로 켜고 끌 수 있습니다.
+[Violet MCP](https://github.com/aileboeth/violet-mcp)는 선택 사항인 Android 앱입니다. 휴대폰에 설치하면 당신이 허락한 범위 안에서 화면이 켜져 있는지, 쓰고 있는 앱, 배터리, 걸음 수, 캘린더, 재생 중인 음악 같은 휴대폰 상태를 Violet이 알 수 있습니다. 항목마다 휴대폰에서 따로 켜고 끌 수 있습니다.
 
 ## 라이선스
 

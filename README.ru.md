@@ -59,7 +59,7 @@ Violet — ИИ-компаньон, который работает на ваш�
 На Linux-сервере — одна команда:
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash
 ```
 
 - Одна и та же команда подходит для Debian, Ubuntu, Rocky и других. От root она устанавливает сразу (подойдёт и минимальный Debian без sudo); от обычного пользователя перезапускается через sudo; обычному пользователю без sudo нужно сначала переключиться на root командой `su -`.
@@ -82,7 +82,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 - Уже установлено: запустите команду установки ещё раз с нужным режимом доступа (`local` / `lan` / `public` / `proxy`). Данные, аккаунт и порт сохраняются.
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- --access local
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash -s -- --access local
 ```
 
 Подробнее (режимы доступа, файрвол, команды обслуживания) — в [violet/INSTALL.md](violet/INSTALL.md) (на английском).
@@ -108,7 +108,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 - системный аккаунт `violet`, каталог `/opt/violet` и все правила файрвола, которые открыла Violet.
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
 ```
 
 Она также убирает то, что осталось после незавершённой установки, потерянной записи об установке или прошлого удаления, при котором была удалена только программа. Python и openssl, установленные системным менеджером пакетов, сохраняются, потому что ими могут пользоваться другие программы.
@@ -138,7 +138,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 
 ## Связанный проект
 
-[Violet MCP](https://github.com/aileboeth-web/violet-mcp) — необязательное приложение для Android. Когда оно установлено на телефоне, Violet может знать его состояние в пределах, которые вы разрешили: включён ли экран, каким приложением вы пользуетесь, заряд батареи, шаги, календарь, какая музыка играет. Каждый пункт включается и выключается на телефоне отдельно.
+[Violet MCP](https://github.com/aileboeth/violet-mcp) — необязательное приложение для Android. Когда оно установлено на телефоне, Violet может знать его состояние в пределах, которые вы разрешили: включён ли экран, каким приложением вы пользуетесь, заряд батареи, шаги, календарь, какая музыка играет. Каждый пункт включается и выключается на телефоне отдельно.
 
 ## Лицензия
 

@@ -37,7 +37,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
-RELAY_REPO = "aileboeth-web/violet-mcp"
+RELAY_REPO = "aileboeth/violet-mcp"
 UNIT_NAME = "violet-mcp-relay"
 UNIT_PATH = Path("/etc/systemd/system") / f"{UNIT_NAME}.service"
 DATA_DIR = Path("/var/lib/violet-mcp-relay")

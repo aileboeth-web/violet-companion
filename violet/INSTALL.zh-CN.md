@@ -7,7 +7,7 @@
 在一台全新的 Linux 服务器上（不需要先下载源码、装 git 或配置 Python）：
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash
 ```
 
 各种 Linux 都用这一条：以 root 登录的（例如 Debian 最小安装，没有 sudo）直接安装；普通用户会自动通过 sudo 重新运行（输入你的密码）；普通用户而且没有 sudo 的，会提示先执行 `su -` 切换到 root。下面的 `/opt/violet/violet …` 命令也是一样，不需要自己加 sudo。
@@ -108,7 +108,7 @@ bash install.sh upgrade       # 或者：在新版本的程序目录里执行
 /opt/violet/violet uninstall     # 删除服务和程序，保留配置、数据和备份
 /opt/violet/violet uninstall --purge --yes   # 全部删除（不可恢复）：数据、备份、/opt/violet、手机中继、所有 violet 服务、violet 系统账号、带 violet 标记的防火墙规则
 # 或者不依赖已安装的文件（例如装坏了、安装记录丢了）——这一条就够了，不需要再执行别的：
-# curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
+# curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
 /opt/violet/violet info             # 后台地址（带安全入口）和用户名；密码不能查看
 /opt/violet/violet reset-password   # 生成新密码（只显示一次），所有登录失效
 /opt/violet/violet reset-entrance   # 换一个随机的安全入口（--entrance 自己指定；--no-entrance 取消）

@@ -59,7 +59,7 @@ Sous Historique des discussions → Importer l'historique et la mémoire, le pan
 Sur un serveur Linux, une seule commande :
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash
 ```
 
 - La même commande fonctionne sur Debian, Ubuntu, Rocky et d'autres. En root, elle installe directement (y compris sur un Debian minimal sans sudo) ; en utilisateur normal, elle se relance via sudo ; un utilisateur normal sans sudo doit d'abord passer en root avec `su -`.
@@ -82,7 +82,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 - Déjà installé : relancez la commande d'installation avec le mode d'accès voulu (`local` / `lan` / `public` / `proxy`). Les données, le compte et le port sont conservés.
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- --access local
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash -s -- --access local
 ```
 
 Plus de détails (modes d'accès, pare-feu, commandes de maintenance) dans [violet/INSTALL.md](violet/INSTALL.md) (en anglais).
@@ -108,7 +108,7 @@ La commande ci-dessous supprime complètement Violet. **C'est irréversible.** E
 - le compte système `violet`, le répertoire `/opt/violet` et toutes les règles de pare-feu ouvertes par Violet.
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
 ```
 
 Elle nettoie aussi ce qui reste après une installation inachevée, un registre d'installation perdu ou une désinstallation précédente qui n'a retiré que le programme. Python et openssl installés par le gestionnaire de paquets du système sont conservés, car d'autres programmes peuvent s'en servir.
@@ -138,7 +138,7 @@ Elle nettoie aussi ce qui reste après une installation inachevée, un registre 
 
 ## Projet associé
 
-[Violet MCP](https://github.com/aileboeth-web/violet-mcp) est une application Android optionnelle. Une fois installée sur votre téléphone, Violet peut connaître l'état du téléphone dans les limites que vous autorisez : écran allumé ou non, app en cours d'utilisation, batterie, pas, agenda, musique en cours de lecture. Chaque élément s'active ou se désactive séparément sur le téléphone.
+[Violet MCP](https://github.com/aileboeth/violet-mcp) est une application Android optionnelle. Une fois installée sur votre téléphone, Violet peut connaître l'état du téléphone dans les limites que vous autorisez : écran allumé ou non, app en cours d'utilisation, batterie, pas, agenda, musique en cours de lecture. Chaque élément s'active ou se désactive séparément sur le téléphone.
 
 ## Licence
 

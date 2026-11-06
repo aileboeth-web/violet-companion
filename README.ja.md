@@ -59,7 +59,7 @@ Violet は、自分のサーバーで動かす AI コンパニオンです。安
 Linux サーバーで、コマンド 1 行です：
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash
 ```
 
 - Debian、Ubuntu、Rocky などすべてこの 1 行で OK です。root ならそのままインストールします（sudo のない最小構成の Debian でも可）。一般ユーザーなら自動的に sudo 経由で実行し直します。sudo のない一般ユーザーは、先に `su -` で root に切り替えてください。
@@ -82,7 +82,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 - インストール済み：希望するアクセス方式（`local` / `lan` / `public` / `proxy`）を付けて、インストールコマンドをもう一度実行します。データ、アカウント、ポートは保持されます。
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- --access local
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash -s -- --access local
 ```
 
 詳しい説明（アクセス方式、ファイアウォール、日常のメンテナンスコマンド）は [violet/INSTALL.md](violet/INSTALL.md)（英語）を参照してください。
@@ -108,7 +108,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 - `violet` システムアカウント、`/opt/violet` ディレクトリ、Violet が開放したすべてのファイアウォールルール
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
 ```
 
 インストールが途中で止まった場合、インストール記録が失われた場合、以前にプログラムだけをアンインストールした場合でも、残ったものをこのコマンドで片付けられます。システムのパッケージマネージャーで入れた Python と openssl は、他のプログラムも使っている可能性があるため削除しません。
@@ -138,7 +138,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 
 ## 関連プロジェクト
 
-[Violet MCP](https://github.com/aileboeth-web/violet-mcp) はオプションの Android アプリです。スマホに入れると、あなたが許可した範囲で、画面がついているか、使っているアプリ、バッテリー、歩数、カレンダー、再生中の音楽などのスマホの状態を Violet が知ることができます。項目ごとにスマホ上で個別にオン・オフできます。
+[Violet MCP](https://github.com/aileboeth/violet-mcp) はオプションの Android アプリです。スマホに入れると、あなたが許可した範囲で、画面がついているか、使っているアプリ、バッテリー、歩数、カレンダー、再生中の音楽などのスマホの状態を Violet が知ることができます。項目ごとにスマホ上で個別にオン・オフできます。
 
 ## ライセンス
 

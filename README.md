@@ -59,7 +59,7 @@ Under Chat history → Import chat history and memory, the panel gives you a pac
 On a Linux server, one command:
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash
 ```
 
 - The same command works on Debian, Ubuntu, Rocky and others. As root it installs directly (fine on a minimal Debian without sudo); as a normal user it re-runs itself through sudo; a normal user without sudo should switch to root with `su -` first.
@@ -82,7 +82,7 @@ curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/dow
 - Already installed: run the install command again with the access mode you want (`local` / `lan` / `public` / `proxy`). Data, account and port are kept.
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- --access local
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash -s -- --access local
 ```
 
 More details (access modes, firewall, maintenance commands) are in [violet/INSTALL.md](violet/INSTALL.md).
@@ -108,7 +108,7 @@ The command below removes Violet completely. **This cannot be undone.** It delet
 - the `violet` system account, the `/opt/violet` directory, and every firewall rule Violet opened.
 
 ```bash
-curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
+curl -fsSL https://github.com/aileboeth/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
 ```
 
 It also cleans up what is left after a half-finished install, a lost install record, or an earlier uninstall that removed only the program. Python and openssl installed through the system package manager are kept, because other programs may use them.
@@ -138,7 +138,7 @@ It also cleans up what is left after a half-finished install, a lost install rec
 
 ## Related project
 
-[Violet MCP](https://github.com/aileboeth-web/violet-mcp) is an optional Android app. Once it is on your phone, Violet can know the phone's state within the limits you allow, such as whether the screen is on, the app you are using, battery, steps, calendar and the music that is playing. Each item can be switched on or off separately on the phone.
+[Violet MCP](https://github.com/aileboeth/violet-mcp) is an optional Android app. Once it is on your phone, Violet can know the phone's state within the limits you allow, such as whether the screen is on, the app you are using, battery, steps, calendar and the music that is playing. Each item can be switched on or off separately on the phone.
 
 ## License
 

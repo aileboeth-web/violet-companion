@@ -62,7 +62,7 @@ MIN_DISK_MB = 1024
 MIN_MEMORY_MB = 512
 HEALTH_TIMEOUT = 90.0
 # where releases are published (GitHub Releases of this repository); VIOLET_UPDATE_REPO overrides it (forks)
-UPDATE_REPO = "aileboeth-web/violet-companion"
+UPDATE_REPO = "aileboeth/violet-companion"
 # copied into <root>/app; user data and machine-local files never are
 COPY_IGNORE = ("__pycache__", "*.pyc", ".env", ".env.*", "*.db", "*.db-wal", "*.db-shm", "data", "logs", "output",
                ".venv", ".venv-*", "*.bak", "main.pid", ".pytest_cache", "tests", "credentials.json", "*.log")
