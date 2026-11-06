@@ -1,13 +1,13 @@
-# Linux 安装验收（自动化）
+# Linux install acceptance (automated)
 
-正式发布前，一键安装必须在真实 Linux 上通过这一套检查。它只用一次性的机器 / 虚拟机 / 容器，**不要在有真实 Violet 的服务器上运行**。
+Before a release, the one-line install must pass this set of checks on real Linux. Use only throwaway machines / VMs / containers. **Do not run it on a server with a real Violet on it.**
 
-| 方式 | 命令 | 覆盖 |
+| Way | Command | Covers |
 |---|---|---|
-| 一台全新的 Linux 虚拟机（root） | `bash "violet/deploy/linux-e2e/install_e2e.sh"` | 全部：一条命令安装、systemd（开机自启、kill -9 后自动重启）、初始密码锁定后台、修复保留端口和密码、备份校验、坏升级自动回退、卸载保留数据、purge 清理 |
-| Docker（多个发行版，无 systemd） | `bash "violet/deploy/linux-e2e/run_in_docker.sh" debian:12 ubuntu:24.04 rockylinux:9` | 同上，服务用 Violet 自带的守护进程 |
-| GitHub Actions | `.github/workflows/install-linux.yml`（仓库发布到 GitHub 后手动触发或改安装器时自动运行） | Ubuntu 22.04 / 24.04 虚拟机上的 systemd + 三个发行版的容器 |
+| A fresh Linux VM (root) | `bash "violet/deploy/linux-e2e/install_e2e.sh"` | Everything: one-command install, systemd (start on boot, automatic restart after kill -9), the initial password locking the panel, repair keeping the port and password, backup verification, automatic rollback of a bad upgrade, uninstall keeping data, purge cleanup |
+| Docker (several distributions, no systemd) | `bash "violet/deploy/linux-e2e/run_in_docker.sh" debian:12 ubuntu:24.04 rockylinux:9` | Same as above, with the service run by Violet's own supervisor |
+| GitHub Actions | `.github/workflows/install-linux.yml` (triggered by hand, or automatically when the installer changes) | systemd on Ubuntu 22.04 / 24.04 VMs + containers for three distributions |
 
-脚本自己构建发布包（`tools/make_release.py --worktree`），在 127.0.0.1 上提供下载，然后执行和用户完全相同的命令 `curl -fsSL <地址>/install.sh | bash`。需要能访问 PyPI（安装依赖）。每一项输出 PASS / FAIL，第一个失败就停止。
+The script builds the release package itself (`tools/make_release.py --worktree`), serves it for download on 127.0.0.1, and then runs exactly the command users run: `curl -fsSL <address>/install.sh | bash`. It needs access to PyPI (to install dependencies). Each check prints PASS / FAIL, and it stops at the first failure.
 
-不在这里自动验证、需要人工看一眼的：`--access public` 在真实公网上的访问（云安全组、域名解析）、浏览器里接受自签名证书、真实聊天平台的登录。
+Not checked automatically here and worth a look by hand: `--access public` on the real internet (cloud security groups, DNS), accepting the self-signed certificate in a browser, and logging in to real chat platforms.

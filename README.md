@@ -1,141 +1,143 @@
 # Violet
 
-Violet 是一个装在你自己服务器上的 AI 陪伴。她有稳定的性格和自己的日常，会记住你说过的事，会在合适的时候主动找你，在微信、QQ、Telegram 上都能和她聊。所有设置都在网页后台里完成，不需要改配置文件。
+Violet is an AI companion that runs on your own server. She has a steady personality and a daily life of her own, remembers what you tell her, reaches out to you when the moment is right, and you can chat with her on WeChat, QQ and Telegram. Everything is set up in a web control panel; there are no config files to edit.
 
-> 灵感来源：[Lynnette177/Project-Eve](https://github.com/Lynnette177/Project-Eve)（作者 [Lynnette177](https://github.com/Lynnette177)）。Violet 在它的基础上重写和扩展了大部分功能，已经是一个独立的项目。感谢原作者的创意。
+> Inspired by [Lynnette177/Project-Eve](https://github.com/Lynnette177/Project-Eve) (by [Lynnette177](https://github.com/Lynnette177)). Violet rewrote and extended most of it and is now an independent project. Thanks to the original author for the idea.
 
-## 她能做什么
+The control panel and Violet's replies are in Chinese. In this README, panel labels are given in English with the Chinese label in brackets, e.g. **Memory** (记忆).
 
-**聊天**
+## What she can do
 
-- 微信（ClawBot / iLink 扫码）、QQ 小号（SnowLuma，扫码登录）、QQ 官方机器人、Telegram，可以同时连好几个。
-- 只回复绑定好的你；陌生人的私聊不回，也不保存原文。
-- QQ 小号可以进群：有人叫她名字、@ 她或戳她时她会接话，冷场时偶尔自己起个话题；群里的人她会慢慢认识。也能看群里的图片、收藏和发表情包、给 QQ 空间写动态（发之前先给你看）。
-- 一次可以发好几条消息、发语音（可选：用一段录音克隆声音，在服务器 CPU 上运行）、发她画的图。
+**Chat**
 
-**记忆**
+- WeChat (ClawBot / iLink, scan a QR code), a personal QQ account (SnowLuma, scan to log in), an official QQ bot, and Telegram. Several can be connected at once.
+- She only replies to you, the person she is bound to. Private messages from strangers get no reply, and their text is not stored.
+- With a personal QQ account she can join groups: she joins in when someone says her name, @-mentions her or pokes her, and now and then starts a topic when the group goes quiet. She gets to know the people in the group over time. She can also look at images in the group, collect and send stickers, and post to QQ Zone (she shows you the post first).
+- She can send several messages in a row, voice messages (optional: clone a voice from one recording, runs on the server CPU), and pictures she draws.
 
-- 分开记你的长期情况、最近发生的事、你喜欢她怎么说话、你们的约定。旧的事会慢慢淡下去，没说完的话不会被当成任务反复追问。
-- 后台“记忆”页可以搜索（关键词高亮）、查看、纠正、删除，或者禁止她用某一条。
-- “明天八点提醒我交作业”会真的记下来，到点提醒你。
+**Memory**
 
-**人设和关系**
+- She keeps separate notes on your long-term situation, recent events, how you like her to talk, and the promises you made each other. Old things slowly fade, and an unfinished remark is not turned into a task she keeps asking about.
+- On the **Memory** (记忆) page you can search (keywords highlighted), view, correct and delete memories, or stop her from using one.
+- "Remind me to hand in my homework at eight tomorrow" really gets written down, and she reminds you on time.
 
-- 自带几种人设：Violet（默认）、温柔陪伴、元气同学、冷静可靠、知道自己是 AI 的、大肥鱼、Eve 原版人设、空白人设，也可以自己写一个。
-- 关系可以选：亲近、朋友、恋人、女儿、开发者。
-- 不同聊天渠道可以用不同的人设。每个人设有自己的一份聊天记录、记忆、生活和心情，换来换去都不会丢，也不会串。
-- 她有自己的虚拟日常和心情：日常平淡地往前走，可能好几天什么都不发生；被凶了会有小情绪。她不会编造生活记录里没有的经历。
+**Personas and relationships**
 
-**主动联系**
+- Built-in personas: Violet (default), gentle companion, cheerful classmate, calm and reliable, one who knows she is an AI, Big Fat Fish (大肥鱼), the original Eve persona, and a blank one. You can also write your own.
+- Relationship options: close, friend, partner, daughter, developer.
+- Each chat channel can use a different persona. Every persona has its own chat history, memory, life and mood, so switching back and forth loses nothing and nothing gets mixed up.
+- She has a virtual daily life and moods of her own: her days move on quietly, and several days may pass with nothing happening; if you are harsh with her she gets a little upset. She never makes up experiences that are not in her life record.
 
-- 会主动分享、想你、接着之前的话题聊，也可能决定不发。
-- 有安静时段、每天上限和“你没回就先等等”的规则；你说“别老找我”，她就会少找你。
-- 可选：按你们的关系发节日祝福（春节、中秋、你的生日；恋人还有情人节、七夕……）。
-- 可选：连上手机后（见下面的 Violet MCP），她知道你现在亮没亮屏、在用什么 App、电量、今天的屏幕时间，早上你第一次解锁手机时可以跟你说早安。
+**Reaching out**
 
-**工具**（都是可选的，默认关闭，在后台打开）
+- She shares things, says she misses you, picks up an earlier topic, or decides not to send anything at all.
+- There are quiet hours, a daily limit and a "wait if you haven't replied" rule. Tell her "stop messaging me so much" and she will reach out less.
+- Optional: holiday greetings that fit your relationship (Spring Festival, Mid-Autumn, your birthday; for partners also Valentine's Day, Qixi and more).
+- Optional: with your phone connected (see Violet MCP below), she knows whether your screen is on, which app you are using, your battery level and today's screen time, and can say good morning the first time you unlock your phone in the morning.
 
-- 联网搜索和读网页：后台一键安装私有的 SearXNG，只在本机监听，不需要 Docker。
-- 课表：上课时不打扰你、考试前给你加油。可以从 CSV / JSON 导入。
-- 看图和画图：画的是“手机随手拍”风格的生活照，不会说成真实照片。
-- MCP 工具：只读工具直接用；会改动东西的工具每次先问你，你在聊天里回“同意”才执行。
+**Tools** (all optional, off by default, turned on in the panel)
 
-**网页后台**
+- Web search and page reading: one-click install of a private SearXNG that listens only on the server itself. No Docker needed.
+- Timetable: she does not disturb you during class and cheers you on before exams. Import from CSV / JSON.
+- Seeing and drawing images: her drawings are casual "phone snapshot" life photos, and she never claims they are real photos.
+- MCP tools: read-only tools are used directly; tools that change anything ask you first every time and only run after you reply "同意" (agree) in the chat.
 
-- 开始（还差哪一步）、概览、流程（每一轮回复用了哪些提示词、工具和模型，可以看到发给模型的完整内容）。
-- 模型服务（每个 Agent、每个聊天平台可以用不同的模型）、聊天渠道、工具与手机、图片、人设与生活、课表、设置。
-- 聊天记录、记忆、诊断、日志、修改记录、账号安全。
+**Web control panel**
 
-**从 Project Eve 搬过来**
+- Start (what is still missing), Overview, Flow (which prompts, tools and models each reply used, including the full content sent to the model).
+- Model services (a different model per agent and per chat platform), Chat channels, Tools & phone, Images, Personas & life, Timetable, Settings.
+- Chat history, Memory, Diagnostics, Logs, Change history, Account security.
 
-后台“聊天记录 → 导入聊天记录和记忆”给出一条打包命令，在 Eve 的服务器上运行，再把生成的文件上传到后台。导入时可以选导入到哪个聊天渠道（还没添加的渠道也可以）、用哪个人设、什么关系，聊天记录和记忆都会带过来。
+**Moving over from Project Eve**
 
-## 安装
+**Chat history → Import chat history and memory** (聊天记录 → 导入聊天记录和记忆) gives you a packing command. Run it on your Eve server, then upload the file it creates to the panel. When importing you choose the chat channel (one you have not added yet works too), the persona and the relationship; both chat history and memory come along.
 
-在一台 Linux 服务器上，一行命令：
+## Install
+
+On a Linux server, one command:
 
 ```bash
 curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash
 ```
 
-- Debian、Ubuntu、Rocky 等都用这一条。root 直接装（Debian 最小安装没有 sudo 也可以）；普通用户会自动通过 sudo 运行；没有 sudo 的普通用户先 `su -` 切换到 root。
-- 安装程序会装好 Python 和依赖，注册 systemd 服务，随机选一个端口，并像 1Panel 一样生成随机的安全入口、用户名和初始密码。最后会显示后台地址，格式是 `https://服务器IP:端口/安全入口`。
-  - 证书是自签名的，浏览器提示“不安全”时选择继续访问即可。
-  - 云服务器还要在控制台的“安全组 / 防火墙”里放行这个端口。
-- 装好以后：
-  1. 打开后台，在“开始”页填写模型服务的地址和 Key。
-  2. 在“聊天渠道”页连上任意一个聊天平台，就可以开始聊天了。
-- 忘记地址或用户名用 `/opt/violet/violet info` 查看，忘记密码用 `/opt/violet/violet reset-password` 重置。
+- The same command works on Debian, Ubuntu, Rocky and others. As root it installs directly (fine on a minimal Debian without sudo); as a normal user it re-runs itself through sudo; a normal user without sudo should switch to root with `su -` first.
+- The installer sets up Python and the dependencies, registers a systemd service, picks a random port and, like 1Panel, generates a random security entrance, username and initial password. At the end it prints the panel address in the form `https://SERVER_IP:PORT/ENTRANCE`.
+  - The certificate is self-signed. When the browser says the page is not secure, choose to continue.
+  - On a cloud server, also open this port in the provider's security group / firewall.
+- After installing:
+  1. Open the panel and fill in your model service address and key on the **Start** (开始) page.
+  2. Connect any chat platform on the **Chat channels** (聊天渠道) page and start chatting.
+- Forgot the address or username: `/opt/violet/violet info`. Forgot the password: `/opt/violet/violet reset-password`.
 
-**需要**：
+**Requirements**:
 
-- 一个 OpenAI 兼容的模型接口。
-- 服务器内存建议至少 512 MB。如果要用语音，需要 8 GB 内存、12 GB 硬盘。
+- An OpenAI-compatible model API.
+- At least 512 MB of RAM is recommended. Voice needs 8 GB of RAM and 12 GB of disk.
 
-**只想在服务器本机访问**（通过 SSH 隧道管理）：
+**Panel reachable only on the server itself** (managed through an SSH tunnel):
 
-- 新装：在安装命令后面加 `-s -- --access local`。
-- 已经装好的：重新运行一次安装命令，带上要的访问方式（`local` / `lan` / `public` / `proxy`）。数据、账号和端口都会保留。
+- New install: add `-s -- --access local` after the install command.
+- Already installed: run the install command again with the access mode you want (`local` / `lan` / `public` / `proxy`). Data, account and port are kept.
 
 ```bash
 curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- --access local
 ```
 
-更多说明（访问方式、防火墙、日常维护命令）见 [violet/INSTALL.md](violet/INSTALL.md)。
+More details (access modes, firewall, maintenance commands) are in [violet/INSTALL.md](violet/INSTALL.md) (Chinese).
 
-## 更新
+## Updates
 
-- 默认自动更新：有新版本就在服务器上自动升级。升级前先备份，升级失败自动退回旧版本。
-- 也可以在后台“设置 → 版本更新”改成“只提醒”或“手动检查”。
-- 在后台“开始”页点“立即更新”会显示进度。
-- 也可以在服务器上手动升级：
+- Automatic by default: when a new version is out, the server upgrades itself. It makes a backup first and rolls back to the old version if the upgrade fails.
+- You can switch to "notify only" or "check manually" under **Settings → Version updates** (设置 → 版本更新).
+- Clicking **Update now** (立即更新) on the **Start** page shows the progress.
+- Or upgrade by hand on the server:
 
 ```bash
 /opt/violet/violet update
 ```
 
-## 卸载
+## Uninstall
 
-下面这一条命令会彻底删除 Violet，**删除后无法恢复**：
+The command below removes Violet completely. **This cannot be undone.** It deletes:
 
-- 程序、服务、自动更新和后台任务服务；
-- 手机 MCP 中继、联网搜索、QQ 小号、语音；
-- 配置、数据（聊天记录和记忆）和备份；
-- `violet` 系统账号、`/opt/violet` 目录，以及 Violet 放行的所有防火墙规则。
+- the program, services, automatic updates and the background task service;
+- the phone MCP relay, web search, the QQ account, voice;
+- configuration, data (chat history and memory) and backups;
+- the `violet` system account, the `/opt/violet` directory, and every firewall rule Violet opened.
 
 ```bash
 curl -fsSL https://github.com/aileboeth-web/violet-companion/releases/latest/download/install.sh | bash -s -- uninstall --purge --yes
 ```
 
-只装了一半、安装记录丢了，或者之前只卸载了程序，这条命令也能把剩下的东西清理干净。安装时用系统包管理器装的 Python、openssl 不会删除，因为其他程序可能也在用。
+It also cleans up what is left after a half-finished install, a lost install record, or an earlier uninstall that removed only the program. Python and openssl installed through the system package manager are kept, because other programs may use them.
 
-## 当前状态
+## Status
 
-- **自动测试**：
-  - 所有功能都有离线自动化测试，共约 3000 项，用模拟的模型和聊天平台运行，不连网。
-  - 每次改动安装器，都会在 GitHub Actions 的真实 Linux 上（Ubuntu 22.04 / 24.04、Debian 12、Rocky Linux 9）把安装、自动重启、备份、升级失败退回、卸载完整跑一遍。
-- **真实使用**：
-  - 四个聊天渠道（微信、QQ 小号、QQ 官方机器人、Telegram）都在真实平台上测试过。
-  - 从 Project Eve 导入聊天记录和记忆，用真实数据导入过。
-  - QQ 小号的一键安装在国内网络下也装成功过。
-- **关于她的身份**：这是一个陪伴类项目。Violet 清楚自己是虚构角色，不会冒充真人；AI 画的图不会说成真实照片。
+- **Automated tests**:
+  - Every feature has offline automated tests, about 3000 in total, run against simulated models and chat platforms with no network.
+  - Every change to the installer runs the full install, auto-restart, backup, failed-upgrade rollback and uninstall on real Linux in GitHub Actions (Ubuntu 22.04 / 24.04, Debian 12, Rocky Linux 9).
+- **Real-world use**:
+  - All four chat channels (WeChat, personal QQ, official QQ bot, Telegram) have been tested on the real platforms.
+  - Importing chat history and memory from Project Eve has been done with real data.
+  - The one-click install of the personal QQ account has also succeeded on a network in mainland China.
+- **About who she is**: this is a companion project. Violet knows she is a fictional character and never pretends to be a real person; images drawn by AI are never passed off as real photos.
 
-## 仓库里有什么
+## What is in the repository
 
-| 路径 | 内容 |
+| Path | Contents |
 |---|---|
-| `violet/ai/` | 她自己：聊天、记忆、人设、心情、虚拟生活、主动联系、群聊、工具、画图、课表 |
-| `violet/ai/channels/` | 微信、QQ、Telegram 的连接 |
-| `violet/wx_ilink_py/` | 网页后台（Flask）和微信 iLink 客户端 |
-| `violet/persona/` | 人设模板和提示词 |
-| `violet/tools/` | 安装器、发布、可选组件（联网搜索、QQ 小号、语音、手机中继）的安装脚本，以及开发用的测试工具 |
-| `violet/tests/` | 离线自动化测试 |
-| `violet/deploy/` | 安装验收脚本、用 Docker 部署 SearXNG 的另一种方式 |
+| `violet/ai/` | Violet herself: chat, memory, personas, mood, virtual life, reaching out, group chat, tools, drawing, timetable |
+| `violet/ai/channels/` | Connections to WeChat, QQ and Telegram |
+| `violet/wx_ilink_py/` | The web control panel (Flask) and the WeChat iLink client |
+| `violet/persona/` | Persona templates and prompts |
+| `violet/tools/` | Installer, release, install scripts for the optional parts (web search, QQ account, voice, phone relay), and test tools for development |
+| `violet/tests/` | Offline automated tests |
+| `violet/deploy/` | Install acceptance scripts, and an alternative way to deploy SearXNG with Docker |
 
-## 相关项目
+## Related project
 
-[Violet MCP](https://github.com/aileboeth-web/violet-mcp) 是可选的安卓 App。装在手机上以后，Violet 可以在你允许的范围内知道手机的状态，比如亮屏、正在用的 App、电量、步数、日程、正在放的音乐。每一项都可以在手机上单独开关。
+[Violet MCP](https://github.com/aileboeth-web/violet-mcp) is an optional Android app. Once it is on your phone, Violet can know the phone's state within the limits you allow, such as whether the screen is on, the app you are using, battery, steps, calendar and the music that is playing. Each item can be switched on or off separately on the phone.
 
-## 许可证
+## License
 
-MIT，见 [LICENSE](LICENSE)。
+MIT, see [LICENSE](LICENSE).

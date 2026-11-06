@@ -1,63 +1,63 @@
-# 用 Docker 部署 SearXNG（另一种方式）
+# Deploying SearXNG with Docker (alternative way)
 
-> **一般不需要看这一页。** 用一行命令装的 Violet，在后台“工具与手机 → 联网工具”点“一键安装联网搜索”就行（或者在服务器上运行 `/opt/violet/violet searxng install`）。那种方式不需要 Docker，会注册成系统服务 `violet-searxng`，只在 127.0.0.1 监听。这一页只给没有 systemd、或者更想用 Docker 的人参考。
+> **You usually don't need this page.** If you installed Violet with the one-line command, click **Install web search** (一键安装联网搜索) under **Tools & phone → Web tools** (工具与手机 → 联网工具) in the control panel (or run `/opt/violet/violet searxng install` on the server). That way needs no Docker, registers a system service `violet-searxng`, and listens only on 127.0.0.1. This page is only for people without systemd, or who prefer Docker.
 
-Violet 的 `web_search` 默认用自建的开源 SearXNG（`VIOLET_WEB_SEARCH_PROVIDER=searxng`），不依赖付费搜索 API（博查 / Brave 的代码保留为可选实现，不是默认来源）。这个目录是 SearXNG 的 Docker Compose 部署，**只在你明确执行 `./searxng.sh up` 时**才会拉镜像、启动容器。Violet 自己不会运行它，也不会安装 Docker。
+Violet's `web_search` uses a self-hosted, open-source SearXNG by default (`VIOLET_WEB_SEARCH_PROVIDER=searxng`) and does not rely on paid search APIs (the Bocha / Brave code is kept as an optional implementation, not the default source). This directory is a Docker Compose deployment of SearXNG. It pulls images and starts containers **only when you explicitly run `./searxng.sh up`**. Violet itself never runs it and never installs Docker.
 
-这种方式下 Violet 照常跑在服务器上（不进容器），SearXNG 跑在 Docker 里，只通过宿主机 `127.0.0.1:18089` 提供搜索。
+In this setup Violet keeps running on the server as usual (not in a container), SearXNG runs in Docker, and search is offered only on the host's `127.0.0.1:18089`.
 
-## 文件
+## Files
 
-| 文件 | 作用 | 在 git 里 |
+| File | Purpose | In git |
 |---|---|---|
-| `compose.yaml` | 服务定义：官方镜像 `docker.io/searxng/searxng`，容器 `violet-searxng`，以 977:977 运行、不带任何 capability，端口只发布到 `127.0.0.1` | 是 |
-| `config/settings.yml` | SearXNG 设置（只读挂载）：打开 JSON 输出、私有实例（关闭 limiter、非公开）、超时短于 Violet 的 10 秒 | 是 |
-| `env_example` | `.env` 模板（没有密钥） | 是 |
-| `searxng.sh` | 管理脚本：init / check / up / upgrade / down / restart / status / logs / test | 是 |
-| `validate_config.py` | 静态检查上面三个文件（python3 + PyYAML；不联网、不调用 Docker） | 是 |
-| `.env` | 真实配置：随机 `SEARXNG_SECRET`、端口、镜像（`init` 生成，权限 600） | **否** |
-| `cache/` | SearXNG 缓存（持久化，属于 977:977） | 否 |
-| `state/image-digests.log` | 每次 up / upgrade 用的镜像 digest（回滚用） | 否 |
+| `compose.yaml` | Service definition: official image `docker.io/searxng/searxng`, container `violet-searxng`, runs as 977:977 with no capabilities, port published only on `127.0.0.1` | yes |
+| `config/settings.yml` | SearXNG settings (mounted read-only): JSON output on, private instance (limiter off, not public), timeouts shorter than Violet's 10 seconds | yes |
+| `env_example` | `.env` template (no secrets) | yes |
+| `searxng.sh` | Management script: init / check / up / upgrade / down / restart / status / logs / test | yes |
+| `validate_config.py` | Static check of the three files above (python3 + PyYAML; no network, no Docker calls) | yes |
+| `.env` | Real configuration: random `SEARXNG_SECRET`, port, image (created by `init`, mode 600) | **no** |
+| `cache/` | SearXNG cache (persistent, owned by 977:977) | no |
+| `state/image-digests.log` | The image digest used by each up / upgrade (for rollback) | no |
 
-## 网络设计
+## Network design
 
 ```
-Violet（start.sh，宿主机）──http://127.0.0.1:18089──> violet-searxng 容器 :8080 ──> 互联网上的搜索引擎
+Violet (start.sh, host) ──http://127.0.0.1:18089──> violet-searxng container :8080 ──> search engines on the internet
 ```
 
-- **不对外开放**：唯一发布的端口绑定在 `127.0.0.1`，公网和局域网都连不到；不加入 1Panel 的网络，不需要 OpenResty 反代。
-- **不冲突**：独立的项目名、容器名、网络名（`violet-searxng`），端口默认 18089（`.env` 可改；`check` 会检查是否被占用）。不用 PostgreSQL；不需要 Redis / Valkey（limiter 关闭），所以不会碰已有的 Redis。
-- **网络不能设为 internal**：SearXNG 要访问外部搜索引擎。
-- **Violet 这边的安全策略**（`ai/web`）：`VIOLET_WEB_SEARXNG_URL` 是唯一受信任的内部地址——只有搜索请求能去、不跟随跳转；`fetch_url` 永远不能访问它（本机、内网、Docker 地址照样全部拒绝，SSRF 防护不变）。明文 http 只允许本机 / 内网 IP / Docker 服务名，其他主机必须 https；地址里不能带用户名密码、参数。地址不可用时后台“工具”页的联网卡片会写明原因。
-- **以后如果 Violet 也放进 Docker（现在不做）**：让 Violet 的容器加入外部网络 `violet-searxng`（compose 里 `networks: { violet-searxng: { external: true } }`），把 `VIOLET_WEB_SEARXNG_URL` 改成 `http://searxng:8080`（网络别名已经配好），就可以去掉 `127.0.0.1:18089` 的端口发布。
+- **Not exposed**: the only published port is bound to `127.0.0.1`, so neither the internet nor the LAN can reach it. It does not join 1Panel's network and needs no OpenResty reverse proxy.
+- **No conflicts**: its own project, container and network name (`violet-searxng`); default port 18089 (changeable in `.env`; `check` tests whether it is taken). No PostgreSQL; no Redis / Valkey needed (limiter off), so an existing Redis is never touched.
+- **The network cannot be internal**: SearXNG has to reach external search engines.
+- **Violet's security policy** (`ai/web`): `VIOLET_WEB_SEARXNG_URL` is the only trusted internal address. Only search requests go there, and redirects are not followed. `fetch_url` can never reach it (local, private and Docker addresses are still all refused; SSRF protection is unchanged). Plain http is allowed only for localhost / private IPs / Docker service names; every other host must use https. The address may not contain a username, password or query parameters. When the address is unusable, the web card on the panel's **Tools** page says why.
+- **If Violet also moves into Docker later (not done now)**: have Violet's container join the external network `violet-searxng` (in compose: `networks: { violet-searxng: { external: true } }`), change `VIOLET_WEB_SEARXNG_URL` to `http://searxng:8080` (the network alias is already set up), and the `127.0.0.1:18089` port publishing can be removed.
 
-## 与官方镜像核对过的配置（2026-10-24，按 docs.searxng.org 和 searxng 仓库 container/ 目录）
+## Configuration checked against the official image (2026-10-24, per docs.searxng.org and the searxng repository's container/ directory)
 
-| 项 | 官方镜像 | 这里的做法 |
+| Item | Official image | What we do here |
 |---|---|---|
-| 密钥 | `server.secret_key` 可由 `SEARXNG_SECRET` 覆盖 | 只放在 `.env`（随机 64 位十六进制）；settings.yml 里是占位符 |
-| 其他变量 | `SEARXNG_BASE_URL`、`SEARXNG_LIMITER`、`SEARXNG_PUBLIC_INSTANCE` | 都设置了；limiter / public 关闭 |
-| 挂载 | 配置 `/etc/searxng`，数据 `/var/cache/searxng` | `./config`（只读）、`./cache`（读写） |
-| 端口 | 容器内 8080（Granian：`GRANIAN_HOST` 默认 `::`） | `GRANIAN_HOST=0.0.0.0`（IPv4，任何 Docker 网络都可用），发布到 `127.0.0.1:18089` |
-| 运行用户 | 镜像没有 `USER`（默认 root），应用文件属于 977:977 | `user: "977:977"`，`cap_drop: [ALL]`，`no-new-privileges` |
-| 目录属主 | 入口脚本 `FORCE_OWNERSHIP`（默认 true）会以 root 递归 chown 挂载目录 | `FORCE_OWNERSHIP=false`：不改 git 里的 `config/`；`init` 只把 `cache/` 交给 977 |
-| settings.yml | 不存在时入口脚本复制模板并生成密钥；存在时不改 | 我们的文件已存在，所以只读挂载可行 |
-| JSON API | `search.formats` 要包含 `json`，否则 `/search?format=json` 返回 403 | 已包含 |
-| 健康检查 | 镜像没有 HEALTHCHECK，也没有 wget / curl；Python 在 `/usr/local/searxng/.venv/bin/python` | 用这个 Python 请求 `http://127.0.0.1:8080/healthz` |
+| Secret | `server.secret_key` can be overridden by `SEARXNG_SECRET` | Only in `.env` (random 64 hex characters); settings.yml holds a placeholder |
+| Other variables | `SEARXNG_BASE_URL`, `SEARXNG_LIMITER`, `SEARXNG_PUBLIC_INSTANCE` | All set; limiter / public off |
+| Mounts | Config `/etc/searxng`, data `/var/cache/searxng` | `./config` (read-only), `./cache` (read-write) |
+| Port | 8080 inside the container (Granian: `GRANIAN_HOST` defaults to `::`) | `GRANIAN_HOST=0.0.0.0` (IPv4, works on any Docker network), published on `127.0.0.1:18089` |
+| Run user | The image has no `USER` (root by default); app files belong to 977:977 | `user: "977:977"`, `cap_drop: [ALL]`, `no-new-privileges` |
+| Directory ownership | The entrypoint's `FORCE_OWNERSHIP` (default true) recursively chowns the mounts as root | `FORCE_OWNERSHIP=false`: the `config/` in git is left alone; `init` hands only `cache/` to 977 |
+| settings.yml | When missing, the entrypoint copies a template and generates a secret; when present, it is left alone | Our file exists, so a read-only mount works |
+| JSON API | `search.formats` must include `json`, otherwise `/search?format=json` returns 403 | Included |
+| Health check | The image has no HEALTHCHECK and no wget / curl; Python is at `/usr/local/searxng/.venv/bin/python` | That Python requests `http://127.0.0.1:8080/healthz` |
 
-## 正式部署（等项目上传 GitHub、服务器拉取代码后，由你手动执行）
+## Deploying (run by hand on the server)
 
-前提：服务器已经装好 Docker 和 compose v2 插件（本脚本不安装；按 Docker 官方文档或 1Panel 安装），用 root（或 sudo）执行。
+Prerequisite: Docker and the compose v2 plugin are already installed on the server (this script does not install them; follow the official Docker docs or install through 1Panel). Run as root (or with sudo).
 
 ```bash
-cd /opt/violet/deploy/searxng      # 按服务器上 Violet 的实际位置
-chmod +x searxng.sh                      # git 里已经是可执行；拉取方式丢了权限时才需要
-./searxng.sh init                        # 生成 .env（随机密钥）、cache/（交给 977:977）和 state/
-./searxng.sh check                       # 只检查：Docker、.env、目录属主、配置、compose 语法、端口 / 名称冲突
-./searxng.sh up                          # 正式部署：再检查一次，输入 yes 后拉镜像、启动、健康检查、试搜一次
+cd /opt/violet/deploy/searxng      # wherever Violet actually is on your server
+chmod +x searxng.sh                      # already executable in git; only needed if the copy lost the mode
+./searxng.sh init                        # creates .env (random secret), cache/ (owned by 977:977) and state/
+./searxng.sh check                       # checks only: Docker, .env, directory owners, config, compose syntax, port / name conflicts
+./searxng.sh up                          # deploys: checks again, then after you type yes pulls the image, starts it, runs a health check and one test search
 ```
 
-然后在 Violet 的 `.env`：
+Then in Violet's `.env`:
 
 ```
 VIOLET_WEB_ENABLED=1
@@ -65,24 +65,24 @@ VIOLET_WEB_SEARCH_PROVIDER=searxng
 VIOLET_WEB_SEARXNG_URL=http://127.0.0.1:18089
 ```
 
-重启 Violet（`start.sh`）。后台 `/control` 的“工具”页应显示“搜索服务 searxng · 搜索 可用”。
+Restart Violet (`start.sh`). The **Tools** (工具) page of `/control` should show "搜索服务 searxng · 搜索 可用" (search service searxng · search available).
 
-## 日常
+## Day to day
 
-| 做什么 | 命令 |
+| Task | Command |
 |---|---|
-| 看状态 / 健康 | `./searxng.sh status` |
-| 看日志 | `./searxng.sh logs`，持续看 `./searxng.sh logs -f` |
-| 试搜一次（从服务器本机） | `./searxng.sh test` |
-| 停 / 启 | `./searxng.sh down`，`./searxng.sh up` |
-| 重启 | `./searxng.sh restart` |
-| 升级 | `./searxng.sh upgrade`（先记录当前镜像，再拉新版、重建；配置和缓存保留） |
-| 回滚 | 把 `state/image-digests.log` 里 `before-upgrade` 行的 digest 写进 `.env`：`SEARXNG_IMAGE=docker.io/searxng/searxng@sha256:…`，再 `./searxng.sh up` |
-| 改设置 | 改 `config/settings.yml`，再 `./searxng.sh restart` |
+| Status / health | `./searxng.sh status` |
+| Logs | `./searxng.sh logs`, follow with `./searxng.sh logs -f` |
+| One test search (from the server itself) | `./searxng.sh test` |
+| Stop / start | `./searxng.sh down`, `./searxng.sh up` |
+| Restart | `./searxng.sh restart` |
+| Upgrade | `./searxng.sh upgrade` (records the current image first, then pulls the new one and recreates; config and cache are kept) |
+| Roll back | Put the digest from the `before-upgrade` line of `state/image-digests.log` into `.env` as `SEARXNG_IMAGE=docker.io/searxng/searxng@sha256:…`, then `./searxng.sh up` |
+| Change settings | Edit `config/settings.yml`, then `./searxng.sh restart` |
 
-## 第一次部署时仍要看一眼的事（本地无法运行镜像）
+## Worth a look on the first deployment (the image could not be run locally)
 
-- `./searxng.sh logs`：以 977 运行时入口脚本会提示没有 root、不改属主（预期）；不应有 `cache/` 写入失败。
-- `./searxng.sh status` 显示 healthy；`./searxng.sh test` 能拿到 JSON 结果。
-- 从国内服务器能连上哪些默认引擎；连不上的会出现在 `test` 的“没有响应的引擎”里，可按 `settings.yml` 末尾的说明只保留能用的引擎。
-- 镜像 `latest` 会随官方更新；官方的变量名或入口脚本将来若有变化，以 `logs` 为准，需要时用 digest 固定版本（见回滚）。
+- `./searxng.sh logs`: when running as 977, the entrypoint says it is not root and will not change owners (expected); there should be no write failures for `cache/`.
+- `./searxng.sh status` shows healthy; `./searxng.sh test` gets JSON results.
+- Which default engines are reachable from a server in mainland China; unreachable ones show up under "engines with no response" (没有响应的引擎) in `test`, and you can keep only the working ones as described at the end of `settings.yml`.
+- The `latest` image follows official updates. If the official variable names or entrypoint change in the future, trust `logs`, and pin a version by digest when needed (see Roll back).
